@@ -1,0 +1,23 @@
+export function whole(name: string, fallback: number): number {
+	const raw = process.env[name];
+	const value = raw === undefined || raw === "" ? fallback : Number(raw);
+	if (!Number.isInteger(value) || value < 0) {
+		throw new Error(`${name} must be a whole number, zero or more`);
+	}
+
+	return value;
+}
+
+export function positive(name: string, fallback: number): number {
+	const value = whole(name, fallback);
+	if (value === 0) throw new Error(`${name} must be greater than zero`);
+
+	return value;
+}
+
+export function secret(name: string): Uint8Array {
+	const bytes = Buffer.from(process.env[name] ?? "", "hex");
+	if (bytes.length !== 32) throw new Error(`${name} must be set to 32 bytes of hex`);
+
+	return bytes;
+}
