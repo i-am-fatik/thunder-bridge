@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "watch": "deno run --allow-net --allow-env main.ts"
+  },
+  "imports": {
+    "thunder-bridge": "npm:thunder-bridge@0.8.0"
+  },
+  "fmt": { "lineWidth": 100 }
+}

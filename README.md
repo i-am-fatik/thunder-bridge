@@ -367,7 +367,17 @@ of other systems' binaries.
 
 Live at
 [thunder-bridge-direct-production.up.railway.app](https://thunder-bridge-direct-production.up.railway.app/health).
-`railway up` from this directory builds the Dockerfile. Three things matter:
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/github?repo=https://github.com/i-am-fatik/thunder-bridge)
+
+That opens Railway's deploy-from-GitHub flow on this repo. `railway.json` hands
+it the Dockerfile, `/health` as the check and restart-always, so the only thing
+left to fill in is `CLUSTER_KEY`, which is `openssl rand -hex 32`. Nothing boots
+without it, deliberately: it is the swarm topic, the handshake and the write
+gate at once.
+
+`railway up` from a checkout does the same thing. Three things matter either
+way:
 
 - **No `VOLUME` instruction.** Railway's builder rejects it, and the build then
   fails two seconds in with an empty log and `Failed to build an image`. Mount
