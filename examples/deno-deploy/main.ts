@@ -6,6 +6,12 @@ import {
   ThunderBridge,
 } from "thunder-bridge";
 
+function randomSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 const GATEWAY_URL = Deno.env.get("GATEWAY_URL") ??
   "https://thunder-bridge-direct-production.up.railway.app";
 const LN_ADDRESSES = (Deno.env.get("LN_ADDRESSES") ?? "")
@@ -21,20 +27,6 @@ const CONTENT = Deno.env.get("CONTENT") ?? "The sats landed. Here is the thing y
 const PUBLIC_URL = Deno.env.get("PUBLIC_URL");
 const UNLOCKED_FOR_MS = 30 * 24 * 60 * 60 * 1000;
 const ADDRESS_PATH = `/.well-known/lnurlp/${ADDRESS_NAME}`;
-
-function randomSecret(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function unconfigured(): Promise<Response> {
-  return Promise.resolve(
-    Response.json({
-      error: "set LN_ADDRESSES to a comma-separated list of lightning addresses that speak LUD-21",
-    }, { status: 503 }),
-  );
-}
 
 if (LN_ADDRESSES.length === 0) {
   console.log("LN_ADDRESSES is unset, every route answers 503 until it names a wallet");
@@ -90,7 +82,13 @@ async function serveContent(id: string): Promise<Response> {
   return Response.json({ content: CONTENT, preimage: unlocked.value });
 }
 
-function route(request: Request): Promise<Response> {
+function unconfigured(): Response {
+  return Response.json({
+    error: "set LN_ADDRESSES to a comma-separated list of lightning addresses that speak LUD-21",
+  }, { status: 503 });
+}
+
+function route(request: Request): Response | Promise<Response> {
   const url = new URL(request.url);
 
   if (LN_ADDRESSES.length === 0) return unconfigured();
@@ -105,7 +103,7 @@ function route(request: Request): Promise<Response> {
     return serveContent(url.pathname.slice("/content/".length));
   }
 
-  return Promise.resolve(new Response("not found", { status: 404 }));
+  return new Response("not found", { status: 404 });
 }
 
 Deno.serve(async (request) => {
