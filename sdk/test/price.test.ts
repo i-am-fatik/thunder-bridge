@@ -199,13 +199,22 @@ describe("msatFor", () => {
     expect(msatFor(1, 300_000_000_000)).toBe(1);
   });
 
-  it("adds the basis points you asked for and nothing when you asked for none", () => {
+  it("charges no margin unless one was asked for", () => {
+    const plain = msatFor(100_000, 134_883_815);
+
+    expect(msatFor(100_000, 134_883_815, {})).toBe(plain);
+    expect(msatFor(100_000, 134_883_815, { spreadBps: 0 })).toBe(plain);
+    expect(msatFor(100_000, 134_883_815, { spreadBps: undefined })).toBe(plain);
+  });
+
+  it("adds the basis points you asked for", () => {
     const plain = msatFor(100_000, 134_883_815);
     const withSpread = msatFor(100_000, 134_883_815, { spreadBps: 100 });
 
     expect(withSpread).toBeGreaterThan(plain);
     expect(withSpread).toBe(Math.ceil(plain * 1.01));
     expect(() => msatFor(100_000, 134_883_815, { spreadBps: 1.5 })).toThrow("basis points");
+    expect(() => msatFor(100_000, 134_883_815, { spreadBps: -100 })).toThrow("basis points");
   });
 
   it("stays exact where a double would not, at a million crowns", () => {
