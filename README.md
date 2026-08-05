@@ -136,7 +136,7 @@ gates it with `npm ci`, the whole test suite, and `tsc --noEmit`.
 ## Railway
 
 Live at
-[thunder-bridge-direct-production.up.railway.app](https://thunder-bridge-direct-production.up.railway.app/health).
+[thunder-bridge-production.up.railway.app](https://thunder-bridge-production.up.railway.app/health).
 The template carries this repo, a volume at `/data`, and a `CLUSTER_KEY`
 generated per deploy, so there is nothing to fill in. Copy that key somewhere
 once it is up. Losing it locks you out of your own cluster and there is nobody to

@@ -15,13 +15,13 @@ there. `tickets: true` swaps it for a short-lived ticket per connection when a u
 log is a worry. Either way the secret stays off anything a payer sees.
 
 ```bash
-GATEWAY_URL=https://thunder-bridge-direct-production.up.railway.app \
+GATEWAY_URL=https://thunder-bridge-production.up.railway.app \
 WATCH_SECRET=<the same 32 characters the endpoint got> \
   deno task watch
 ```
 
 ```
-watching https://thunder-bridge-direct-production.up.railway.app, ctrl-c to stop
+watching https://thunder-bridge-production.up.railway.app, ctrl-c to stop
 21 sat to you@blink.sv, preimage 9f3c1ab5e70d2c84
 ```
 

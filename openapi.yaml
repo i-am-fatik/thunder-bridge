@@ -27,7 +27,7 @@ info:
     access to.
 
 servers:
-  - url: https://thunder-bridge-direct-production.up.railway.app
+  - url: https://thunder-bridge-production.up.railway.app
     description: Production
   - url: http://localhost:3000
     description: A local instance
