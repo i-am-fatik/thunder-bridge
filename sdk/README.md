@@ -12,6 +12,12 @@ amount you asked for rather than the amount the gateway echoed back, and its
 settlement proof url belongs to the recipient. A gateway that substitutes an
 invoice is caught before a payer sees a QR code.
 
+Lightning is the rail it was built for, not the only one it can prove. A bank
+transfer has no preimage, so `bankTransfer` derives one and hands the gateway its
+hash, which puts money arriving in a bank account behind the same watch, the same
+poll and the same proof. `Statement` is where a bank plugs in and `fioStatement`
+is the first one.
+
 It touches only `fetch`, `crypto.subtle`, `URL` and `WebSocket`, so it runs in
 Node, Bun, Deno, Cloudflare Workers and the browser. The gateway it talks to is
 one level up in [this repository](../README.md).
@@ -96,24 +102,41 @@ them and this table does not repeat them.
 | `preimageMatchesHash(preimage, hash)` | one sha256 comparison |
 | `decodeInvoice(bolt11)` | the invoice's own amount, payment hash and description hash |
 
-**Serving your own endpoint** - [`src/trigger.ts`](src/trigger.ts)
+**Serving your own endpoint** - [`src/trigger.ts`](src/trigger.ts), [`src/bank.ts`](src/bank.ts), [`src/fio.ts`](src/fio.ts)
 
 | Export | What it does |
 |---|---|
 | `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your domain |
 | `seal(secret, plaintext)`, `unseal` | the blob the gateway stores and cannot read |
 | `toLnurl(url)` | bech32-encode an endpoint url |
+| `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway with no token |
+| `bankVerifyEndpoint(config)` | the other half, the LUD-21 shape backed by your own statement |
+| `fioStatement(config)` | a `Statement` reading a Fio account, several tokens used strictly in turn |
 
-What your service answers once that handler is mounted is written out in
+What your service answers once those handlers are mounted is written out in
 [`openapi.yaml`](openapi.yaml), shipped with this package.
+
+`Statement` is a plain `(sinceUnix) => Promise<Credit[]>`, so another bank is
+another function of that shape and persistence wraps it from outside rather than
+living inside it. Nothing above it changes, and the package stays ignorant of
+whatever runtime you keep state in.
+
+**Pricing a fiat order** - [`src/price.ts`](src/price.ts), [`src/currency.ts`](src/currency.ts)
+
+| Export | What it does |
+|---|---|
+| `medianOf(tickers?, options?)` | ask several venues, take the middle, refuse the lot when they disagree too much |
+| `coinbase`, `kraken`, `bitstamp`, `coinmate` | the four MiCA authorised venues, every one replaceable |
+| `msatFor(amountMinor, priceMinorPerBtc, options?)` | exact BigInt arithmetic from fiat to millisatoshi |
+| `minorUnitsOf(currency)`, `minorScaleOf` | what ISO 4217 says the currency's minor unit is |
 
 **QR codes** - [`src/qr.ts`](src/qr.ts)
 
 Every renderer returns a string, so they work on a server, in a worker and in a
 browser with no canvas involved. `invoiceToSvg` takes an invoice or a lightning
-address and `lnurlToSvg` takes your own endpoint url, each with a `…ToDataUrl` twin
-for an `<img>` `src`. A BOLT12 offer is not handled, because this gateway never
-returns one.
+address, `lnurlToSvg` takes your own endpoint url, `spdToSvg` takes the `spd` from
+`bankTransfer`. Each has a `…ToDataUrl` twin for an `<img>` `src`. A BOLT12 offer
+is not handled, because this gateway never returns one.
 
 ```ts
 import { invoiceToSvg, lnurlToSvg } from "thunder-bridge";

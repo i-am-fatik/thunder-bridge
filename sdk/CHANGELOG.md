@@ -29,11 +29,26 @@ instance still emitting it.
 
 ## 0.8.1
 
-The project dropped `direct` from its name, and two identifiers moved with it.
-Everything else here is additive.
+A second rail, and the project dropped `direct` from its name. Two identifiers moved
+with the rename, everything else here is additive.
 
 ### Added
 
+- `bankTransfer(params)` puts a bank transfer on the same footing as a Lightning
+  payment. It derives a preimage from an HMAC over the reference, the amount and
+  the currency, registers the watch, and returns the watched id with the Short
+  Payment Descriptor a Czech QR platba carries. The gateway needed no change,
+  because from where it stands this is a hash and a URL to poll.
+- That gateway has to be one of your own. A blind Lightning watch hands over a
+  hash and a wallet's opaque URL, while this hands over a URL naming the amount
+  and the reference, so whoever runs the gateway could read your order book off
+  the watches. `bankTransfer` therefore throws unless the gateway carries a token,
+  and `allowPublicGateway` is the way to say the order book is not worth hiding.
+- `gateway.isPrivate` says whether a token was given, which is what makes an
+  instance yours, and what the refusal above reads.
+- `bankTransfer` takes `trigger` and `sealed` and passes both to the watch, so a
+  bank leg and a Lightning leg of the same order arrive on one `followTrigger`
+  socket, with `sealed` saying which order each belongs to.
 - `gateway.getWatched(id)` and `gateway.waitForWatched(id, options?)` read and
   follow a payment the gateway only watches. Such a payment carries no address,
   amount or invoice, because the gateway was told none of them, so `getPayment` and
@@ -41,13 +56,41 @@ Everything else here is additive.
   nonsense.
 - `gateway.firstToSettle(ids, options?)` waits on several payments, keeps the first
   that is really paid and stops waiting on the losers, which closes their sockets.
-  It is not a race: an expired leg is a loser rather than a winner, and `null` means
-  every leg ended unpaid.
-- `gateway.isPrivate` says whether a token was given, which is what makes an
-  instance yours.
-- `openapi.yaml` ships with this package, specifying the LNURL-pay endpoint
-  `lnurlPayEndpoint` mounts. It is the only HTTP surface the SDK gives you, so it is
-  the only part a specification can describe.
+  That is how one order is offered on two rails. It is not a race: an expired leg is
+  a loser, so a Lightning invoice timing out after an hour does not cancel the
+  transfer still coming, and `null` means every leg ended unpaid.
+- `bankVerifyEndpoint(config)` is the Fetch handler the gateway then polls. It
+  answers the LUD-21 shape from your own bank statement, stores nothing, and
+  refuses a query it did not sign, which is what stops it answering "did anyone
+  send you this amount with this note" to whoever asks.
+- `Statement` is the plugin seam, one function from a timestamp to the credits
+  after it, so another bank is another function of that shape.
+- `fioStatement(config)` is the first one, reading your own Fio account. A read
+  only token is the whole configuration, because a Fio token belongs to one
+  account and the "Sledování účtu" right cannot pay anyone. Fio allows one read
+  per token every 30 seconds and the gateway polls faster, so the last answer is
+  held for `minIntervalSecs` instead of earning a `409`.
+- `spdToSvg(spd, options?)` and `spdToDataUrl(spd, options?)` render the transfer's
+  QR, next to the ones for an invoice and a lightning address.
+- `medianOf(tickers?, options?)` prices a bitcoin in the minor units of any
+  currency, defaulting to four venues that hold a MiCA CASP authorisation,
+  `coinbase()`, `kraken()`, `bitstamp()` and `coinmate()`. It takes the middle
+  answer, skips a venue that does not quote the currency, refuses the lot when they
+  disagree by more than `maxSpreadBps`, and holds an answer for a minute.
+  `Ticker` is the seam, so your own source is a one line function.
+- Every adapter proves it was given the pair it asked for. Bitstamp answers an
+  unknown pair with a `200` and its whole ticker list starting at BTC/USD, which
+  would have priced a bitcoin at 64,000 crowns, and Kraken puts its refusal in a
+  `200` body.
+- `msatFor(amountMinor, priceMinorPerBtc, options?)` turns a fiat price into what to
+  ask for over Lightning, in BigInt so a large order stays exact, rounding up, with
+  an optional `spreadBps` that defaults to none.
+- `minorUnitsOf(currency)` and `minorScaleOf(currency)` read a currency's minor unit
+  from ISO 4217 instead of assuming two digits, and throw for a code they do not
+  know rather than guessing. That fixes the QR platba amount and the price reading
+  for a yen, which has no decimals, and a dinar, which has three.
+- `openapi.yaml` in this package now specifies both handlers you can mount, the
+  LNURL-pay endpoint and the bank verify endpoint.
 
 ### Changed
 
@@ -59,6 +102,14 @@ Everything else here is additive.
 - The sealing key's HKDF info string dropped `direct` with it, so a blob sealed by
   0.8.0 cannot be unsealed by 0.8.1. Nothing sealed exists yet, and this was the last
   moment that was true.
+
+### Security
+
+- What a bank preimage proves is what LUD-21 proves and no more: that the server
+  holding the secret saw the money. It is the recipient's own word, made
+  unforgeable by anyone else, and the gateway cannot produce it at all. Read the
+  README before putting it in front of a payer who needs to distrust the
+  recipient.
 
 
 ## 0.8.0
