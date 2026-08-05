@@ -52,6 +52,7 @@ const REMEMBERED = ["fio", "statement"];
 
 const TICKERS: Record<string, () => Ticker> = { coinbase, kraken, bitstamp, coinmate };
 const OFFERS_LIGHTNING = LN_ADDRESSES.length > 0;
+const FIO_PACE_MS = FIO_WINDOW_MS / FIO_TOKENS.length;
 const [CURRENCY, AMOUNT_MINOR] = readPrice(PRICE);
 
 const priceOf = medianOf(VENUES.map((venue) => {
@@ -83,19 +84,17 @@ interface Remembered {
 }
 
 const acrossInvocations: Statement = async (sinceUnix) => {
-  const kept = await kv.get<Remembered>(REMEMBERED);
-  const known = kept.value ?? { at: 0, credits: [], turns: {} };
+  const stored = await kv.get<Remembered>(REMEMBERED);
+  const last = stored.value ?? { at: 0, credits: [], turns: {} };
   const now = Date.now();
-  if (now - known.at < FIO_WINDOW_MS / FIO_TOKENS.length) return known.credits;
+  if (now - last.at < FIO_PACE_MS) return last.credits;
 
-  const turn = FIO_TOKENS
-    .map((_, at) => at)
-    .reduce((one, other) => ((known.turns[other] ?? 0) < (known.turns[one] ?? 0) ? other : one));
-  if (now - (known.turns[turn] ?? 0) < FIO_WINDOW_MS) return known.credits;
+  const turn = longestUnusedToken(last.turns);
+  if (now - (last.turns[turn] ?? 0) < FIO_WINDOW_MS) return last.credits;
 
-  const turns = { ...known.turns, [turn]: now };
-  const claimed = await kv.atomic().check(kept).set(REMEMBERED, { ...known, turns }).commit();
-  if (!claimed.ok) return known.credits;
+  const turns = { ...last.turns, [turn]: now };
+  const claimed = await kv.atomic().check(stored).set(REMEMBERED, { ...last, turns }).commit();
+  if (!claimed.ok) return last.credits;
 
   const credits = await fioStatement({ token: FIO_TOKENS[turn]!, minIntervalSecs: 0 })(sinceUnix);
   await kv.atomic()
@@ -105,6 +104,15 @@ const acrossInvocations: Statement = async (sinceUnix) => {
 
   return credits;
 };
+
+function longestUnusedToken(turns: Record<number, number>): number {
+  let longest = 0;
+  for (let token = 1; token < FIO_TOKENS.length; token += 1) {
+    if ((turns[token] ?? 0) < (turns[longest] ?? 0)) longest = token;
+  }
+
+  return longest;
+}
 
 const proveOnStatement = bankVerifyEndpoint({
   secret: BANK_SECRET,
