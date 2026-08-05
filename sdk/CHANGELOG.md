@@ -13,6 +13,20 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 0.8.2
+
+The retired problem-type namespace is gone. Breaking for a client that talks to an
+instance still emitting it.
+
+### Removed
+
+- `isProblemType` no longer accepts `urn:problem-type:thunder-bridge-direct:`. It
+  reads the current namespace only, so a document carrying the retired spelling now
+  arrives as a plain `ProblemError` instead of the class its type names. 0.8.1 read
+  both to carry callers across the rename, and that transition is over: nothing this
+  house runs emits the old spelling any more.
+
+
 ## 0.8.1
 
 The project dropped `direct` from its name, and two identifiers moved with it.

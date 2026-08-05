@@ -1639,7 +1639,7 @@ describe("watchPayment", () => {
 });
 
 describe("the problem namespace after the rename", () => {
-  it("types an error from an instance still emitting the old namespace", async () => {
+  it("leaves an error from the retired namespace as a plain problem", async () => {
     stubFetch({
       [`${GATEWAY}/incoming-payments`]: () =>
         problemResponse(
@@ -1656,8 +1656,9 @@ describe("the problem namespace after the rename", () => {
       .createPayment({ lnAddresses: [LN_ADDRESS], amountMsat: AMOUNT_MSAT })
       .catch((error: unknown) => error);
 
-    expect(refused).toBeInstanceOf(NoWalletAvailableError);
-    expect((refused as NoWalletAvailableError).wallets).toHaveLength(1);
+    expect(refused).toBeInstanceOf(ProblemError);
+    expect(refused).not.toBeInstanceOf(NoWalletAvailableError);
+    expect((refused as ProblemError).status).toBe(502);
   });
 
   it("types one emitting the new namespace, which is what the gateway sends now", async () => {

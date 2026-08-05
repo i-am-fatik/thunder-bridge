@@ -65,21 +65,9 @@ export class ProblemError extends Error {
   }
 }
 
-const NAMESPACE = "urn:problem-type:thunder-bridge:";
-const NAMESPACE_BEFORE_THE_RENAME = "urn:problem-type:thunder-bridge-direct:";
-
-/**
- * Whether a problem document carries this type, accepting the namespace this
- * project used before `direct` left its name.
- *
- * A problem type is an identifier clients branch on, so renaming one is a breaking
- * change. The gateway emits only the new spelling, and this reads both, so a client
- * that has been updated still types the errors of an instance that has not
- */
+/** Whether a problem document carries this type */
 export function isProblemType(problem: { type?: string }, type: string): boolean {
-  return (
-    problem.type === type || problem.type === type.replace(NAMESPACE, NAMESPACE_BEFORE_THE_RENAME)
-  );
+  return problem.type === type;
 }
 
 export const NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge:no-wallet-available";
