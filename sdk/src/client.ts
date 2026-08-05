@@ -2,6 +2,7 @@ import {
   GatewayCheatError,
   IDEMPOTENCY_KEY_REUSED,
   IdempotencyConflictError,
+  isProblemType,
   NO_WALLET_AVAILABLE,
   NoWalletAvailableError,
   ProblemError,
@@ -128,6 +129,15 @@ export class ThunderBridge {
   }
 
   /**
+   * Whether a token was given, which is what makes an instance yours: a gateway
+   * started with `GATEWAY_TOKEN` answers nobody else, so anything you hand it
+   * stays between you and it
+   */
+  get isPrivate(): boolean {
+    return this.token !== null;
+  }
+
+  /**
    * Ask the gateway for an invoice payable to the first address on your list
    * that can issue a provable one, throws `NoWalletAvailableError` when none can
    * and `GatewayCheatError` when what comes back is not what you asked for
@@ -184,6 +194,29 @@ export class ThunderBridge {
   }
 
   /**
+   * Read back a payment the gateway is only watching, null when it has never
+   * heard of it. A watched payment carries no address, amount or invoice, so
+   * `getPayment` refuses it and this reads the shape both rails share
+   */
+  async getWatched(id: string): Promise<TriggerEvent | null> {
+    const response = await fetch(`${this.baseUrl}/incoming-payments/${encodeURIComponent(id)}`, {
+      headers: this.reading(),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw await problemFrom(response);
+
+    const watched = triggerEventFromWire(await response.json().catch(() => null));
+    if (watched === null) {
+      throw new ProblemError({
+        status: response.status,
+        title: "The gateway answered with something that is not a payment",
+      });
+    }
+
+    return this.proven(watched);
+  }
+
+  /**
    * List what this gateway is watching, newest first. Only a gateway started
    * with `GATEWAY_TOKEN` serves this, because on a shared one it would hand
    * every caller everyone else's payments, so a public gateway answers 404.
@@ -222,11 +255,44 @@ export class ThunderBridge {
    * one that has answered is followed until its own expiry, so the wait always
    * ends by itself
    */
-  waitForPayment(id: string, options?: WaitOptions): Promise<Payment> {
+  async waitForPayment(id: string, options?: WaitOptions): Promise<Payment> {
+    const payment = paymentFromWire(await this.followed(id, options));
+    if (payment === null) {
+      throw new ProblemError({
+        status: 200,
+        title: `payment ${id} is watched rather than minted here, read it with waitForWatched`,
+      });
+    }
+
+    return this.checked(payment);
+  }
+
+  /**
+   * Follow a payment the gateway is only watching, one it did not mint, until it
+   * is paid or expired.
+   *
+   * A watched payment carries no address, no amount and no invoice, because the
+   * gateway was told none of them, so it reads back as the shape a trigger
+   * streams rather than as a `Payment`. That is every bank transfer, and every
+   * Lightning invoice registered with `watchPayment` instead of `createPayment`.
+   */
+  async waitForWatched(id: string, options?: WaitOptions): Promise<TriggerEvent> {
+    const watched = triggerEventFromWire(await this.followed(id, options));
+    if (watched === null) {
+      throw new ProblemError({
+        status: 200,
+        title: "The gateway answered with something that is not a payment",
+      });
+    }
+
+    return this.proven(watched);
+  }
+
+  private followed(id: string, options?: WaitOptions): Promise<unknown> {
     const base = this.baseUrl.replace(/^http/, "ws");
     const direct = `${base}/ws/incoming-payments/${encodeURIComponent(id)}`;
 
-    return new Promise<Payment>((resolve, reject) => {
+    return new Promise<unknown>((resolve, reject) => {
       const aborted = () => new Error(`waiting for payment ${id} was aborted`);
       if (options?.signal?.aborted) {
         reject(aborted());
@@ -282,14 +348,14 @@ export class ThunderBridge {
         socket = opened;
         opened.onmessage = (event: MessageEvent) => {
           try {
-            const payment = paymentFromWire(JSON.parse(String(event.data)));
-            if (payment === null) return;
+            const frame: unknown = JSON.parse(String(event.data));
+            const watched = triggerEventFromWire(frame);
+            if (watched === null) return;
 
-            expiresAt = payment.expiresAt;
+            expiresAt = watched.expiresAt;
             attempt = 1;
-            if (!TERMINAL.has(payment.status)) return;
-            const checked = this.checked(payment);
-            settle(() => resolve(checked));
+            if (!TERMINAL.has(watched.status)) return;
+            settle(() => resolve(frame));
           } catch (refused: unknown) {
             settle(() => reject(refused));
           }
@@ -300,6 +366,57 @@ export class ThunderBridge {
       options?.signal?.addEventListener("abort", abort, { once: true });
       void connect();
     });
+  }
+
+  /**
+   * Wait on several payments and keep the first one that is really paid, then stop
+   * waiting on the losers, which closes their sockets.
+   *
+   * This is how one order offers two rails. A Lightning invoice and a bank
+   * transfer for the same thing are two payments here, and the payer picks one, so
+   * what you want is the one that arrives and nothing further from the other.
+   *
+   * A leg that expires is a loser, not a winner, which is the whole reason this is
+   * not a race: `waitForPayment` ends on `paid` and on `expired` alike, and a
+   * Lightning invoice expires in an hour while a bank transfer takes days. `null`
+   * means every leg ended without being paid.
+   *
+   * Stopping the wait is not revoking the invoice. Nobody can revoke one, because
+   * the recipient's own wallet minted it, so a payer who pays the loser afterwards
+   * really does pay twice and that shows up on `followTrigger` as a second
+   * settlement to refund.
+   */
+  async firstToSettle(ids: string[], options?: WaitOptions): Promise<TriggerEvent | null> {
+    if (ids.length === 0) return null;
+
+    const stopLosers = new AbortController();
+    const signal = options?.signal
+      ? AbortSignal.any([stopLosers.signal, options.signal])
+      : stopLosers.signal;
+    let refused: unknown = null;
+
+    try {
+      const winner = await new Promise<TriggerEvent | null>((resolve) => {
+        let waiting = ids.length;
+        const lost = () => {
+          waiting -= 1;
+          if (waiting === 0) resolve(null);
+        };
+        for (const id of ids) {
+          this.waitForWatched(id, { ...options, signal })
+            .then((watched) => (watched.status === "paid" ? resolve(watched) : lost()))
+            .catch((failure: unknown) => {
+              refused ??= failure;
+              lost();
+            });
+        }
+      });
+      if (winner === null && refused !== null) throw refused;
+
+      return winner;
+    } finally {
+      stopLosers.abort();
+    }
   }
 
   /**
@@ -450,13 +567,13 @@ async function problemFrom(response: Response): Promise<Error> {
     wallets?: unknown;
   };
   const document = { ...problem, status: response.status };
-  if (problem.type === NO_WALLET_AVAILABLE) {
+  if (isProblemType(problem, NO_WALLET_AVAILABLE)) {
     return new NoWalletAvailableError(document, refusals(problem.wallets));
   }
-  if (problem.type === REQUEST_IN_FLIGHT) {
+  if (isProblemType(problem, REQUEST_IN_FLIGHT)) {
     return new IdempotencyConflictError(document, "request-in-flight");
   }
-  if (problem.type === IDEMPOTENCY_KEY_REUSED) {
+  if (isProblemType(problem, IDEMPOTENCY_KEY_REUSED)) {
     return new IdempotencyConflictError(document, "key-reused");
   }
   return new ProblemError(document);

@@ -369,7 +369,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
       [`${GATEWAY}/watched-payments`]: () =>
         new Response(
           JSON.stringify({
-            type: "urn:problem-type:thunder-bridge-direct:payment-already-watched",
+            type: "urn:problem-type:thunder-bridge:payment-already-watched",
             title: "This payment hash is already being watched here",
             status: 409,
           }),
@@ -474,7 +474,7 @@ describe("what a wallet is told when it cannot be served", () => {
       [`${GATEWAY}/quotes`]: () =>
         new Response(
           JSON.stringify({
-            type: "urn:problem-type:thunder-bridge-direct:no-wallet-available",
+            type: "urn:problem-type:thunder-bridge:no-wallet-available",
             title: "No wallet would take this amount",
             status: 400,
             wallets: [],

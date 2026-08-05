@@ -98,9 +98,10 @@ export function nextDue(payment: Payment, eagerMs: number): number | null {
 }
 
 export async function spend(budget: Budget, host: string): Promise<void> {
-	const slot = Math.max(Date.now(), budget.nextAt.get(host) ?? 0);
+	const now = Date.now();
+	const slot = Math.max(now, budget.nextAt.get(host) ?? 0);
 	budget.nextAt.set(host, slot + 1000 / budget.perSecond);
-	await sleep(slot - Date.now());
+	await sleep(slot - now);
 }
 
 function hostOf(url: string): string {

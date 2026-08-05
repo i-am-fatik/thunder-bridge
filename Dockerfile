@@ -6,6 +6,7 @@ COPY package.json package-lock.json tsconfig.json vitest.config.ts ./
 RUN npm ci
 COPY core ./core
 COPY src ./src
+COPY openapi.yaml ./
 RUN npm test && npx tsc --noEmit \
 	&& rm -f core/*.test.ts src/*.test.ts src/testing.ts vitest.config.ts \
 	&& mkdir -p /data
@@ -21,6 +22,7 @@ WORKDIR /app
 COPY --from=check /app/node_modules ./node_modules
 COPY --from=check /app/core ./core
 COPY --from=check /app/src ./src
+COPY --from=check /app/openapi.yaml ./
 COPY --from=check /data /data
 ENV LEDGER=/data/ledger.db
 EXPOSE 3000/tcp

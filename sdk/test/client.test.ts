@@ -4,6 +4,8 @@ import { ThunderBridge } from "../src/client";
 import {
   GatewayCheatError,
   IdempotencyConflictError,
+  isProblemType,
+  NO_WALLET_AVAILABLE,
   NoWalletAvailableError,
   PAYMENT_ALREADY_WATCHED,
   ProblemError,
@@ -338,7 +340,7 @@ describe("createPayment", () => {
       [`${GATEWAY}/incoming-payments`]: () =>
         problemResponse(
           {
-            type: "urn:problem-type:thunder-bridge-direct:no-wallet-available",
+            type: "urn:problem-type:thunder-bridge:no-wallet-available",
             title: "No wallet could issue a provable invoice",
             status: 502,
             wallets,
@@ -355,7 +357,7 @@ describe("createPayment", () => {
     expect(rejection).toBeInstanceOf(ProblemError);
     expect((rejection as NoWalletAvailableError).wallets).toEqual(wallets);
     expect((rejection as NoWalletAvailableError).type).toBe(
-      "urn:problem-type:thunder-bridge-direct:no-wallet-available",
+      "urn:problem-type:thunder-bridge:no-wallet-available",
     );
     expect((rejection as NoWalletAvailableError).status).toBe(502);
   });
@@ -365,7 +367,7 @@ describe("createPayment", () => {
       [`${GATEWAY}/incoming-payments`]: () =>
         problemResponse(
           {
-            type: "urn:problem-type:thunder-bridge-direct:invalid-request",
+            type: "urn:problem-type:thunder-bridge:invalid-request",
             title: "The request could not be read",
             status: 400,
             detail: "amount_msat must be a positive number",
@@ -381,7 +383,7 @@ describe("createPayment", () => {
     expect(rejection).toBeInstanceOf(ProblemError);
     expect(rejection).not.toBeInstanceOf(NoWalletAvailableError);
     expect(rejection as ProblemError).toMatchObject({
-      type: "urn:problem-type:thunder-bridge-direct:invalid-request",
+      type: "urn:problem-type:thunder-bridge:invalid-request",
       title: "The request could not be read",
       status: 400,
       detail: "amount_msat must be a positive number",
@@ -438,7 +440,7 @@ describe("createPayment", () => {
       [`${GATEWAY}/incoming-payments`]: () =>
         problemResponse(
           {
-            type: "urn:problem-type:thunder-bridge-direct:request-in-flight",
+            type: "urn:problem-type:thunder-bridge:request-in-flight",
             title: "A request with this Idempotency-Key is still running",
             status: 409,
           },
@@ -464,7 +466,7 @@ describe("createPayment", () => {
       [`${GATEWAY}/incoming-payments`]: () =>
         problemResponse(
           {
-            type: "urn:problem-type:thunder-bridge-direct:idempotency-key-reused",
+            type: "urn:problem-type:thunder-bridge:idempotency-key-reused",
             title: "This Idempotency-Key was used for a different request",
             status: 409,
           },
@@ -584,7 +586,7 @@ describe("createQuote", () => {
       [`${GATEWAY}/quotes`]: () =>
         problemResponse(
           {
-            type: "urn:problem-type:thunder-bridge-direct:no-wallet-available",
+            type: "urn:problem-type:thunder-bridge:no-wallet-available",
             title: "No wallet would take this amount",
             status: 400,
             wallets,
@@ -839,6 +841,82 @@ describe("waitForPayment", () => {
   });
 });
 
+describe("firstToSettle", () => {
+  function legs(): FakeSocket[] {
+    expect(FakeSocket.opened).toHaveLength(2);
+    return FakeSocket.opened;
+  }
+
+  it("opens one socket per leg", () => {
+    track(new ThunderBridge(GATEWAY).firstToSettle(["bank_01", "ln_01"]));
+
+    expect(legs().map((socket) => socket.url)).toEqual([
+      "wss://gateway.example.net/ws/incoming-payments/bank_01",
+      "wss://gateway.example.net/ws/incoming-payments/ln_01",
+    ]);
+  });
+
+  it("keeps the leg that was paid and stops waiting on the other", async () => {
+    const paid = settledPayment({ id: "bank_01" });
+    const winner = new ThunderBridge(GATEWAY).firstToSettle(["bank_01", "ln_01"]);
+
+    legs()[0].deliver(paid);
+
+    await expect(winner).resolves.toMatchObject({ id: paid.id, preimage: paid.preimage });
+    await drainMicrotasks();
+    expect(legs()[1].closeCalls).toBeGreaterThan(0);
+  });
+
+  it("waits on the rest when a leg only expires, because an expiry is a loser", async () => {
+    const paid = settledPayment({ id: "ln_01" });
+    const winner = track(new ThunderBridge(GATEWAY).firstToSettle(["bank_01", "ln_01"]));
+
+    legs()[1].deliver(pendingPayment({ id: "ln_01", status: "expired" }));
+    await drainMicrotasks();
+    expect(winner.outcomes).toEqual([]);
+
+    legs()[0].deliver(paid);
+    await drainMicrotasks();
+
+    expect(winner.outcomes).toEqual(["resolved"]);
+    expect(winner.value).toMatchObject({ id: paid.id, preimage: paid.preimage });
+  });
+
+  it("answers null when every leg ended unpaid", async () => {
+    const winner = new ThunderBridge(GATEWAY).firstToSettle(["bank_01", "ln_01"]);
+
+    legs()[0].deliver(pendingPayment({ id: "bank_01", status: "expired" }));
+    legs()[1].deliver(pendingPayment({ id: "ln_01", status: "expired" }));
+
+    await expect(winner).resolves.toBeNull();
+  });
+
+  it("answers null for nothing to wait on, and opens no socket", async () => {
+    await expect(new ThunderBridge(GATEWAY).firstToSettle([])).resolves.toBeNull();
+
+    expect(FakeSocket.opened).toHaveLength(0);
+  });
+
+  it("surfaces a refusal only when it cost the last leg", async () => {
+    const paid = settledPayment({ id: "ln_01" });
+    const winner = new ThunderBridge(GATEWAY).firstToSettle(["bank_01", "ln_01"]);
+
+    legs()[0].onmessage?.({ data: "not json at all" });
+    legs()[1].deliver(paid);
+
+    await expect(winner).resolves.toMatchObject({ id: paid.id, preimage: paid.preimage });
+  });
+
+  it("throws what refused when no leg was paid", async () => {
+    const winner = new ThunderBridge(GATEWAY).firstToSettle(["bank_01", "ln_01"]);
+
+    legs()[0].onmessage?.({ data: "not json at all" });
+    legs()[1].deliver(pendingPayment({ id: "ln_01", status: "expired" }));
+
+    await expect(winner).rejects.toThrow();
+  });
+});
+
 describe("waitForPayment through a dropped socket", () => {
   const LONGEST_WAIT_MS = 30_000;
   const TOKEN = "only-my-app-holds-this";
@@ -1037,7 +1115,7 @@ describe("what the client will not take on faith", () => {
       [`${GATEWAY}/incoming-payments`]: () =>
         problemResponse(
           {
-            type: "urn:problem-type:thunder-bridge-direct:no-wallet-available",
+            type: "urn:problem-type:thunder-bridge:no-wallet-available",
             title: "No wallet could issue a provable invoice",
             wallets: "every single one of them",
           },
@@ -1515,7 +1593,7 @@ describe("watchPayment", () => {
       [`${GATEWAY}/watched-payments`]: () =>
         problemResponse(
           {
-            type: "urn:problem-type:thunder-bridge-direct:payment-already-watched",
+            type: "urn:problem-type:thunder-bridge:payment-already-watched",
             title: "This payment hash is already being watched here",
             status: 409,
           },
@@ -1557,5 +1635,140 @@ describe("watchPayment", () => {
       expect(rejection).toBeInstanceOf(Error);
       expect((rejection as Error).message).toMatch(/expiresAt/);
     }
+  });
+});
+
+describe("the problem namespace after the rename", () => {
+  it("types an error from an instance still emitting the old namespace", async () => {
+    stubFetch({
+      [`${GATEWAY}/incoming-payments`]: () =>
+        problemResponse(
+          {
+            type: "urn:problem-type:thunder-bridge-direct:no-wallet-available",
+            title: "No wallet could issue a provable invoice",
+            wallets: [{ address: LN_ADDRESS, reason: "unreachable" }],
+          },
+          502,
+        ),
+    });
+
+    const refused = await new ThunderBridge(GATEWAY)
+      .createPayment({ lnAddresses: [LN_ADDRESS], amountMsat: AMOUNT_MSAT })
+      .catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(NoWalletAvailableError);
+    expect((refused as NoWalletAvailableError).wallets).toHaveLength(1);
+  });
+
+  it("types one emitting the new namespace, which is what the gateway sends now", async () => {
+    stubFetch({
+      [`${GATEWAY}/incoming-payments`]: () =>
+        problemResponse(
+          { type: NO_WALLET_AVAILABLE, title: "No wallet could issue a provable invoice" },
+          502,
+        ),
+    });
+
+    const refused = await new ThunderBridge(GATEWAY)
+      .createPayment({ lnAddresses: [LN_ADDRESS], amountMsat: AMOUNT_MSAT })
+      .catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(NoWalletAvailableError);
+  });
+
+  it("leaves a foreign namespace as a plain problem", () => {
+    expect(
+      isProblemType(
+        { type: "urn:problem-type:someone-else:no-wallet-available" },
+        NO_WALLET_AVAILABLE,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("a payment the gateway only watches", () => {
+  const WATCHED = "watch_0001";
+  const HASH = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925";
+  const PREIMAGE_FOR = "00".repeat(32);
+
+  function blindWire(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: WATCHED,
+      status: "pending",
+      payment_hash: HASH,
+      verify_url: "https://coinos.io/api/lnurl/verify/blind",
+      preimage: null,
+      expires_at: new Date(1_900_000_600 * 1000).toISOString(),
+      created_at: new Date(1_900_000_000 * 1000).toISOString(),
+      ...overrides,
+    };
+  }
+
+  it("reads back with getWatched, which asks for no address and no invoice", async () => {
+    stubFetch({ [`${GATEWAY}/incoming-payments/${WATCHED}`]: () => jsonResponse(blindWire()) });
+
+    const watched = await new ThunderBridge(GATEWAY).getWatched(WATCHED);
+
+    expect(watched?.id).toBe(WATCHED);
+    expect(watched?.lnAddress).toBeNull();
+    expect(watched?.amountMsat).toBeNull();
+  });
+
+  it("is null from getWatched when the gateway never heard of it", async () => {
+    stubFetch({
+      [`${GATEWAY}/incoming-payments/${WATCHED}`]: () =>
+        problemResponse({ title: "Not Found" }, 404),
+    });
+
+    expect(await new ThunderBridge(GATEWAY).getWatched(WATCHED)).toBeNull();
+  });
+
+  it("refuses a settlement whose preimage does not hash to the payment hash", async () => {
+    stubFetch({
+      [`${GATEWAY}/incoming-payments/${WATCHED}`]: () =>
+        jsonResponse(blindWire({ status: "paid", preimage: "11".repeat(32) })),
+    });
+
+    await expect(new ThunderBridge(GATEWAY).getWatched(WATCHED)).rejects.toBeInstanceOf(
+      GatewayCheatError,
+    );
+  });
+
+  it("sends getPayment to waitForWatched rather than answering nonsense", async () => {
+    stubFetch({ [`${GATEWAY}/incoming-payments/${WATCHED}`]: () => jsonResponse(blindWire()) });
+
+    await expect(new ThunderBridge(GATEWAY).getPayment(WATCHED)).rejects.toThrow(ProblemError);
+  });
+
+  it("settles on the socket through waitForWatched", async () => {
+    const waiting = new ThunderBridge(GATEWAY).waitForWatched(WATCHED);
+
+    theSocket().onmessage?.({
+      data: JSON.stringify(blindWire({ status: "paid", preimage: PREIMAGE_FOR })),
+    });
+
+    const settled = await waiting;
+    expect(settled.status).toBe("paid");
+    expect(settled.preimage).toBe(PREIMAGE_FOR);
+  });
+
+  it("tells waitForPayment to use the other one, instead of a parse failure", async () => {
+    const waiting = new ThunderBridge(GATEWAY).waitForPayment(WATCHED);
+
+    theSocket().onmessage?.({ data: JSON.stringify(blindWire({ status: "expired" })) });
+
+    await expect(waiting).rejects.toThrow("waitForWatched");
+  });
+
+  it("wins a two-rail race without an address or an invoice", async () => {
+    const winning = new ThunderBridge(GATEWAY).firstToSettle([WATCHED, "ln_01"]);
+
+    FakeSocket.opened[0].onmessage?.({
+      data: JSON.stringify(blindWire({ status: "paid", preimage: PREIMAGE_FOR })),
+    });
+
+    const winner = await winning;
+    expect(winner?.id).toBe(WATCHED);
+    expect(winner?.preimage).toBe(PREIMAGE_FOR);
   });
 });

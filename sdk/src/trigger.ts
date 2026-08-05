@@ -2,7 +2,7 @@ import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
 import { resolve } from "../../core/lnurl.js";
 import { seal } from "../../core/sealed.js";
 import type { ThunderBridge } from "./client.js";
-import { PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
+import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
 
 const NONCE_BYTES = 16;
 
@@ -169,7 +169,7 @@ async function mintBlind(
 }
 
 function alreadyWatched(refused: unknown): boolean {
-  return refused instanceof ProblemError && refused.type === PAYMENT_ALREADY_WATCHED;
+  return refused instanceof ProblemError && isProblemType(refused, PAYMENT_ALREADY_WATCHED);
 }
 
 function sign(secret: string, address: string, amountMsat: number, nonce: string): Promise<string> {

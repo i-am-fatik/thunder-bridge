@@ -8,7 +8,7 @@ const OTHER_SECRET = "whsec_0000000000000000ffff";
 
 const PAYMENT: Payment = {
   id: "pay_7f3c9d21",
-  lnAddress: "charter@coinos.io",
+  lnAddress: "i_am_fatik@btcpay.3d3d.cz",
   amountMsat: 21000000,
   status: "paid",
   paymentHash: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
@@ -16,7 +16,7 @@ const PAYMENT: Payment = {
   preimage: "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
   expiresAt: 1754000600,
   createdAt: 1753999999,
-  verifyUrl: "https://coinos.io/api/lnurl/verify/7f3c9d21",
+  verifyUrl: "https://btcpay.3d3d.cz/lnurlp/verify/7f3c9d21",
 };
 
 const BODY = JSON.stringify({

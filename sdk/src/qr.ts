@@ -47,6 +47,8 @@ export function lnurlToDataUrl(endpoint: string, options?: QrOptions): string {
   return asDataUrl(lnurlToSvg(endpoint, options));
 }
 
+
+
 function svgOf(scanned: string, options?: QrOptions): string {
   const size = options?.size ?? 256;
   const color = options?.color ?? "#000";

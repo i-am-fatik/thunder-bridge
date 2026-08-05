@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname } from "node:path";
@@ -60,6 +60,21 @@ const DEFAULT_PAGE = 50;
 const MAX_PAGE = 500;
 const BEARER = "Bearer ";
 const TICKET_TTL_SECS = 60;
+const UNGATED = new Set(["/health", "/openapi.yaml", "/docs"]);
+const SPEC = readFileSync(new URL("../openapi.yaml", import.meta.url), "utf8");
+const DOCS = `<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Thunder Bridge</title>
+	</head>
+	<body>
+		<script id="api-reference" data-url="/openapi.yaml"></script>
+		<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+	</body>
+</html>
+`;
 
 type Follower = { id: string | null; trigger: string | null; answered: boolean };
 
@@ -261,7 +276,7 @@ async function respond(
 }
 
 function refused(incoming: IncomingMessage, token: string | null): Response | null {
-	if (token === null || pathOf(incoming) === "/health") return null;
+	if (token === null || UNGATED.has(pathOf(incoming))) return null;
 
 	return bearerMatches(incoming, token) ? null : unauthorized();
 }
@@ -291,6 +306,8 @@ async function route(
 ): Promise<Response> {
 	const path = pathOf(incoming);
 	if (path === "/health") return new Response("OK");
+	if (path === "/openapi.yaml") return served(SPEC, "application/yaml");
+	if (path === "/docs") return served(DOCS, "text/html; charset=utf-8");
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
@@ -512,6 +529,10 @@ function unreadable(error: unknown): Response {
 	if (error instanceof SyntaxError) return invalidRequest("the request body is not JSON");
 	if (error instanceof MalformedRequest) return invalidRequest(error.message);
 	throw error;
+}
+
+function served(body: string, type: string): Response {
+	return new Response(body, { headers: { "content-type": type } });
 }
 
 function json(body: unknown, status = 200): Response {

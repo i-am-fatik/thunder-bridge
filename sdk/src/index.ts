@@ -11,7 +11,12 @@ export type { Minted, TriggerConfig } from "./trigger.js";
 export { isProvablyPaid, proveOrigin, proveSettlement } from "./verify.js";
 export { decodeInvoice, preimageMatchesHash } from "../../core/bolt11.js";
 export type { Invoice } from "../../core/bolt11.js";
-export { invoiceToDataUrl, invoiceToSvg, lnurlToDataUrl, lnurlToSvg } from "./qr.js";
+export {
+  invoiceToDataUrl,
+  invoiceToSvg,
+  lnurlToDataUrl,
+  lnurlToSvg,
+} from "./qr.js";
 export type { QrOptions } from "./qr.js";
 export { toLnurl } from "../../core/lnurl.js";
 export { parseWebhook, parseWebhookRequest, verifyWebhookSignature } from "./webhook.js";
@@ -23,6 +28,7 @@ export {
   ProblemError,
   UnverifiedRecipientError,
 } from "./errors.js";
+export { isProblemType } from "./errors.js";
 export {
   IDEMPOTENCY_KEY_REUSED,
   NO_WALLET_AVAILABLE,

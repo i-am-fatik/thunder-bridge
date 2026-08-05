@@ -13,6 +13,40 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 0.8.1
+
+The project dropped `direct` from its name, and two identifiers moved with it.
+Everything else here is additive.
+
+### Added
+
+- `gateway.getWatched(id)` and `gateway.waitForWatched(id, options?)` read and
+  follow a payment the gateway only watches. Such a payment carries no address,
+  amount or invoice, because the gateway was told none of them, so `getPayment` and
+  `waitForPayment` refuse it and say which method to use instead of answering
+  nonsense.
+- `gateway.firstToSettle(ids, options?)` waits on several payments, keeps the first
+  that is really paid and stops waiting on the losers, which closes their sockets.
+  It is not a race: an expired leg is a loser rather than a winner, and `null` means
+  every leg ended unpaid.
+- `gateway.isPrivate` says whether a token was given, which is what makes an
+  instance yours.
+- `openapi.yaml` ships with this package, specifying the LNURL-pay endpoint
+  `lnurlPayEndpoint` mounts. It is the only HTTP surface the SDK gives you, so it is
+  the only part a specification can describe.
+
+### Changed
+
+- The problem type namespace is `urn:problem-type:thunder-bridge:` now that `direct`
+  has left the project's name. A problem type is an identifier clients branch on, so
+  `isProblemType` reads both spellings and the gateway emits only the new one, which
+  means an updated client still types the errors of an instance that has not been
+  redeployed.
+- The sealing key's HKDF info string dropped `direct` with it, so a blob sealed by
+  0.8.0 cannot be unsealed by 0.8.1. Nothing sealed exists yet, and this was the last
+  moment that was true.
+
+
 ## 0.8.0
 
 A total replacement of the 0.7.x package. Same name on npm, same author, nothing
@@ -267,7 +301,7 @@ intended outcome: a silent behavioural swap under a familiar name would be worse
   `title`, `status` and `detail`. `status` is always the HTTP status of the
   response: a problem document claiming a different one does not override it. The
   one minted problem type,
-  `urn:problem-type:thunder-bridge-direct:no-wallet-available`, becomes
+  `urn:problem-type:thunder-bridge:no-wallet-available`, becomes
   `NoWalletAvailableError`, a `ProblemError` subclass whose `wallets` array says
   what each address on your list did: `address-unusable`, `unreachable`,
   `amount-not-accepted`, `cannot-prove-delivery` or `invoice-refused`. That array
@@ -324,6 +358,17 @@ intended outcome: a silent behavioural swap under a familiar name would be worse
   a test that no longer matches the public surface fails the check instead of
   passing silently. The published tarball still contains `dist` only.
 
+### Changed
+
+- The problem type namespace is `urn:problem-type:thunder-bridge:` now that `direct`
+  has left the project's name. A problem type is an identifier clients branch on, so
+  `isProblemType` reads both spellings and the gateway emits only the new one, which
+  means an updated client still types the errors of an instance that has not been
+  redeployed.
+- The sealing key's HKDF info string dropped `direct` with it, so a blob sealed by
+  0.8.0 cannot be unsealed by 0.8.1. Nothing sealed exists yet, and this was the last
+  moment that was true.
+
 ### Security
 
 - **Both verification fetches are bounded to public https hosts.** The guard
@@ -351,7 +396,7 @@ intended outcome: a silent behavioural swap under a familiar name would be worse
 
 There is none, by construction. Donations and payments are not the same object
 and the gateways are not the same service, so no shim could be honest about what
-it was doing. Point new code at a Thunder Bridge Direct gateway and write it
+it was doing. Point new code at a Thunder Bridge gateway and write it
 against `createPayment`, which proves the invoice's origin as it hands it back,
 and `proveSettlement`, which is what you call before you treat a payment as
 received. Old code has to vendor the 0.7.x client, which is only in git now.

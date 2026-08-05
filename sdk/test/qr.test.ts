@@ -16,7 +16,7 @@ describe("encodeForQr", () => {
   });
 
   it("leaves a lightning address in the case it was given, where case carries meaning", () => {
-    expect(encodeForQr("charter@blink.sv")).toBe("LIGHTNING:charter@blink.sv");
+    expect(encodeForQr("iamfatik@blink.sv")).toBe("LIGHTNING:iamfatik@blink.sv");
     expect(encodeForQr("Tip.Jar@Example.com")).toBe("LIGHTNING:Tip.Jar@Example.com");
   });
 
@@ -90,7 +90,7 @@ describe("a trigger endpoint", () => {
 
 describe("a lightning address", () => {
   it("renders as a QR of its own, so a tip jar can show one without an invoice", () => {
-    const svg = invoiceToSvg("charter@blink.sv", { size: 128 });
+    const svg = invoiceToSvg("iamfatik@blink.sv", { size: 128 });
     expect(svg.startsWith("<svg")).toBe(true);
     expect(svg).toContain('width="128" height="128"');
   });
