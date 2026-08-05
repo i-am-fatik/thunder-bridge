@@ -4,7 +4,7 @@ import { seal, unseal } from "./sealed.ts";
 
 const SECRET = "a".repeat(32);
 const OTHER_SECRET = "b".repeat(32);
-const PLAIN = JSON.stringify({ amountMsat: 21_000, lnAddress: "charter@blink.sv" });
+const PLAIN = JSON.stringify({ amountMsat: 21_000, lnAddress: "iamfatik@blink.sv" });
 
 test("a sealed blob reads back only with the secret that sealed it", async () => {
 	const sealed = await seal(SECRET, PLAIN);
@@ -17,7 +17,7 @@ test("nothing readable survives into the blob, which is the whole point", async 
 	const sealed = await seal(SECRET, PLAIN);
 
 	expect(sealed).not.toContain("21000");
-	expect(sealed).not.toContain("charter");
+	expect(sealed).not.toContain("iamfatik");
 	expect(sealed).not.toContain("amountMsat");
 	expect(sealed.startsWith("v1.")).toBe(true);
 });
@@ -31,13 +31,13 @@ test("an edited blob is refused rather than decrypted into rubbish", async () =>
 	const [version, body] = sealed.split(".") as [string, string];
 
 	const flipped = (at: number) => {
-		const bytes = [...body];
-		bytes[at] = bytes[at] === "A" ? "B" : "A";
-		return `${version}.${bytes.join("")}`;
+		const bytes = Buffer.from(body, "base64url");
+		bytes[at] = bytes[at]! ^ 1;
+		return `${version}.${bytes.toString("base64url")}`;
 	};
 
 	expect(await unseal(SECRET, flipped(0))).toBeNull();
-	expect(await unseal(SECRET, flipped(body.length - 1))).toBeNull();
+	expect(await unseal(SECRET, flipped(Buffer.from(body, "base64url").length - 1))).toBeNull();
 	expect(await unseal(SECRET, `${version}.${body.slice(0, -4)}`)).toBeNull();
 });
 

@@ -7,11 +7,11 @@ export {
 	type WalletReason,
 } from "../core/refusal.ts";
 
-export const INVALID_REQUEST = "urn:problem-type:thunder-bridge-direct:invalid-request";
-export const NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge-direct:no-wallet-available";
-export const REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge-direct:request-in-flight";
-export const KEY_REUSED = "urn:problem-type:thunder-bridge-direct:idempotency-key-reused";
-export const ALREADY_WATCHED = "urn:problem-type:thunder-bridge-direct:payment-already-watched";
+export const INVALID_REQUEST = "urn:problem-type:thunder-bridge:invalid-request";
+export const NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge:no-wallet-available";
+export const REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge:request-in-flight";
+export const KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reused";
+export const ALREADY_WATCHED = "urn:problem-type:thunder-bridge:payment-already-watched";
 
 const STATUS: Record<WalletReason, number> = {
 	"address-unusable": 400,

@@ -2,7 +2,7 @@ const VERSION = "v1";
 const IV_BYTES = 12;
 const MIN_SECRET_CHARS = 32;
 const MAX_PLAIN_BYTES = 3000;
-const INFO = new TextEncoder().encode("thunder-bridge-direct/sealed");
+const INFO = new TextEncoder().encode("thunder-bridge/sealed");
 
 /**
  * Encrypt what the watcher needs and the gateway must not have. The gateway

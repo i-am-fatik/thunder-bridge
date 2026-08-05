@@ -65,12 +65,27 @@ export class ProblemError extends Error {
   }
 }
 
-export const NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge-direct:no-wallet-available";
-export const REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge-direct:request-in-flight";
-export const IDEMPOTENCY_KEY_REUSED =
-  "urn:problem-type:thunder-bridge-direct:idempotency-key-reused";
-export const PAYMENT_ALREADY_WATCHED =
-  "urn:problem-type:thunder-bridge-direct:payment-already-watched";
+const NAMESPACE = "urn:problem-type:thunder-bridge:";
+const NAMESPACE_BEFORE_THE_RENAME = "urn:problem-type:thunder-bridge-direct:";
+
+/**
+ * Whether a problem document carries this type, accepting the namespace this
+ * project used before `direct` left its name.
+ *
+ * A problem type is an identifier clients branch on, so renaming one is a breaking
+ * change. The gateway emits only the new spelling, and this reads both, so a client
+ * that has been updated still types the errors of an instance that has not
+ */
+export function isProblemType(problem: { type?: string }, type: string): boolean {
+  return (
+    problem.type === type || problem.type === type.replace(NAMESPACE, NAMESPACE_BEFORE_THE_RENAME)
+  );
+}
+
+export const NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge:no-wallet-available";
+export const REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge:request-in-flight";
+export const IDEMPOTENCY_KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reused";
+export const PAYMENT_ALREADY_WATCHED = "urn:problem-type:thunder-bridge:payment-already-watched";
 
 /**
  * Why an `Idempotency-Key` was refused, `request-in-flight` is the benign one and
