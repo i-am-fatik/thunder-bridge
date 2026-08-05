@@ -132,6 +132,51 @@ describe("fioStatement", () => {
     await expect(reading()(SINCE)).rejects.toThrow("fio answered 401");
   });
 
+  it("uses each token in turn, always the one unused longest", async () => {
+    const calls = fioServing(statementOf(transaction()));
+    const statement = fioStatement({ token: ["one", "two", "three"], minIntervalSecs: 0 });
+
+    await statement(SINCE);
+    await statement(SINCE);
+    await statement(SINCE);
+    await statement(SINCE);
+
+    const used = calls.map((call) => new URL(call.url).pathname.split("/")[4]);
+    expect(used).toEqual(["one", "two", "three", "one"]);
+  });
+
+  it("never asks one token twice inside its own window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const calls = fioServing(statementOf(transaction()));
+    const statement = fioStatement({ token: ["one", "two"] });
+
+    const used: (string | undefined)[] = [];
+    for (let second = 0; second <= 60; second += 1) {
+      vi.setSystemTime(second * 1000);
+      await statement(SINCE);
+    }
+    for (const call of calls) used.push(new URL(call.url).pathname.split("/")[4]);
+    vi.useRealTimers();
+
+    expect(used).toEqual(["one", "two", "one", "two", "one"]);
+  });
+
+  it("counts a token given twice only once, so it buys no extra reads", async () => {
+    const calls = fioServing(statementOf(transaction()));
+    const statement = fioStatement({ token: ["one", "one"], minIntervalSecs: 0 });
+
+    await statement(SINCE);
+    await statement(SINCE);
+
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => new URL(call.url).pathname.split("/")[4])).toEqual(["one", "one"]);
+  });
+
+  it("refuses a list with no token in it", () => {
+    expect(() => fioStatement({ token: [] })).toThrow("at least one token");
+  });
+
   it("holds the last answer rather than reading twice inside the window", async () => {
     const calls = fioServing(statementOf(transaction()));
     const statement = fioStatement({ token: TOKEN });

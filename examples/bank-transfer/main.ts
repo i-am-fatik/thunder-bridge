@@ -25,7 +25,10 @@ function randomSecret(): string {
 const UNCONFIGURED = "https://unconfigured.invalid";
 const GATEWAY = new URL(Deno.env.get("GATEWAY_URL") ?? UNCONFIGURED);
 const IBAN = Deno.env.get("IBAN") ?? "";
-const FIO_TOKEN = Deno.env.get("FIO_TOKEN") ?? "";
+const FIO_TOKENS = (Deno.env.get("FIO_TOKEN") ?? "")
+  .split(",")
+  .map((token) => token.trim())
+  .filter(Boolean);
 const BANK_SECRET = Deno.env.get("BANK_SECRET") ?? randomSecret();
 const TRIGGER_SECRET = Deno.env.get("TRIGGER_SECRET");
 const LN_ADDRESSES = (Deno.env.get("LN_ADDRESSES") ?? "")
@@ -56,7 +59,7 @@ const priceOf = medianOf(VENUES.map((venue) => {
   return open();
 }));
 
-if (!IBAN || !FIO_TOKEN || !GATEWAY.username) {
+if (!IBAN || FIO_TOKENS.length === 0 || !GATEWAY.username) {
   console.log("IBAN, FIO_TOKEN and a GATEWAY_URL carrying its token are unset, every route is 503");
 }
 if (!Deno.env.get("BANK_SECRET")) {
@@ -70,7 +73,7 @@ const gateway = new ThunderBridge(GATEWAY.origin, { token: decodeURIComponent(GA
 
 const proveOnStatement = bankVerifyEndpoint({
   secret: BANK_SECRET,
-  statement: fioStatement({ token: FIO_TOKEN }),
+  statement: fioStatement({ token: FIO_TOKENS }),
 });
 
 async function sellOne(origin: string): Promise<Response> {
@@ -155,7 +158,7 @@ function unconfigured(): Response {
 function route(request: Request): Response | Promise<Response> {
   const url = new URL(request.url);
 
-  if (!IBAN || !FIO_TOKEN || !GATEWAY.username) return unconfigured();
+  if (!IBAN || FIO_TOKENS.length === 0 || !GATEWAY.username) return unconfigured();
   if (url.pathname === VERIFY_PATH) return proveOnStatement(request);
   if (request.method === "POST" && url.pathname === "/order") {
     return sellOne(PUBLIC_URL ?? url.origin);

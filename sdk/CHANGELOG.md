@@ -70,6 +70,13 @@ with the rename, everything else here is additive.
   account and the "Sledování účtu" right cannot pay anyone. Fio allows one read
   per token every 30 seconds and the gateway polls faster, so the last answer is
   held for `minIntervalSecs` instead of earning a `409`.
+- `token` also takes a list. Fio's window is per token, so five tokens on one
+  account is a read every six seconds. They are used strictly in turn, always the
+  one unused longest, no token is asked twice inside its own window, and a token
+  listed twice counts once.
+- One read answers every open order, because Fio returns the whole account for the
+  period and the cache lives on the statement rather than on a payment. Five
+  transfers cost one request.
 - `spdToSvg(spd, options?)` and `spdToDataUrl(spd, options?)` render the transfer's
   QR, next to the ones for an invoice and a lightning address.
 - `medianOf(tickers?, options?)` prices a bitcoin in the minor units of any

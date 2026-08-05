@@ -69,7 +69,7 @@ selling its own goods, and not the rail for a payer who needs to distrust the re
 | variable         | required | what it is                                                                |
 | ---------------- | -------- | ------------------------------------------------------------------------- |
 | `IBAN`           | yes      | the account the money goes to, as an IBAN                                 |
-| `FIO_TOKEN`      | yes      | a Fio token with the read only "Sledování účtu" right                     |
+| `FIO_TOKEN`      | yes      | one or more read only "Sledování účtu" tokens, comma separated            |
 | `GATEWAY_URL`    | yes      | your own gateway with its token in it, `https://<token>@tb.example.net`   |
 | `BANK_SECRET`    | no       | generated at boot and printed, set it or a restart loses every open order |
 | `LN_ADDRESSES`   | no       | a comma separated priority list, and the Lightning leg appears with it    |
@@ -95,6 +95,10 @@ That one is read only: it exports data and cannot pay anyone, so this service ca
 and could not empty it if it were compromised. One token is one account, which is why there is no
 account number to configure. It works five minutes after you authorise it and lives at most 180
 days.
+
+Fio's window is per token, so `FIO_TOKEN` takes a list and five tokens on one account is a read
+every six seconds instead of every thirty. They are used in turn, always the one unused longest. One
+read also answers every open order at once, because Fio returns the whole account for the period.
 
 Fio wants at most one read per token every 30 seconds and answers `409` when you ask sooner. The
 gateway polls `/verify/bank` every `POLL_INTERVAL_SECS`, five by default, so `fioStatement` holds

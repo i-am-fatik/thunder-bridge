@@ -23,14 +23,21 @@ const WHERE_A_PAYER_WRITES = [
 export interface FioConfig {
   /**
    * A token with "Sledování účtu" rights, which is read only and cannot move
-   * money. One token is one account, which is why this takes no account number
+   * money. One token is one account, which is why this takes no account number.
+   *
+   * Give it several and they are used in turn. Fio's window is per token rather
+   * than per account, so five tokens on one account is a read every six seconds,
+   * and generating another token for the same account is what Fio's own
+   * documentation suggests when one is not enough
    */
-  token: string;
+  token: string | string[];
 
   /**
-   * Fio asks for at most one read per token every 30 seconds, and the gateway
-   * polls faster than that, so the last answer is held for this long and handed
-   * back instead of asking again. Only helps a process that stays up
+   * Fio's window for one token, 30 seconds. No token is ever asked twice inside
+   * it, and the gap between reads is this divided by however many tokens were
+   * given, so the answers stay evenly spaced rather than arriving in bursts.
+   * Inside that gap the last answer is handed back. Only helps a process that
+   * stays up
    */
   minIntervalSecs?: number;
 
@@ -62,19 +69,31 @@ interface FioStatement {
  * documents them and treats a missing field as absent rather than guessing.
  */
 export function fioStatement(config: FioConfig): Statement {
-  const holdFor = (config.minIntervalSecs ?? DEFAULT_MIN_INTERVAL_SECS) * MILLIS;
-  let asked = 0;
+  const named = typeof config.token === "string" ? [config.token] : config.token;
+  if (named.length === 0) throw new Error("fioStatement needs at least one token to read with");
+
+  const usedAt = new Map(named.map((token) => [token, Number.NEGATIVE_INFINITY]));
+  const tokenWindowMs = (config.minIntervalSecs ?? DEFAULT_MIN_INTERVAL_SECS) * MILLIS;
+  const paceMs = tokenWindowMs / usedAt.size;
+  let lastRead = Number.NEGATIVE_INFINITY;
   let credits: Credit[] = [];
 
   return async (sinceUnix: number) => {
-    if (Date.now() - asked < holdFor) return credits;
+    const now = Date.now();
+    if (now - lastRead < paceMs) return credits;
+
+    const idlest = longestUnused(usedAt);
+    if (now - idlest.usedAt < tokenWindowMs) return credits;
+
+    usedAt.set(idlest.token, now);
+    lastRead = now;
 
     const url = [
       config.baseUrl ?? BASE_URL,
       "periods",
-      config.token,
+      idlest.token,
       asDate(sinceUnix),
-      asDate(Math.floor(Date.now() / MILLIS)),
+      asDate(Math.floor(now / MILLIS)),
       "transactions.json",
     ].join("/");
 
@@ -85,13 +104,25 @@ export function fioStatement(config: FioConfig): Statement {
     if (!answer.ok) throw new Error(`fio answered ${answer.status} reading the statement`);
 
     const read = (await answer.json()) as FioStatement;
-    asked = Date.now();
     credits = (read.accountStatement?.transactionList?.transaction ?? [])
       .filter(isCredit)
       .map(asCredit);
 
     return credits;
   };
+}
+
+function longestUnused(usedAt: Map<string, number>): { token: string; usedAt: number } {
+  let token = "";
+  let idleSince = Number.POSITIVE_INFINITY;
+  for (const [candidate, at] of usedAt) {
+    if (at < idleSince) {
+      token = candidate;
+      idleSince = at;
+    }
+  }
+
+  return { token, usedAt: idleSince };
 }
 
 function isCredit(transaction: FioTransaction): boolean {

@@ -10,6 +10,7 @@ import {
   type Statement,
 } from "../src/bank";
 import { ThunderBridge } from "../src/client";
+import { fioStatement } from "../src/fio";
 import { type FetchCall, jsonResponse } from "./harness";
 
 const SECRET = "keep-me-server-side";
@@ -299,5 +300,62 @@ describe("a bank transfer against the gateway's own settlement check", () => {
     await expect(checkSettled(transfer.verifyUrl, transfer.paymentHash)).rejects.toThrow(
       "does not hash to",
     );
+  });
+});
+
+describe("one statement read answers every order at once", () => {
+  const FIO = "https://fioapi.fio.cz/v1/rest";
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function fioServing(credits: Credit[]): { reads: number } {
+    const counted = { reads: 0 };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (!url.startsWith(FIO)) throw new Error(`nothing else should be fetched, got ${url}`);
+        counted.reads += 1;
+        return jsonResponse({
+          accountStatement: {
+            transactionList: {
+              transaction: credits.map((paid) => ({
+                column1: { value: paid.amountMinor / 100 },
+                column14: { value: paid.currency },
+                column16: { value: paid.reference },
+                column0: { value: paid.bookedAt * 1000 },
+              })),
+            },
+          },
+        });
+      }),
+    );
+
+    return counted;
+  }
+
+  it("reads the bank once for five orders, because Fio lists the whole account", async () => {
+    watching();
+    const orders = ["A", "B", "C", "D", "E"];
+    const transfers = [];
+    for (const order of orders) {
+      transfers.push(await bankTransfer(asking({ reference: `ORDER-${order}` })));
+    }
+
+    const statement = fioStatement({ token: "one-token" });
+    const counted = fioServing(
+      orders.map((order) => credit({ reference: `PLATBA ORDER-${order}` })),
+    );
+    const verify = bankVerifyEndpoint({ secret: SECRET, statement });
+
+    const answers = [];
+    for (const transfer of transfers) {
+      answers.push(await (await verify(new Request(transfer.verifyUrl))).json());
+    }
+
+    expect(counted.reads).toBe(1);
+    expect(answers.every((answer) => (answer as { settled: boolean }).settled)).toBe(true);
   });
 });
