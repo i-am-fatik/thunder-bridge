@@ -1,7 +1,7 @@
 openapi: 3.1.0
 
 info:
-  title: Thunder Bridge Direct
+  title: Thunder Bridge
   version: 0.1.0
   license:
     name: MIT
@@ -43,6 +43,8 @@ tags:
     description: One static place many people pay, and the stream of what lands there.
   - name: health
     description: Liveness.
+  - name: docs
+    description: This specification, and a page that renders it.
 
 paths:
   /health:
@@ -60,6 +62,40 @@ paths:
                 type: string
                 const: OK
 
+  /openapi.yaml:
+    get:
+      tags: [docs]
+      operationId: getSpec
+      summary: This document, served by the instance it describes
+      description: |
+        Open to everyone, on a private gateway too. The specification says what the API is,
+        not what any caller's payments are, so gating it would hide nothing and would only
+        stop a client generating itself against the instance it talks to.
+      responses:
+        "200":
+          description: The specification.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      tags: [docs]
+      operationId: getDocs
+      summary: The specification, rendered for reading
+      description: |
+        An HTML page that loads `/openapi.yaml` and renders it. The renderer comes from a
+        CDN, so this page needs the public internet while the specification underneath it
+        does not.
+      responses:
+        "200":
+          description: The rendered reference.
+          content:
+            text/html:
+              schema:
+                type: string
+
   /incoming-payments:
     get:
       tags: [incoming-payments]
@@ -69,10 +105,6 @@ paths:
         Served only by a gateway started with `GATEWAY_TOKEN`. A public one answers `404`,
         because a list on a shared gateway would hand every caller everyone else's payments,
         and it does not disclose that the endpoint exists elsewhere.
-
-        On a private gateway the correlation a list implies costs nothing: you are the only
-        caller, so there is no one to be correlated against. That is the whole reason this is
-        gated on the mode rather than on a scope or a role.
 
         Newest first, by creation. `settled_scanned` says how many settled records were read
         to build the page: settled payments older than that window are not in the answer, and
@@ -212,27 +244,22 @@ paths:
         Hand over an invoice you obtained yourself and the gateway will poll its LUD-21
         `verify_url` until a preimage appears, exactly as it does for one it minted.
 
-        The difference is what it is told. Creating a payment means naming an address and an
-        amount, so the gateway learns who is being paid and how much, and a gateway that knows
-        that can refuse selectively. Here it gets a payment hash, a URL to poll and an expiry.
-        It cannot tell who the recipient is beyond the domain in that URL, and it cannot tell
-        the amount at all, so the only refusal available to it is refusing everyone, which is
-        visible and is what makes leaving easy.
+        It is told a payment hash, a URL to poll and an expiry, and nothing else. So it cannot
+        tell who the recipient is beyond the domain in that URL, and cannot tell the amount at
+        all. Anything the watcher needs goes in `sealed`, which the gateway stores and hands
+        back untouched without being able to read it.
 
-        Anything the watcher needs to know goes in `sealed`, which the gateway stores and
-        hands back untouched without being able to read it.
+        Nothing here is verified on your behalf, because there is nothing to verify against:
+        you resolved the address, so the origin proof is yours to have run already.
 
-        This is the mode to use when you mint the invoice yourself. Nothing here is verified
-        on your behalf, because there is nothing to verify against: you resolved the address,
-        so the origin proof is yours to have run already.
+        It does not have to be an invoice. All this endpoint requires is a hash and a URL that
+        will one day answer with something hashing to it, so anything able to release a secret
+        on settlement can be watched here.
 
-        A hash already watched here answers `409`, and that is a disclosure control rather
-        than bookkeeping. The payment id is an HMAC of the payment hash, and that id is the
-        read capability for the payment. Since a payment hash sits in every invoice a payer
-        holds, returning the stored record for one would turn a public value into a capability
-        for a resource whose whole protection is that its id cannot be guessed. Repeating your
-        own registration byte for byte still answers `201`, so an honest retry after a timeout
-        works, and the `409` carries nothing about what is stored.
+        A hash already watched answers `409` and discloses nothing about what is stored,
+        because a payment hash sits in every invoice a payer holds while the payment id is the
+        read capability. Repeating your own registration byte for byte still answers `201`, so
+        an honest retry after a timeout works.
       requestBody:
         required: true
         content:
@@ -259,22 +286,18 @@ paths:
       operationId: createWsTicket
       summary: Mint a short-lived permission to open one socket
       description: |
-        A socket URL is logged: by this gateway, by proxies in front of it, and by the
-        browser. So a trigger secret in that URL ends up in places it should not be. A ticket
-        is what goes in the URL instead, and the secret moves into this request body, which
-        is not logged. That is the whole benefit and it is worth being exact about it: the
+        A socket URL is logged by this gateway, by proxies in front of it and by the browser,
+        so a trigger secret in that URL ends up where it should not be. A ticket goes in the
+        URL instead and the secret moves into this request body, which is not logged. The
         ticket does not make the secret stronger, it keeps it out of logs.
 
-        Name exactly one of `trigger_secret` or `payment_id`. The ticket is bound to that
-        one subject, so a leaked ticket grants one subscription to one thing rather than a
-        socket to anything.
+        Name exactly one of `trigger_secret` or `payment_id`. The ticket is bound to that one
+        subject, so a leaked ticket grants one subscription to one thing.
 
-        Two independent checks, which is what makes this work in both modes. On a gateway
-        with `GATEWAY_TOKEN` the bearer must be right, like every other route. In both modes
-        the body must name something you already hold: the trigger secret is itself the
-        authorisation for that stream, and a payment id is the capability for that payment.
-        A public gateway therefore mints with no bearer, correctly, because there the secret
-        was always the only thing authorising the stream.
+        Two independent checks. On a gateway with `GATEWAY_TOKEN` the bearer must be right,
+        like every other route. In both modes the body must name something you already hold:
+        the trigger secret is itself the authorisation for that stream, and a payment id is
+        the capability for that payment. A public gateway therefore mints with no bearer.
 
         Tickets are signed, not stored, so any instance sharing the cluster key reads a
         ticket another one minted. Single use is not enforced: within the minute it lives, a
@@ -323,10 +346,9 @@ paths:
         Behaves exactly as the path the ticket stands in for: a trigger ticket streams that
         trigger, replay first, and a payment ticket follows that one payment.
 
-        This is not a second way to do the same thing. It is the way to watch without a
-        secret in a URL. The direct paths stay, because one hardcoded URL and a dumb
-        reconnect loop is the right shape for a microcontroller, where a POST and a JSON
-        parse before every connect is more to go wrong, not less.
+        Use this rather than the direct paths whenever a secret in a URL is a worry. The
+        direct paths stay for a microcontroller, where one hardcoded URL and a dumb reconnect
+        loop beats a POST and a JSON parse before every connect.
 
         A ticket carries its own authority, so this path takes no bearer even on a private
         gateway. It stays usable until it expires rather than being consumed by opening, and
@@ -400,6 +422,58 @@ paths:
           $ref: "#/components/responses/unprovable"
         "502":
           $ref: "#/components/responses/upstream_unreachable"
+
+webhooks:
+  payment_paid:
+    post:
+      tags: [incoming-payments]
+      operationId: paymentPaid
+      summary: What the gateway POSTs to your webhook URL once a payment is paid
+      description: |
+        Sent when the recipient's own server releases a preimage, and only then. An invoice
+        that expires unpaid is never delivered, so a webhook is proof of settlement rather
+        than a status feed, and code waiting for an outcome still needs the expiry.
+
+        The body is the same `incoming_payment` you would read back by id, so the preimage
+        arrives with it and nothing has to be fetched to act on this.
+
+        Delivery is at-least-once and any 2xx retires it. Anything else is retried six times
+        on a widening delay, `WEBHOOK_BACKOFF_SECS` seconds further apart each attempt, and
+        then dropped. A payment settled on one instance is delivered by whichever instance in
+        the cluster gets there first, so a duplicate is normal and the receiver must be
+        idempotent.
+
+        Verify before you act. The SDK's `parseWebhookRequest` does both halves in one call,
+        and refuses a body whose signature or timestamp does not hold up.
+      parameters:
+        - name: x-timestamp
+          in: header
+          required: true
+          description: |
+            Unix seconds at the moment the body was signed. It is inside the signed payload,
+            so refusing anything older than your tolerance, five minutes in the SDK, is what
+            stops a captured delivery being replayed later.
+          schema:
+            type: string
+        - name: x-signature
+          in: header
+          required: false
+          description: |
+            `sha256=<hmac>` over `<x-timestamp>.<raw body>`, keyed with the `webhook.secret`
+            given at create time. Absent when no secret was given, and then nothing about
+            the body is provable, which is why a secret is the only sane way to run this.
+          schema:
+            type: string
+            pattern: "^sha256=[0-9a-f]{64}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/incoming_payment"
+      responses:
+        "200":
+          description: Taken. Any 2xx stops the retries.
 
 components:
   parameters:
@@ -502,8 +576,9 @@ components:
     webhook:
       type: object
       description: |
-        Where to POST the payment when it reaches a terminal status. Delivery is
-        at-least-once, so the receiver must tolerate duplicates.
+        Where to POST the payment once it is paid. Nothing is sent for an invoice that
+        expires, and delivery is at-least-once, so the receiver must tolerate duplicates.
+        The shape is under `webhooks` in this document.
       properties:
         url:
           type: string
@@ -554,7 +629,11 @@ components:
       properties:
         id:
           type: string
-          format: uuid
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            A keyed hash of `payment_hash`, so posting the same invoice again returns the
+            same payment from any instance. It cannot be derived from the invoice alone, and
+            holding it is the read capability for this payment.
         ln_address:
           $ref: "#/components/schemas/ln_address"
         incoming_amount:
@@ -707,11 +786,18 @@ components:
             - cannot-prove-delivery
             - invoice-refused
           description: |
-            `address-unusable` is a malformed address, `unreachable` means its server did
-            not answer usefully, `amount-not-accepted` means the amount falls outside what
-            it takes, `cannot-prove-delivery` means it publishes no usable LUD-21 endpoint,
-            and `invoice-refused` means it issued an invoice that did not match what was
-            asked for.
+            What it means, and what to do about it.
+
+            - `address-unusable` - not a lightning address, or its domain is not a public
+              https host. Fix the address.
+            - `unreachable` - its server returned no usable payRequest or invoice, which
+              also covers an unknown user. Retry, or check the wallet.
+            - `amount-not-accepted` - the amount is outside that wallet's min and max.
+              Change the amount.
+            - `cannot-prove-delivery` - no usable LUD-21 `verify` endpoint, or a provider
+              known never to release a preimage. Use another provider.
+            - `invoice-refused` - it issued an invoice this gateway will not accept: wrong
+              amount, unbound metadata, or undecodable. Report it, use another wallet.
       required: [address, reason]
 
     problem:
@@ -737,7 +823,7 @@ components:
         - type: object
           properties:
             type:
-              const: "urn:problem-type:thunder-bridge-direct:no-wallet-available"
+              const: "urn:problem-type:thunder-bridge:no-wallet-available"
             wallets:
               type: array
               description: Every address that was tried, in the order tried, and why each failed.
@@ -789,8 +875,8 @@ components:
                 properties:
                   type:
                     enum:
-                      - "urn:problem-type:thunder-bridge-direct:request-in-flight"
-                      - "urn:problem-type:thunder-bridge-direct:idempotency-key-reused"
+                      - "urn:problem-type:thunder-bridge:request-in-flight"
+                      - "urn:problem-type:thunder-bridge:idempotency-key-reused"
 
     watch_taken:
       description: |
@@ -805,7 +891,7 @@ components:
               - type: object
                 properties:
                   type:
-                    const: "urn:problem-type:thunder-bridge-direct:payment-already-watched"
+                    const: "urn:problem-type:thunder-bridge:payment-already-watched"
 
     replay_pruned:
       description: |

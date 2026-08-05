@@ -86,10 +86,11 @@ whole proof itself with no proxy.
 ## How the code uses this
 
 Presence of a preimage cannot be tested before someone pays, so the
-useless-list is a denylist in `lnurl.rs` (`VERIFY_WITHOUT_PREIMAGE`), checked
-against the address domain and its subdomains before any request goes out. A
-ZeusPay-class recipient is refused at creation instead of staying pending until
-the watcher gives up and calling `expired` a payment that may well have landed.
+useless-list is a denylist in [`core/lnurl.ts`](../core/lnurl.ts)
+(`VERIFY_WITHOUT_PREIMAGE`), checked against the address domain and its
+subdomains before any request goes out. A ZeusPay-class recipient is refused at
+creation instead of staying pending until the watcher gives up and calling
+`expired` a payment that may well have landed.
 
 Extend the list here and in that const together. It does not catch a server
 that answers `verify` from a domain other than the address it was reached at,
