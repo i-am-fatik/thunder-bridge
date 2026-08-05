@@ -4,6 +4,7 @@ import {
   bitstamp,
   coinbase,
   coinmate,
+  type Credit,
   fioStatement,
   kraken,
   medianOf,
@@ -12,6 +13,7 @@ import {
   msatFor,
   type Payment,
   preimageMatchesHash,
+  type Statement,
   ThunderBridge,
   type Ticker,
 } from "thunder-bridge";
@@ -45,6 +47,8 @@ const PUBLIC_URL = Deno.env.get("PUBLIC_URL");
 const CONTENT = "The money landed. Here is the thing you paid for.";
 const PAY_WITHIN_DAYS = 3;
 const VERIFY_PATH = "/verify/bank";
+const FIO_WINDOW_MS = 30_000;
+const REMEMBERED = ["fio", "statement"];
 
 const TICKERS: Record<string, () => Ticker> = { coinbase, kraken, bitstamp, coinmate };
 const OFFERS_LIGHTNING = LN_ADDRESSES.length > 0;
@@ -70,10 +74,41 @@ if (!OFFERS_LIGHTNING) {
 }
 
 const gateway = new ThunderBridge(GATEWAY.origin, { token: decodeURIComponent(GATEWAY.username) });
+const kv = await Deno.openKv();
+
+interface Remembered {
+  at: number;
+  credits: Credit[];
+  turns: Record<number, number>;
+}
+
+const acrossInvocations: Statement = async (sinceUnix) => {
+  const kept = await kv.get<Remembered>(REMEMBERED);
+  const known = kept.value ?? { at: 0, credits: [], turns: {} };
+  const now = Date.now();
+  if (now - known.at < FIO_WINDOW_MS / FIO_TOKENS.length) return known.credits;
+
+  const turn = FIO_TOKENS
+    .map((_, at) => at)
+    .reduce((one, other) => ((known.turns[other] ?? 0) < (known.turns[one] ?? 0) ? other : one));
+  if (now - (known.turns[turn] ?? 0) < FIO_WINDOW_MS) return known.credits;
+
+  const turns = { ...known.turns, [turn]: now };
+  const claimed = await kv.atomic().check(kept).set(REMEMBERED, { ...known, turns }).commit();
+  if (!claimed.ok) return known.credits;
+
+  const credits = await fioStatement({ token: FIO_TOKENS[turn]!, minIntervalSecs: 0 })(sinceUnix);
+  await kv.atomic()
+    .check({ key: REMEMBERED, versionstamp: claimed.versionstamp })
+    .set(REMEMBERED, { at: now, credits, turns })
+    .commit();
+
+  return credits;
+};
 
 const proveOnStatement = bankVerifyEndpoint({
   secret: BANK_SECRET,
-  statement: fioStatement({ token: FIO_TOKENS }),
+  statement: acrossInvocations,
 });
 
 async function sellOne(origin: string): Promise<Response> {
