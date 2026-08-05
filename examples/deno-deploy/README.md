@@ -127,4 +127,5 @@ and every payment to either route prints there as it settles.
 - One payment unlocks one id and the id is in the url, so treat it as the bearer
   token it is. Thirty days later the KV entry expires.
 - `PRICE_MSAT` is read once at boot. A fiat peg is a function call at mint time
-  instead, which is the shape `lnurlPayEndpoint` takes for `amountMsat`.
+  instead, which is the shape `lnurlPayEndpoint` takes for `amountMsat`, and
+  `medianOf` with `msatFor` is that call.
