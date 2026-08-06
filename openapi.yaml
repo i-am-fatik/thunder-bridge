@@ -643,6 +643,7 @@ components:
     ln_address:
       type: string
       format: email
+      maxLength: 320
       description: A LUD-16 lightning address, `user@domain`.
       examples: ["someone@coinos.io"]
 
@@ -678,6 +679,7 @@ components:
         secret:
           type: string
           writeOnly: true
+          maxLength: 256
           description: |
             Signs the body as `x-signature: sha256=<hmac>`. Never read back, on any
             endpoint.

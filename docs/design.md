@@ -36,6 +36,27 @@ That split is what makes replication trivial. Work is nobody else's business and
 facts cannot conflict, so there is nothing to reconcile and no merge policy to
 get wrong.
 
+## The file says which build wrote it
+
+The ledger carries `PRAGMA user_version`, and version one is the shape the first
+release wrote. A file already on disk adopts that number without being asked,
+because every statement creating the shape is `IF NOT EXISTS`, so a live ledger
+and an empty one take the same path and end up stamped the same.
+
+The shape is still applied on every boot rather than only when the stamp moves.
+That is the self-heal: a dropped index is rebuilt on the next start, and it does
+not announce itself any other way, because a query against a missing index
+prepares perfectly well and simply scans the table.
+
+What the stamp buys is the other direction. A file stamped higher than this build
+knows means a newer release wrote it and was rolled back, and that is refused at
+boot instead of queried. A process that will not start is a page; a process that
+reads a schema it does not understand is a wrong answer about money.
+
+Every later step is expand-only, new tables and nullable or defaulted columns,
+because `paid`, `outbox` and `delivered` are facts and a rollback hands the same
+volume back to a build that ignores the stamp entirely.
+
 ## A paid fact proves itself
 
 Beyond the HMAC, two things must hold: the payment id must be the keyed hash of
@@ -272,6 +293,75 @@ starts on an empty file and gap-syncs every fact back from its peers, since a
 fresh instance is just one whose watermarks are all zero. That makes a second
 instance somewhere else the actual durability mechanism. Until one exists, set a
 volume at `/data` or accept that a lone redeploy forgets.
+
+## Talking to a stranger
+
+Every outbound request in this service goes to a server somebody else named. A
+payer names the lightning address, and anyone holding an invoice may register a
+webhook, so the URL is untrusted input that happens to be spelled like a URL.
+
+One place owns that conversation. It refuses anything that is not public https,
+resolves the name and refuses when any address it answers with is one we would
+not reach, follows at most two redirects and re-runs both checks on every hop,
+and reads a bounded number of bytes before parsing anything.
+
+The redirect is the part that was actually exploitable. Left to itself `fetch`
+follows up to twenty hops, so a URL that passes every check on hop one can land
+on `http://169.254.169.254/` on hop two and hand back the cloud metadata service.
+Following the chain by hand is the only way the guard sees the destination that
+is finally reached.
+
+Checking the resolved address rather than the name is one layer, not the whole
+answer: the name is resolved again by the connection, so a record that flips
+between the two is not caught here. What it does buy is that a name openly
+pointing inside is refused before a socket opens, and the https requirement means
+an attacker also needs a certificate the internal service will serve. Refusing
+when *any* address is private, rather than when all of them are, costs
+availability in one case worth knowing: a wallet whose DNS answers with a stray
+private record alongside good ones is refused entirely.
+
+Credentials do not travel across an origin, and a redirect that does not say
+where to is refused rather than retried, both because the next caller of this
+helper will not think about either.
+
+## What a caller may send
+
+A request body is read up to 64 KiB and refused past it, twice over: once on
+`content-length`, which costs nothing and refuses before a byte is read, and once
+on the bytes actually arriving, because a chunked body declares no length. The
+largest request this API defines is a watch carrying a full 4096-character
+`sealed` blob, which is around 24 KB once escaped, so the ceiling is generous and
+still nothing a public instance can be made to spend.
+
+Every field that is kept has a length now, not only a type. An address, a webhook
+secret and a sealed blob are all stored, and the secret is an HMAC key that
+replicates to every peer, so "a string" was never a bound. The WebSocket surface
+takes the same ceiling, since a socket upgrade never passes through the body path
+at all and `ws` would otherwise accept 100 MB a frame.
+
+## Leaving without dropping work
+
+A redeploy is a signal, and the process answers it. `SIGTERM` and `SIGINT` turn
+readiness down first, so a balancer stops sending work while the listener is
+still up, then the timers stop, the tick in flight is waited out under
+`DRAIN_TIMEOUT_SECS`, the sockets and the listener close, and the ledger closes
+last. A second signal exits at once.
+
+Liveness and readiness answer different questions and are kept apart, because the
+platform does different things with them. `/health` is liveness: it turns 503 only
+when the watch loop has stopped being scheduled at all, which a restart cures. A
+slow tick is not that, and pacing a crowded wallet host can make a tick take
+minutes without anything being wrong.
+
+`/ready` is whether to send work. It turns 503 while draining, and it reports a
+full worklist without refusing on it, because an instance at `MAX_PENDING` still
+settles and still serves, and `POST /incoming-payments` is where a caller learns
+it cannot take another. Reporting a count as not-ready would take the whole
+deployment out of rotation for a condition no restart and no drain repairs.
+
+The vitals behind that answer are added only for a caller holding the bearer. A
+pending count is small, but it is still a fact about somebody's trade, and the
+path is open to everyone.
 
 ## What is still trusted
 
