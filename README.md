@@ -168,6 +168,8 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   sees it.
 - [examples/deno-deploy](examples/deno-deploy) - a paywall and a lightning
   address in one Fetch handler.
+- [examples/bank-transfer](examples/bank-transfer) - the same shop on a Czech QR
+  platba, settled by the same rule.
 - [examples/trigger-watcher](examples/trigger-watcher) - one socket that hears
   every settlement.
 

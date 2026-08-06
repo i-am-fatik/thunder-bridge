@@ -200,6 +200,51 @@ between the payRequest and the callback fails that payment, with no fallback
 behind it. The priority list buys availability at create time, not for the length
 of one payer's hesitation.
 
+## Two rails, one order
+
+A shop can offer the same thing for Lightning and for a Czech QR platba at once
+and take whichever lands first. The design is a shared trigger, not a new
+resource. Both legs carry one trigger secret, `followTrigger` streams every
+payment carrying it, and the first to reach `paid` wins. No linkage table, no
+polling loop of your own, no socket per customer.
+
+Which order settled travels in `sealed`, an opaque blob the gateway stores and
+hands back without being able to read it. So the socket tells the shop the
+reference and the price while the gateway learns neither.
+
+**Mint the Lightning leg late.** The bank leg is nearly free: the QR is derived
+from a secret and a reference with no network at all, and registering the watch is
+one POST. The Lightning leg costs a round trip to the recipient's wallet and
+produces an invoice that expires in about an hour. So show the QR immediately and
+mint the invoice when the payer picks Lightning, with the reference as the
+idempotency key. The window in which both rails are payable shrinks from days to
+the minutes a payer spends deciding.
+
+**No cancel endpoint, and no order object.** Cancelling a watch would buy about
+130 saved polls per order and would cost a fourth fact type in the ledger, since
+a cancellation has to replicate or one instance keeps polling what another
+abandoned. That is a lot of machinery for a rounding error. Revisit it only if
+open offers ever run into `MAX_PENDING`. An order object was tried on paper and
+did not survive the writing: two prices, two addresses, an IBAN, a verify URL, an
+expiry and a trigger is a twelve field parameter bag that mostly forwards to two
+functions the caller can already call. What was actually missing was one sentence
+of behaviour, which leg won, and that is `firstToSettle`.
+
+**Double payment is detected, not prevented.** Nothing can revoke an invoice,
+because the recipient's own wallet minted it and only that wallet could refuse
+it. LUD-21 reports settlement, it does not revoke. So a payer who scans the QR on
+Monday and pays the invoice on Tuesday really has paid twice. What the design
+gives is the fastest possible detection with no extra work: the second `paid`
+arrives on the trigger socket the shop is already listening to, with the amount
+and the reference in `sealed`. That is a refund signal, not a bug, and it needs no
+reconciliation job.
+
+**Reading the bank does not stop when an order is won.** An earlier plan closed
+the verify endpoint for a won order. That was wrong, and it was found while
+building: a bank transfer landing two days later would go unnoticed, and that is
+exactly the double payment the shop has to refund. The reads are cheap enough not
+to matter anyway.
+
 ## Railway
 
 Three things bite, and each fails in a way that does not name its own cause.

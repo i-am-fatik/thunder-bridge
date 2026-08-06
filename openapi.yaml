@@ -254,7 +254,8 @@ paths:
 
         It does not have to be an invoice. All this endpoint requires is a hash and a URL that
         will one day answer with something hashing to it, so anything able to release a secret
-        on settlement can be watched here.
+        on settlement can be watched here. The SDK's `bankTransfer` uses that to put a bank
+        transfer on the same footing.
 
         A hash already watched answers `409` and discloses nothing about what is stored,
         because a payment hash sits in every invoice a payer holds while the payment id is the
