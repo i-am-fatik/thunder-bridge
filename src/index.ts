@@ -345,7 +345,7 @@ function readiness(
 	if (vitals.draining) return unavailable(LEAVING);
 	if (token === null || !bearerMatches(incoming, token)) return json({ status: "ready" });
 
-	const { origin, peers, pending, maxPending, convergedAt, origins, marks } = store.info();
+	const { origin, peers, pending, maxPending, convergedAt, origins, marks, rows } = store.info();
 
 	return json({
 		status: "ready",
@@ -359,6 +359,7 @@ function readiness(
 			converged_at: convergedAt,
 			origins,
 			marks,
+			rows,
 		},
 	});
 }

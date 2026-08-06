@@ -140,8 +140,16 @@ paths:
                         type: object
                         description: |
                           Sum of the sequence numbers held per fact source. Curl two instances and
-                          compare: equal marks with equal `origins` is a strong fingerprint that
-                          they hold the same facts. A fingerprint, not a hash.
+                          compare: equal marks and equal `rows` with equal `origins` is a strong
+                          fingerprint that they hold the same facts. A fingerprint, not a hash,
+                          because a mark is a maximum and says nothing about holes below it.
+                        additionalProperties:
+                          type: integer
+                      rows:
+                        type: object
+                        description: |
+                          Rows actually held per fact source. Matching marks with mismatched rows is
+                          the shape of a hole, which is the one thing a mark alone cannot show.
                         additionalProperties:
                           type: integer
                 required: [status]

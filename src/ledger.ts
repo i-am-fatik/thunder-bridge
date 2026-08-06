@@ -191,6 +191,9 @@ type Statements = {
 	read: StatementSync;
 	all: StatementSync;
 	count: StatementSync;
+	paymentsByIds: StatementSync;
+	listing: StatementSync;
+	rows: Record<Source, StatementSync>;
 	insertAccepted: StatementSync;
 	schedule: StatementSync;
 	remember: StatementSync;
@@ -203,6 +206,7 @@ type Statements = {
 	prune: StatementSync;
 	pruneForRollback: StatementSync;
 	pruneAccepted: StatementSync;
+	pruneSettled: StatementSync;
 	settlement: StatementSync;
 	recentlyPaid: StatementSync;
 	insertPaid: StatementSync;
@@ -221,7 +225,7 @@ type Statements = {
 	watermarks: StatementSync;
 	watermark: StatementSync;
 	advance: StatementSync;
-	origins: StatementSync;
+	origins: Record<Source, StatementSync>;
 	nextSeq: Record<Source, StatementSync>;
 	since: Record<Source, StatementSync>;
 };
@@ -254,6 +258,13 @@ export class Ledger {
 				"SELECT accepted.id AS id, accepted.payment AS payment FROM accepted JOIN schedule ON schedule.id = accepted.id ORDER BY accepted.id, accepted.origin, accepted.seq",
 			),
 			count: this.db.prepare("SELECT count(*) AS rows FROM schedule"),
+			paymentsByIds: this.db.prepare(
+				"SELECT id, payment FROM accepted WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id, origin, seq",
+			),
+			listing: this.db.prepare(
+				"SELECT payment FROM accepted WHERE id IN (SELECT id FROM schedule) GROUP BY id ORDER BY acceptedAt DESC LIMIT ?",
+			),
+			rows: bySource((source) => this.db.prepare(`SELECT count(*) AS rows FROM ${source}`)),
 			insertAccepted: this.db.prepare(
 				"INSERT INTO accepted (origin, seq, id, payment, acceptedAt, expiresAt, mac) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
 			),
@@ -274,6 +285,9 @@ export class Ledger {
 			prune: this.db.prepare("DELETE FROM schedule WHERE expiresAt <= ?"),
 			pruneForRollback: this.db.prepare("DELETE FROM pending WHERE expiresAt <= ?"),
 			pruneAccepted: this.db.prepare("DELETE FROM accepted WHERE expiresAt <= ?"),
+			pruneSettled: this.db.prepare(
+				"DELETE FROM accepted WHERE id IN (SELECT id FROM paid WHERE settledAt <= ?)",
+			),
 			settlement: this.db.prepare("SELECT payment FROM paid WHERE id = ? LIMIT 1"),
 			recentlyPaid: this.db.prepare(
 				"SELECT payment FROM paid ORDER BY settledAt DESC, seq DESC LIMIT ?",
@@ -317,7 +331,7 @@ export class Ledger {
 			advance: this.db.prepare(
 				"INSERT INTO progress (source, origin, seq) VALUES (?, ?, ?) ON CONFLICT(source, origin) DO UPDATE SET seq = max(seq, excluded.seq)",
 			),
-			origins: this.db.prepare("SELECT origin FROM progress WHERE source = ?"),
+			origins: bySource((source) => this.db.prepare(`SELECT DISTINCT origin FROM ${source}`)),
 			nextSeq: bySource((source) =>
 				this.db.prepare(`SELECT coalesce(max(seq), 0) + 1 AS seq FROM ${source} WHERE origin = ?`),
 			),
@@ -346,12 +360,21 @@ export class Ledger {
 	}
 
 	all(): Payment[] {
-		const held = new Map<string, Payment[]>();
-		for (const row of this.statements.all.all() as (Row & { id: string })[]) {
-			held.set(row.id, [...(held.get(row.id) ?? []), revive(row)]);
-		}
+		return groupById(this.statements.all.all() as (Row & { id: string })[]);
+	}
 
-		return [...held.values()].map((accepted) => withStatus(oneFromEvery(accepted)));
+	rows(): Record<Source, number> {
+		return bySource(
+			(source) => (this.statements.rows[source].get() as { rows: number }).rows,
+		);
+	}
+
+	private paymentsFor(ids: string[]): Payment[] {
+		if (ids.length === 0) return [];
+
+		return groupById(this.statements.paymentsByIds.all(JSON.stringify(ids)) as (Row & {
+			id: string;
+		})[]);
 	}
 
 	count(): number {
@@ -380,7 +403,7 @@ export class Ledger {
 			this.statements.remember.run(payment.id, payment.expiresAt, dueAt, JSON.stringify(payment));
 
 			return {
-				payment: this.read(payment.id) ?? withStatus(payment),
+				payment: withStatus({ ...(held ?? payment), webhooks }),
 				facts: fresh ? { accepted: [fresh] } : {},
 			};
 		});
@@ -431,7 +454,7 @@ export class Ledger {
 		const now = unixNow();
 		const due = this.statements.claim.all(now + leaseSecs, now, limit) as { id: string }[];
 
-		return due.flatMap((one) => this.read(one.id) ?? []);
+		return this.paymentsFor(due.map((one) => one.id));
 	}
 
 	polled(id: string, dueAt: number | null): void {
@@ -456,7 +479,10 @@ export class Ledger {
 	}
 
 	list(limit: number, window: number): PublicPayment[] {
-		const waiting = this.all().map(withoutSecrets);
+		const waiting = (this.statements.listing.all(limit) as Row[])
+			.map(revive)
+			.map(withStatus)
+			.map(withoutSecrets);
 		const newestFirst = [...waiting, ...this.recentlySettled(window)].sort(
 			(one, other) => other.createdAt - one.createdAt,
 		);
@@ -591,7 +617,7 @@ export class Ledger {
 		let more = false;
 		const gap = <T>(source: Source): T[] => {
 			const rows: T[] = [];
-			for (const { origin } of this.statements.origins.all(source) as { origin: string }[]) {
+			for (const { origin } of this.statements.origins[source].all() as { origin: string }[]) {
 				const batch = this.statements.since[source].all(
 					origin,
 					theirs[source]?.[origin] ?? 0,
@@ -659,13 +685,14 @@ export class Ledger {
 
 	sweep(graceSecs: number): Payment[] {
 		const now = unixNow();
-		const expired = (this.statements.justExpired.all(now) as { id: string }[]).flatMap(
-			(one) => this.read(one.id) ?? [],
+		const expired = this.paymentsFor(
+			(this.statements.justExpired.all(now) as { id: string }[]).map((one) => one.id),
 		);
 		this.statements.announce.run(now);
 		this.statements.prune.run(now - graceSecs);
 		this.statements.pruneForRollback.run(now - graceSecs);
 		this.statements.pruneAccepted.run(now - graceSecs);
+		this.statements.pruneSettled.run(now - graceSecs);
 		this.statements.pruneOutbox.run(now - graceSecs);
 		this.statements.prunePaid.run(now - graceSecs);
 		this.statements.pruneDelivered.run(now - graceSecs);
@@ -861,6 +888,13 @@ function proves(preimage: string | null, paymentHash: string): void {
 	if (hashed !== paymentHash) {
 		throw new Error(`the preimage for ${paymentHash} does not hash to it`);
 	}
+}
+
+function groupById(rows: (Row & { id: string })[]): Payment[] {
+	const held = new Map<string, Payment[]>();
+	for (const row of rows) held.set(row.id, [...(held.get(row.id) ?? []), revive(row)]);
+
+	return [...held.values()].map((accepted) => withStatus(oneFromEvery(accepted)));
 }
 
 function oneFromEvery(accepted: Payment[]): Payment {

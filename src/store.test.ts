@@ -250,6 +250,22 @@ test("the store reports itself full once the worklist reaches its cap", () => {
 	}
 });
 
+test("an accepted fact does not outlive the settlement that closed it", () => {
+	const { store, stop } = openStore();
+	try {
+		const waiting = store.insert(payment(0));
+		store.paid(waiting.id, preimage(0));
+		expect(store.info().rows.accepted).toBe(1);
+
+		store.sweep(0);
+
+		expect(store.info().rows.accepted).toBe(0);
+		expect(store.info().rows.paid).toBe(0);
+	} finally {
+		stop();
+	}
+});
+
 test("the fact channel alone carries a payment to another instance", () => {
 	const one = openStore();
 	const two = openStore();

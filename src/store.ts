@@ -18,6 +18,7 @@ export type Info = {
 	convergedAt: number | null;
 	origins: number;
 	marks: Record<Source, number>;
+	rows: Record<Source, number>;
 };
 
 export type Settled = { payment: Payment; won: boolean };
@@ -72,6 +73,7 @@ export class Store {
 			convergedAt: this.convergedAt,
 			origins: origins.size,
 			marks: bySource(marks),
+			rows: this.ledger.rows(),
 		};
 	}
 
