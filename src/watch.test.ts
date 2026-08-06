@@ -213,6 +213,29 @@ test("the webhook posts the stored body and signs it only where a secret was giv
 	}
 });
 
+test("the webhook carries a deadline, and one that runs out puts it back on the outbox", async () => {
+	const deadlines: unknown[] = [];
+	const real = globalThis.fetch;
+	globalThis.fetch = ((_target: string | URL | Request, options?: RequestInit) => {
+		deadlines.push(options?.signal);
+		return Promise.reject(new DOMException("The operation was aborted", "TimeoutError"));
+	}) as typeof fetch;
+	const quiet = console.warn;
+	console.warn = () => {};
+	const { done, failed, watcher } = owing([owed()]);
+
+	try {
+		await tick(watcher);
+
+		expect(deadlines[0]).toBeInstanceOf(AbortSignal);
+		expect(done).toEqual([]);
+		expect(failed).toEqual([HOOK_URL]);
+	} finally {
+		console.warn = quiet;
+		globalThis.fetch = real;
+	}
+});
+
 test("a settlement the store refuses leaves the rest of the batch alone", async () => {
 	const wire = intercepting(() => verified(true));
 	const quiet = console.error;

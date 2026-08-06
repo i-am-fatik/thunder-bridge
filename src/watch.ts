@@ -9,6 +9,7 @@ const STALENESS = 0.1;
 const DAILY_DELAY_MS = 86_400_000;
 const GIVE_UP_AFTER_SECS = 2_592_000;
 const LEASE_SECS = 30;
+const WEBHOOK_TIMEOUT_MS = 15_000;
 
 export type Budget = { perSecond: number; nextAt: Map<string, number> };
 
@@ -80,7 +81,12 @@ async function notify(owed: Delivery): Promise<boolean> {
 	}
 
 	try {
-		const response = await fetch(owed.url, { method: "POST", headers, body: owed.body });
+		const response = await fetch(owed.url, {
+			method: "POST",
+			headers,
+			body: owed.body,
+			signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+		});
 		if (!response.ok) console.warn(`webhook for ${owed.id} rejected with ${response.status}`);
 		return response.ok;
 	} catch (error: unknown) {
