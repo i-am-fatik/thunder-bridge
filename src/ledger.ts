@@ -170,6 +170,8 @@ export type Facts = {
 	delivered?: DeliveredFact[];
 };
 
+export type Taken = { payment: Payment; facts: Facts };
+
 export type Watermarks = Record<Source, Record<string, number>>;
 
 export type Tuning = { takeoverAfterSecs: number; deliveryBackoffSecs: number };
@@ -360,31 +362,32 @@ export class Ledger {
 		return (this.statements.count.get() as { rows: number }).rows;
 	}
 
-	accept(payment: Payment): Payment {
+	accept(payment: Payment): Taken {
 		return this.keep(payment, unixNow());
 	}
 
-	mirror(payment: Payment): Payment {
+	mirror(payment: Payment): Taken {
 		return this.keep(payment, this.watchAfter(payment.id));
 	}
 
-	private keep(payment: Payment, dueAt: number): Payment {
+	private keep(payment: Payment, dueAt: number): Taken {
 		return this.transact(() => {
 			const mine = (this.statements.acceptedMine.all(this.origin, payment.id) as Row[]).map(revive);
 			const held = mine.length === 0 ? null : oneFromEvery(mine);
 			const webhooks = held ? mergedWebhooks(held.webhooks, payment.webhooks) : payment.webhooks;
-			if (!held || webhooks.length > held.webhooks.length) {
-				this.recordAccepted(this.acceptedFact({ ...payment, webhooks }));
-			}
-			this.scheduleWatch(payment.id, payment.expiresAt, dueAt);
-			this.statements.remember.run(
-				payment.id,
-				payment.expiresAt,
-				dueAt,
-				JSON.stringify(payment),
-			);
+			const fresh =
+				!held || webhooks.length > held.webhooks.length
+					? this.acceptedFact({ ...payment, webhooks })
+					: null;
+			if (fresh) this.recordAccepted(fresh);
 
-			return this.read(payment.id) ?? withStatus(payment);
+			this.scheduleWatch(payment.id, payment.expiresAt, dueAt);
+			this.statements.remember.run(payment.id, payment.expiresAt, dueAt, JSON.stringify(payment));
+
+			return {
+				payment: this.read(payment.id) ?? withStatus(payment),
+				facts: fresh ? { accepted: [fresh] } : {},
+			};
 		});
 	}
 

@@ -1,5 +1,13 @@
 import { announce, type Gossip } from "./gossip.ts";
-import { paymentId, SOURCES, type Claim, type Ledger, type Source, type Watermarks } from "./ledger.ts";
+import {
+	paymentId,
+	SOURCES,
+	type Claim,
+	type Facts,
+	type Ledger,
+	type Source,
+	type Watermarks,
+} from "./ledger.ts";
 import type { Delivery, Payment, PublicPayment, UnsavedPayment } from "./payment.ts";
 
 export type Info = {
@@ -34,7 +42,9 @@ export class Store {
 			peers: new Map(),
 			onAdd: (payment) => {
 				if (this.ledger.settlement(payment.id)) return;
-				this.onChange(this.ledger.mirror(payment));
+				const taken = this.ledger.mirror(payment);
+				this.spread(taken.facts);
+				this.onChange(taken.payment);
 			},
 			onFacts: (facts) => {
 				for (const settled of this.ledger.absorb(facts)) {
@@ -70,10 +80,15 @@ export class Store {
 		const settled = this.ledger.settlement(id);
 		if (settled) return withWebhooks(settled, null);
 
-		const payment = this.ledger.accept({ ...unsaved, id });
-		announce(this.gossip, { add: payment });
+		const taken = this.ledger.accept({ ...unsaved, id });
+		announce(this.gossip, { add: taken.payment });
+		this.spread(taken.facts);
 
-		return payment;
+		return taken.payment;
+	}
+
+	private spread(facts: Facts): void {
+		if ((facts.accepted ?? []).length > 0) announce(this.gossip, { facts, more: false });
 	}
 
 	get(id: string): Payment | null {

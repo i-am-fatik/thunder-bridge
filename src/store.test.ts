@@ -331,6 +331,27 @@ test("a peer that sends no accepted facts at all is understood", () => {
 	}
 });
 
+test("a build that predates accepted facts still finds the worklist where it looks", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-rollback-"));
+	const ledger = join(directory, "ledger.db");
+	const { store, stop } = openStore({ ledger });
+	const waiting = store.insert(payment(0));
+	stop();
+
+	const older = new DatabaseSync(ledger);
+	try {
+		expect(schemaVersionOf(ledger)).toBe(1);
+		const rows = older.prepare("SELECT payment FROM pending WHERE id = ?").all(waiting.id) as {
+			payment: string;
+		}[];
+		expect(rows).toHaveLength(1);
+		expect(JSON.parse(rows[0]!.payment)).toMatchObject({ paymentHash: waiting.paymentHash });
+	} finally {
+		older.close();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
 test("a ledger written before accepted facts existed keeps its worklist", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-adopt-"));
 	const ledger = join(directory, "ledger.db");

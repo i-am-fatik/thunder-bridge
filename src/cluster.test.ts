@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
 import type { Store } from "./store.ts";
-import { freePort, openStore, until, type TestOptions } from "./testing.ts";
+import { paymentId } from "./ledger.ts";
+import { CLUSTER_KEY, freePort, openStore, until, type TestOptions } from "./testing.ts";
 
 const TAKEOVER_TIMEOUT_MS = 25_000;
 
@@ -126,6 +127,19 @@ test("every instance takes on every pending payment, whoever created it", async 
 
 		expect(seen(cluster.first)).toBe(20);
 		expect(seen(cluster.second)).toBe(20);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a payment pushed the way the last release pushed it becomes a fact and travels", async () => {
+	const cluster = await connected();
+	try {
+		const pushed = { ...payment(0), id: paymentId(CLUSTER_KEY, payment(0).paymentHash) };
+		cluster.first.gossip.onAdd(pushed);
+
+		await until(() => cluster.second.get(pushed.id) !== null, "the pushed payment to reach a peer");
+		expect(cluster.second.info().marks.accepted).toBeGreaterThan(0);
 	} finally {
 		cluster.stop();
 	}
