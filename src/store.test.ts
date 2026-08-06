@@ -285,6 +285,35 @@ test("a ledger a newer build wrote is refused instead of opened", () => {
 	}
 });
 
+test("a stamped ledger still rebuilds an index that went missing", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-index-"));
+	const ledger = join(directory, "ledger.db");
+	openStore({ ledger }).stop();
+
+	const damaged = new DatabaseSync(ledger);
+	damaged.exec("DROP INDEX pending_by_due");
+	damaged.close();
+	expect(indexesOf(ledger)).not.toContain("pending_by_due");
+
+	const { stop } = openStore({ ledger });
+	try {
+		expect(indexesOf(ledger)).toContain("pending_by_due");
+	} finally {
+		stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+function indexesOf(path: string): string[] {
+	const db = new DatabaseSync(path);
+	const found = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as {
+		name: string;
+	}[];
+	db.close();
+
+	return found.map((one) => one.name);
+}
+
 function schemaVersionOf(path: string): number {
 	const db = new DatabaseSync(path);
 	const stamped = db.prepare("PRAGMA user_version").get() as { user_version: number };

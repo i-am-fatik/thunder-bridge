@@ -89,7 +89,7 @@ const SCHEMA = `
 	CREATE INDEX IF NOT EXISTS requests_by_age ON requests (claimedAt);
 `;
 
-const MIGRATIONS = [foundation];
+const SCHEMA_VERSION = 1;
 
 const DELIVERY_ATTEMPTS = 6;
 const TAKEOVER_SPREAD = 8;
@@ -540,22 +540,26 @@ export class Ledger {
 
 	private migrate(): void {
 		const found = this.schemaVersion();
-		if (found > MIGRATIONS.length) {
+		if (found > SCHEMA_VERSION) {
 			throw new Error(
-				`this ledger is at schema ${found} and this build knows ${MIGRATIONS.length}, so a newer build wrote it`,
+				`this ledger is at schema ${found} and this build knows ${SCHEMA_VERSION}, so a newer build wrote it`,
 			);
 		}
 
-		for (let version = found; version < MIGRATIONS.length; version += 1) {
-			this.transact(() => {
-				MIGRATIONS[version]!(this.db);
-				this.db.exec(`PRAGMA user_version = ${version + 1}`);
-			});
-		}
+		this.dropOutdatedRequestCache();
+		this.db.exec(SCHEMA);
+		if (found !== SCHEMA_VERSION) this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 	}
 
 	private schemaVersion(): number {
 		return (this.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+	}
+
+	private dropOutdatedRequestCache(): void {
+		const columns = this.db.prepare("PRAGMA table_info(requests)").all() as { name: string }[];
+		if (columns.length > 0 && !columns.some((column) => column.name === "fingerprint")) {
+			this.db.exec("DROP TABLE requests");
+		}
 	}
 
 	private transact<T>(work: () => T): T {
@@ -658,18 +662,6 @@ export class Ledger {
 		const after = this.tuning.takeoverAfterSecs;
 
 		return fact.owedAt + after + Math.max(1, Math.round(after / TAKEOVER_SPREAD)) * rank;
-	}
-}
-
-function foundation(db: DatabaseSync): void {
-	dropOutdatedRequestCache(db);
-	db.exec(SCHEMA);
-}
-
-function dropOutdatedRequestCache(db: DatabaseSync): void {
-	const columns = db.prepare("PRAGMA table_info(requests)").all() as { name: string }[];
-	if (columns.length > 0 && !columns.some((column) => column.name === "fingerprint")) {
-		db.exec("DROP TABLE requests");
 	}
 }
 
