@@ -2,7 +2,7 @@ import { announce, type Gossip } from "./gossip.ts";
 import { paymentId, type Claim, type Ledger } from "./ledger.ts";
 import type { Delivery, Payment, PublicPayment, UnsavedPayment } from "./payment.ts";
 
-export type Info = { origin: string; peers: number };
+export type Info = { origin: string; peers: number; pending: number; maxPending: number };
 
 export type Settled = { payment: Payment; won: boolean };
 
@@ -40,7 +40,12 @@ export class Store {
 	}
 
 	info(): Info {
-		return { origin: this.ledger.origin, peers: this.gossip.peers.size };
+		return {
+			origin: this.ledger.origin,
+			peers: this.gossip.peers.size,
+			pending: this.ledger.count(),
+			maxPending: this.maxPending,
+		};
 	}
 
 	insert(unsaved: UnsavedPayment): Payment {

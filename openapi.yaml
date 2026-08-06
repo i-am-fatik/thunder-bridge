@@ -42,7 +42,7 @@ tags:
   - name: triggers
     description: One static place many people pay, and the stream of what lands there.
   - name: health
-    description: Liveness.
+    description: Whether this instance is alive, and separately whether to send it work.
   - name: docs
     description: This specification, and a page that renders it.
 
@@ -52,7 +52,12 @@ paths:
       tags: [health]
       operationId: getHealth
       summary: Liveness probe
-      description: Answers as soon as the HTTP listener is up and the store has opened.
+      description: |
+        Answers as soon as the HTTP listener is up and the store has opened, and keeps
+        answering while the watch loop is being scheduled. It turns 503 for the one condition
+        a restart cures: the loop has stopped being scheduled at all, which means this
+        process is stuck rather than busy. A slow tick is not that, so pacing a crowded
+        wallet host never shows up here.
       responses:
         "200":
           description: The instance is serving.
@@ -61,6 +66,64 @@ paths:
               schema:
                 type: string
                 const: OK
+        "503":
+          description: |
+            The watch loop is no longer being scheduled, so this instance needs replacing
+            rather than draining.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/problem"
+
+  /ready:
+    get:
+      tags: [health]
+      operationId: getReadiness
+      summary: Readiness probe, and the vitals on a gateway that is yours
+      description: |
+        Whether this instance should be sent work, which is a different question from whether
+        it is alive. It turns 503 once the instance is draining, so a balancer takes it out of
+        rotation before the listener closes and a redeploy costs nobody a refused request.
+
+        A full worklist is reported, never a refusal: an instance at `MAX_PENDING` still
+        settles and still serves, and `POST /incoming-payments` is where a caller learns it
+        cannot take another. Open to everyone, like `/health`, but the vitals are added only
+        for a caller holding the bearer, because a count is still a fact about somebody's
+        trade.
+      responses:
+        "200":
+          description: |
+            Ready. Without the bearer the body is only `{"status":"ready"}`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    const: ready
+                  origin:
+                    type: string
+                    description: This instance's own identity in the cluster.
+                  peers:
+                    type: integer
+                    description: Instances it is currently gossiping with.
+                  pending:
+                    type: integer
+                    description: Payments on the worklist.
+                  max_pending:
+                    type: integer
+                    description: Where `MAX_PENDING` stops taking new ones.
+                  watching:
+                    type: string
+                    enum: [scheduled, stalled]
+                required: [status]
+        "503":
+          description: This instance is draining and is not taking new work.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/problem"
 
   /openapi.yaml:
     get:
@@ -242,6 +305,8 @@ paths:
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
         "404":
           $ref: "#/components/responses/not_found"
 
@@ -378,6 +443,8 @@ paths:
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
 
   /ws/triggers/{secret}:
     parameters:
@@ -404,6 +471,8 @@ paths:
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
 
   /quotes:
     post:

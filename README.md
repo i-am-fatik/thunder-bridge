@@ -71,7 +71,8 @@ GET  /incoming-payments/{id}     read one payment
 POST /quotes                     ask which address would take an amount, mint nothing
 POST /watched-payments           watch an invoice you obtained yourself
 POST /ws-tickets                 exchange a secret for a short-lived socket ticket
-GET  /health
+GET  /health                     is this instance alive, the one thing a restart cures
+GET  /ready                      should it be sent work, plus the vitals on a gated instance
 GET  /openapi.yaml
 GET  /docs                       the specification, rendered
 
@@ -106,8 +107,10 @@ standard's camelCase, and there is no authorization server.
 | `CLUSTER_KEY` | required | 32 bytes of hex, the swarm topic and the right to write a fact |
 | `PORT` | `3000` | listen port, Railway sets this for you |
 | `LEDGER` | `./data/ledger.db` | the SQLite file, everything lives here |
-| `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/openapi.yaml` and `/docs` |
+| `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/ready`, `/openapi.yaml` and `/docs` |
 | `POLL_INTERVAL_SECS` | `5` | how often a payment under five minutes old polls `verify` |
+| `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
+| `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
 | `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per wallet host, and the batch each tick takes |
 | `MAX_PENDING` | `5000` | pending rows before `POST /incoming-payments` answers 503 |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance waits before delivering a webhook it does not own |
@@ -118,6 +121,10 @@ standard's camelCase, and there is no authorization server.
 
 Every numeric variable is validated at boot. A nonsense value stops the process
 rather than being coerced.
+
+On `SIGTERM` or `SIGINT` the instance turns `/ready` down, stops taking sockets,
+waits out the tick in flight and closes the ledger, so a redeploy costs no
+in-flight work. A second signal exits at once.
 
 Joining a cluster is one step: start another instance with the same
 `CLUSTER_KEY`. There is no leader, no quorum and no writer to authorise.

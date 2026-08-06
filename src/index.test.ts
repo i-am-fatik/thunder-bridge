@@ -13,7 +13,7 @@ import {
 	REQUEST_IN_FLIGHT,
 } from "./problem.ts";
 import type { Store } from "./store.ts";
-import { CLUSTER_KEY, openStore } from "./testing.ts";
+import { CLUSTER_KEY, openStore, until } from "./testing.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
 
 const MSAT_21K = { value: "21000", asset_code: "BTC", asset_scale: 11 };
@@ -22,10 +22,18 @@ const PAYMENT_HASH = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d
 
 type App = { service: Service; store: Store; stop: () => void };
 
-async function running(token: string | null = null): Promise<App> {
+async function running(token: string | null = null, drainTimeoutMs = 10_000): Promise<App> {
 	const opened = openStore();
 	const service = await start(
-		{ port: 0, eagerDelayMs: 3000, pollsPerSecond: 5, token, key: CLUSTER_KEY },
+		{
+			port: 0,
+			eagerDelayMs: 3000,
+			pollsPerSecond: 5,
+			tickStallMs: 30_000,
+			drainTimeoutMs,
+			token,
+			key: CLUSTER_KEY,
+		},
 		opened.store,
 	);
 
@@ -803,6 +811,51 @@ test("a trigger that is not the hash of anything is refused before a wallet is c
 });
 
 type Problem = Record<string, unknown>;
+
+test("readiness says only that it is ready until a bearer proves the instance is yours", async () => {
+	const shared = await running();
+	const bare = await fetch(`http://127.0.0.1:${shared.service.port}/ready`);
+	expect(bare.status).toBe(200);
+	expect(await bare.json()).toEqual({ status: "ready" });
+	shared.stop();
+
+	const mine = await running("secret-token");
+	const told = await fetch(`http://127.0.0.1:${mine.service.port}/ready`, {
+		headers: { authorization: "Bearer secret-token" },
+	});
+	expect(await told.json()).toMatchObject({
+		status: "ready",
+		peers: 0,
+		pending: 0,
+		max_pending: 5000,
+		watching: "scheduled",
+	});
+	mine.stop();
+});
+
+test("a draining instance turns readiness down and waits for the tick in flight", async () => {
+	const real = globalThis.fetch;
+	let asked = 0;
+	globalThis.fetch = (() => {
+		asked += 1;
+		return new Promise((answer) => setTimeout(() => answer(Response.json({ settled: false })), 400));
+	}) as typeof fetch;
+
+	const app = await running(null, 3000);
+	try {
+		app.store.insert(pendingPayment());
+		await until(() => asked > 0, "the watcher to reach the wallet");
+
+		const stopping = app.service.stop();
+		const draining = await real(`http://127.0.0.1:${app.service.port}/ready`);
+		expect(draining.status).toBe(503);
+		expect(((await draining.json()) as Problem)["title"]).toBe("Service Unavailable");
+		await stopping;
+	} finally {
+		globalThis.fetch = real;
+		app.stop();
+	}
+});
 
 test("a body larger than this gateway reads is refused before anything parses it", async () => {
 	const app = await running();
