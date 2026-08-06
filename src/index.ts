@@ -60,7 +60,7 @@ const REPLAY_WINDOW = 500;
 const SETTLED_WINDOW = 1_000;
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 500;
-const MAX_BODY_BYTES = 64 * 1024;
+const MAX_REQUEST_BYTES = 64 * 1024;
 const BEARER = "Bearer ";
 const TICKET_TTL_SECS = 60;
 const UNGATED = new Set(["/health", "/ready", "/openapi.yaml", "/docs"]);
@@ -123,12 +123,12 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	let draining = false;
 	let firedAt = Date.now();
 	const vitals = (): Vitals => ({
-		stalled: Date.now() - firedAt > options.tickStallMs,
+		stalled: !draining && Date.now() - firedAt > options.tickStallMs,
 		draining,
 	});
 
 	const followers = new Map<WebSocket, Follower>();
-	const upgrades = new WebSocketServer({ noServer: true });
+	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_REQUEST_BYTES });
 	const server = createServer((incoming, outgoing) => {
 		void respond(incoming, store, options.token, options.key, vitals()).then((answer) =>
 			reply(answer, outgoing),
@@ -583,7 +583,7 @@ function pathOf(incoming: IncomingMessage): string {
 }
 
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
-	if (Number(incoming.headers["content-length"] ?? 0) > MAX_BODY_BYTES) throw new BodyTooLarge();
+	if (Number(incoming.headers["content-length"] ?? 0) > MAX_REQUEST_BYTES) throw new BodyTooLarge();
 
 	const headers = new Headers();
 	for (const [name, value] of Object.entries(incoming.headers)) {
@@ -593,7 +593,7 @@ async function asRequest(incoming: IncomingMessage): Promise<Request> {
 	let bytes = 0;
 	for await (const chunk of incoming) {
 		bytes += (chunk as Buffer).length;
-		if (bytes > MAX_BODY_BYTES) throw new BodyTooLarge();
+		if (bytes > MAX_REQUEST_BYTES) throw new BodyTooLarge();
 		chunks.push(chunk as Buffer);
 	}
 
@@ -665,7 +665,7 @@ function oversized(error: unknown): Response {
 	return problem(413, {
 		type: INVALID_REQUEST,
 		title: "The request body is larger than this gateway will read",
-		detail: `the ceiling is ${MAX_BODY_BYTES} bytes, far above any request this API defines`,
+		detail: `the ceiling is ${MAX_REQUEST_BYTES} bytes, far above any request this API defines`,
 	});
 }
 

@@ -1,11 +1,14 @@
 import { lookup } from "node:dns/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 
-import { publicAddress, publicHttps } from "./url.ts";
+import { publicAddress, publicHttps, sameOrigin } from "./url.ts";
 
 const HTTP_TIMEOUT_MS = 15_000;
+const LOOKUP_TIMEOUT_MS = 5_000;
 const HOPS_FOLLOWED = 2;
 const REDIRECTS = [301, 302, 303, 307, 308];
 const KEEPS_THE_METHOD = [307, 308];
+const ONLY_FOR_THE_FIRST_ORIGIN = ["authorization", "cookie", "proxy-authorization"];
 
 export const BODY_LIMIT_BYTES = 262_144;
 
@@ -35,8 +38,16 @@ export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
 		});
 		if (!REDIRECTS.includes(response.status)) return await answerOf(response);
 
-		target = new URL(response.headers.get("location") ?? "", target).toString();
+		const location = response.headers.get("location");
+		if (location === null) {
+			throw new Error(`${target} answered ${response.status} without saying where to`);
+		}
+		await response.body?.cancel();
+
+		const next = new URL(location, target).toString();
 		carried = KEEPS_THE_METHOD.includes(response.status) ? carried : withoutBody(carried);
+		carried = sameOrigin(target, next) ? carried : withoutCredentials(carried);
+		target = next;
 	}
 
 	throw new Error(`${url} redirected more than ${HOPS_FOLLOWED} times`);
@@ -44,9 +55,12 @@ export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
 
 export async function resolvesPublic(url: string): Promise<boolean> {
 	const host = new URL(url).hostname.replace(/^\[|]$/g, "");
-	const found = await lookup(host, { all: true, verbatim: true }).catch(() => []);
+	const found = await Promise.race([
+		lookup(host, { all: true, verbatim: true }).catch(() => []),
+		sleep(LOOKUP_TIMEOUT_MS, null, { ref: false }),
+	]);
 
-	return found.every((one) => publicAddress(one.address));
+	return found !== null && found.every((one) => publicAddress(one.address));
 }
 
 async function refuseUnlessPublic(url: string): Promise<void> {
@@ -76,6 +90,13 @@ function withoutBody(sent: Sent): Sent {
 	delete headers["content-type"];
 
 	return { method: "GET", headers, deadline: sent.deadline };
+}
+
+function withoutCredentials(sent: Sent): Sent {
+	const headers = { ...sent.headers };
+	for (const named of ONLY_FOR_THE_FIRST_ORIGIN) delete headers[named];
+
+	return { ...sent, headers };
 }
 
 function text(chunks: Uint8Array[]): string {

@@ -130,6 +130,45 @@ test("an empty answer is read without a body to read", async () => {
 	}
 });
 
+test("a redirect that does not say where to is refused rather than retried", async () => {
+	const { seen, restore } = answering(() => new Response(null, { status: 302 }));
+	try {
+		await expect(ask(ENTRY, { method: "POST", body: "{}" })).rejects.toThrow(/without saying where to/);
+		expect(seen).toEqual([ENTRY]);
+	} finally {
+		restore();
+	}
+});
+
+test("credentials do not travel to a second origin", async () => {
+	const sent: RequestInit[] = [];
+	const { restore } = answering((url, options) => {
+		sent.push(options);
+		return url === ENTRY ? redirect(ELSEWHERE, 307) : new Response("done");
+	});
+	try {
+		await ask(ENTRY, { method: "POST", headers: { authorization: "Bearer secret" }, body: "{}" });
+		expect(sent[0]?.headers).toEqual({ authorization: "Bearer secret" });
+		expect(sent[1]?.headers).toEqual({});
+	} finally {
+		restore();
+	}
+});
+
+test("credentials do travel to another path on the same origin", async () => {
+	const sent: RequestInit[] = [];
+	const { restore } = answering((url, options) => {
+		sent.push(options);
+		return url === ENTRY ? redirect("https://wallet.example/moved", 307) : new Response("done");
+	});
+	try {
+		await ask(ENTRY, { method: "POST", headers: { authorization: "Bearer secret" }, body: "{}" });
+		expect(sent[1]?.headers).toEqual({ authorization: "Bearer secret" });
+	} finally {
+		restore();
+	}
+});
+
 test("a name that resolves to a private address is not one we reach", async () => {
 	expect(await resolvesPublic("https://127.0.0.1/")).toBe(false);
 	expect(await resolvesPublic("https://[::1]/")).toBe(false);
