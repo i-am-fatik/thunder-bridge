@@ -181,6 +181,8 @@ paths:
           $ref: "#/components/responses/key_conflict"
         "410":
           $ref: "#/components/responses/replay_pruned"
+        "413":
+          $ref: "#/components/responses/body_too_large"
         "422":
           $ref: "#/components/responses/unprovable"
         "502":
@@ -283,6 +285,8 @@ paths:
           $ref: "#/components/responses/bad_request"
         "409":
           $ref: "#/components/responses/watch_taken"
+        "413":
+          $ref: "#/components/responses/body_too_large"
         "503":
           $ref: "#/components/responses/at_capacity"
 
@@ -335,6 +339,8 @@ paths:
           $ref: "#/components/responses/unauthorized"
         "404":
           description: No payment with that id, so the endpoint is not an id oracle.
+        "413":
+          $ref: "#/components/responses/body_too_large"
 
   /ws/tickets/{ticket}:
     parameters:
@@ -424,6 +430,8 @@ paths:
                 $ref: "#/components/schemas/quote"
         "400":
           $ref: "#/components/responses/bad_request"
+        "413":
+          $ref: "#/components/responses/body_too_large"
         "422":
           $ref: "#/components/responses/unprovable"
         "502":
@@ -849,6 +857,16 @@ components:
             oneOf:
               - $ref: "#/components/schemas/problem"
               - $ref: "#/components/schemas/no_wallet_available_problem"
+
+    body_too_large:
+      description: |
+        The request body is larger than this gateway will read. The ceiling is 65536 bytes,
+        far above the largest request this API defines, which is a watch carrying a full
+        4096-character `sealed` blob. Send less, and do not retry the same body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
 
     unprovable:
       description: |

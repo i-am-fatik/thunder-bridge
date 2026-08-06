@@ -16,6 +16,7 @@ import { quote, resolve, RESOLVE_TIMEOUT_MS } from "../core/lnurl.ts";
 import type { Payment } from "./payment.ts";
 import {
 	ALREADY_WATCHED,
+	BodyTooLarge,
 	INVALID_REQUEST,
 	KEY_REUSED,
 	MalformedRequest,
@@ -58,6 +59,7 @@ const REPLAY_WINDOW = 500;
 const SETTLED_WINDOW = 1_000;
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 500;
+const MAX_BODY_BYTES = 64 * 1024;
 const BEARER = "Bearer ";
 const TICKET_TTL_SECS = 60;
 const UNGATED = new Set(["/health", "/openapi.yaml", "/docs"]);
@@ -82,7 +84,6 @@ const DOCS = `<!doctype html>
 		<title>Thunder Bridge</title>
 	</head>
 	<body>
-		<noscript><a href="/openapi.yaml">the specification, unrendered</a></noscript>
 		<script id="api-reference" data-url="/openapi.yaml" data-configuration='{"withDefaultFonts":false}'></script>
 		<script src="${RENDERER}" integrity="${RENDERER_HASH}" crossorigin="anonymous"></script>
 	</body>
@@ -282,7 +283,8 @@ async function respond(
 	if (incoming.method === "OPTIONS") return new Response(null, { status: 204, headers: OPEN });
 
 	const answer =
-		refused(incoming, token) ?? (await route(incoming, store, token, key).catch(unhandled));
+		refused(incoming, token) ??
+		(await route(incoming, store, token, key).catch(oversized).catch(unhandled));
 	for (const [header, value] of Object.entries(OPEN)) answer.headers.set(header, value);
 
 	return answer;
@@ -530,12 +532,19 @@ function pathOf(incoming: IncomingMessage): string {
 }
 
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
+	if (Number(incoming.headers["content-length"] ?? 0) > MAX_BODY_BYTES) throw new BodyTooLarge();
+
 	const headers = new Headers();
 	for (const [name, value] of Object.entries(incoming.headers)) {
 		if (typeof value === "string") headers.set(name, value);
 	}
 	const chunks: Buffer[] = [];
-	for await (const chunk of incoming) chunks.push(chunk as Buffer);
+	let bytes = 0;
+	for await (const chunk of incoming) {
+		bytes += (chunk as Buffer).length;
+		if (bytes > MAX_BODY_BYTES) throw new BodyTooLarge();
+		chunks.push(chunk as Buffer);
+	}
 
 	return new Request(`http://${incoming.headers.host ?? "app"}${incoming.url ?? "/"}`, {
 		method: incoming.method,
@@ -597,6 +606,16 @@ function gone(detail: string): Response {
 
 function unavailable(detail: string): Response {
 	return problem(503, { title: "Service Unavailable", detail });
+}
+
+function oversized(error: unknown): Response {
+	if (!(error instanceof BodyTooLarge)) throw error;
+
+	return problem(413, {
+		type: INVALID_REQUEST,
+		title: "The request body is larger than this gateway will read",
+		detail: `the ceiling is ${MAX_BODY_BYTES} bytes, far above any request this API defines`,
+	});
 }
 
 function unhandled(error: unknown): Response {

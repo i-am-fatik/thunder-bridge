@@ -804,6 +804,31 @@ test("a trigger that is not the hash of anything is refused before a wallet is c
 
 type Problem = Record<string, unknown>;
 
+test("a body larger than this gateway reads is refused before anything parses it", async () => {
+	const app = await running();
+	const tooMuch = "x".repeat(70_000);
+
+	const declared = await failing(app, `{"pad":"${tooMuch}"}`);
+	expect(declared.status).toBe(413);
+	expect(declared.contentType).toContain("application/problem+json");
+	expect(declared.problem["type"]).toBe(INVALID_REQUEST);
+
+	const streamed = await fetch(`http://127.0.0.1:${app.service.port}/incoming-payments`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode(tooMuch));
+				controller.close();
+			},
+		}),
+		duplex: "half",
+	} as RequestInit);
+	expect(streamed.status).toBe(413);
+
+	app.stop();
+});
+
 function post(app: App, body: unknown, key?: string): Promise<Response> {
 	const headers: Record<string, string> = { "content-type": "application/json" };
 	if (key) headers["idempotency-key"] = key;

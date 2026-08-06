@@ -23,6 +23,8 @@ const STATUS: Record<WalletReason, number> = {
 
 export class MalformedRequest extends Error {}
 
+export class BodyTooLarge extends Error {}
+
 export function statusForWallets(wallets: WalletFailure[]): number {
 	const codes = wallets.map((wallet) => STATUS[wallet.reason]);
 	if (codes.includes(502)) return 502;
