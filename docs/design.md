@@ -146,16 +146,32 @@ An expired invoice fires nothing. Anyone holding an invoice can register a
 webhook against it, so a hook that fired without a payment would make this
 service an outbound cannon aimed wherever they chose.
 
-## Why the work is not split
+## Why the work is not split, and why a copy waits
 
-Nobody hands out leases and nobody splits the pending set. Every instance polls
-every pending payment it holds.
+Nobody hands out leases and nobody splits the pending set. Every instance holds
+every pending payment it hears about, and the one that took the payment on polls
+it at once while everyone else stands by: a mirrored row is due after
+`TAKEOVER_AFTER_SECS` plus a stagger from a hash of the payment and the instance,
+which is the same shape the outbox already uses to take over a webhook.
 
-Splitting by a hash of the payment id looks cheaper and is not. A full pending
-set costs one instance 0.31 `verify` polls a second against a per-host budget of
-five, so a second instance doubling that spends twelve percent of the budget to
-remove the question entirely. What splitting saves is small enough to measure,
-and what it costs is a coordination problem.
+That is what keeps politeness flat. In the ordinary case the settlement arrives as
+a fact and the standby row is deleted before its turn ever comes, so a second
+instance costs the recipient's server nothing. When the owner dies, the copy comes
+due and polls, which is the whole point of holding it.
+
+Splitting by a hash of the payment id looks cheaper and is not. Ownership needs
+membership everyone agrees on, and without it the failure is not a duplicate poll
+but a payment nobody polls at all. Standing by buys the same saving from the other
+end and needs nobody to agree on anything.
+
+The cost is admitted: a payment whose owner dies is noticed up to one takeover
+window late rather than immediately. Against a three day horizon that is nothing,
+and against a wallet host asked the same question by every instance at once it is
+a bargain.
+
+The queue is a schedule, not a line. Every row carries the moment it is next due,
+and `claim` takes the most overdue first, so a payment created a second ago is not
+behind a worklist a peer handed over.
 
 A payment settles once per instance that saw the preimage, and every one of those
 records says the same thing, because a paid fact is the invoice, the payment hash

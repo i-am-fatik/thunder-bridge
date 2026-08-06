@@ -26,7 +26,7 @@ export class Store {
 			onAdd: (payment) => {
 				if (this.ledger.settlement(payment.id)) return;
 				if (this.full()) return;
-				this.onChange(this.ledger.remember(payment));
+				this.onChange(this.ledger.standby(payment));
 			},
 			onFacts: (facts) => {
 				for (const settled of this.ledger.absorb(facts)) {

@@ -206,7 +206,7 @@ export class Ledger {
 			all: this.db.prepare("SELECT payment FROM pending"),
 			count: this.db.prepare("SELECT count(*) AS rows FROM pending"),
 			remember: this.db.prepare(
-				"INSERT INTO pending (id, expiresAt, dueAt, payment) VALUES (?, ?, 0, ?) ON CONFLICT(id) DO UPDATE SET payment = excluded.payment",
+				"INSERT INTO pending (id, expiresAt, dueAt, payment) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET payment = excluded.payment",
 			),
 			forget: this.db.prepare("DELETE FROM pending WHERE id = ?"),
 			claim: this.db.prepare(
@@ -287,14 +287,31 @@ export class Ledger {
 	}
 
 	remember(payment: Payment): Payment {
+		return this.keep(payment, unixNow());
+	}
+
+	standby(payment: Payment): Payment {
+		return this.keep(payment, this.watchAfter(payment.id));
+	}
+
+	private keep(payment: Payment, dueAt: number): Payment {
 		const known = this.read(payment.id);
 		const merged = known
 			? { ...known, webhooks: mergedWebhooks(known.webhooks, payment.webhooks) }
 			: payment;
 
-		this.statements.remember.run(merged.id, merged.expiresAt, JSON.stringify(merged));
+		this.statements.remember.run(merged.id, merged.expiresAt, dueAt, JSON.stringify(merged));
 
 		return withStatus(merged);
+	}
+
+	private watchAfter(id: string): number {
+		const rank =
+			createHash("sha256").update(`${id}\x00${this.origin}`).digest().readUInt32BE(0) %
+			TAKEOVER_SPREAD;
+		const after = this.tuning.takeoverAfterSecs;
+
+		return unixNow() + after + Math.max(1, Math.round(after / TAKEOVER_SPREAD)) * rank;
 	}
 
 	forget(id: string): void {

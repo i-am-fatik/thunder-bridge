@@ -131,6 +131,37 @@ test("every instance takes on every pending payment, whoever created it", async 
 	}
 });
 
+test("a mirrored payment stands by, so the instance that took it on polls it first", async () => {
+	const cluster = await connected();
+	try {
+		const mine = cluster.first.insert(payment(0));
+		await until(() => cluster.second.get(mine.id) !== null, "the payment to gossip across");
+
+		expect(cluster.second.duePolls(10, 30)).toEqual([]);
+		expect(cluster.first.duePolls(10, 30).map((one) => one.id)).toEqual([mine.id]);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a payment of my own is polled at once, however much a peer handed over", async () => {
+	const cluster = await connected();
+	try {
+		const theirs: string[] = [];
+		for (let n = 0; n < 20; n += 1) theirs.push(cluster.first.insert(spread(n)).id);
+		await until(
+			() => theirs.every((one) => cluster.second.get(one) !== null),
+			"the worklist to gossip across",
+		);
+
+		const mine = cluster.second.insert(payment(0));
+
+		expect(cluster.second.duePolls(5, 30).map((one) => one.id)).toEqual([mine.id]);
+	} finally {
+		cluster.stop();
+	}
+});
+
 test("the instance that settled the payment is the one that owes its webhook", async () => {
 	const cluster = await connected();
 	try {
