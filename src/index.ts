@@ -86,6 +86,7 @@ const DOCS = `<!doctype html>
 	<body>
 		<script id="api-reference" data-url="/openapi.yaml" data-configuration='{"withDefaultFonts":false}'></script>
 		<script src="${RENDERER}" integrity="${RENDERER_HASH}" crossorigin="anonymous"></script>
+		<main><a href="/openapi.yaml">this specification, unrendered</a></main>
 	</body>
 </html>
 `;

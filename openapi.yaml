@@ -85,12 +85,20 @@ paths:
       operationId: getDocs
       summary: The specification, rendered for reading
       description: |
-        An HTML page that loads `/openapi.yaml` and renders it. The renderer comes from a
-        CDN, so this page needs the public internet while the specification underneath it
-        does not.
+        An HTML page that loads `/openapi.yaml` and renders it. The renderer is pinned to
+        one immutable version and checked against a subresource-integrity hash, and the page
+        carries a Content-Security-Policy that allows a script only from
+        `https://cdn.jsdelivr.net` and a connection only back to this origin, so neither
+        telemetry nor a proxied test request reaches a third party. When the CDN cannot be
+        reached the page still names `/openapi.yaml`, which this instance serves itself.
       responses:
         "200":
           description: The rendered reference.
+          headers:
+            content-security-policy:
+              description: Holds the page to the pinned renderer and to this origin.
+              schema:
+                type: string
           content:
             text/html:
               schema:
