@@ -60,16 +60,17 @@ const REPLAY_WINDOW = 500;
 const SETTLED_WINDOW = 1_000;
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 500;
-const MAX_REQUEST_BYTES = 64 * 1024;
+const MAX_INBOUND_BYTES = 64 * 1024;
 const BEARER = "Bearer ";
 const TICKET_TTL_SECS = 60;
 const UNGATED = new Set(["/health", "/ready", "/openapi.yaml", "/docs"]);
 const STALLED = "the watch loop has stopped being scheduled, so this instance needs replacing";
 const LEAVING = "this instance is shutting down and is not taking new work";
+const AT_CAPACITY = "this instance is watching as many payments as it can";
 const SPEC = readFileSync(new URL("../openapi.yaml", import.meta.url), "utf8");
 const RENDERER = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.64.0/dist/browser/standalone.js";
 const RENDERER_HASH = "sha384-ei8P62VHbV+6AdLO3hN333PsTEYp6k9OAVhlYvpmer+zdPIf8jSbdgh9ojiLWX3T";
-const RENDERER_ORIGIN = "https://cdn.jsdelivr.net";
+const RENDERER_ORIGIN = new URL(RENDERER).origin;
 const DOCS_POLICY = [
 	"default-src 'none'",
 	`script-src ${RENDERER_ORIGIN} 'unsafe-inline'`,
@@ -111,7 +112,7 @@ export type Service = {
 	stop: () => Promise<void>;
 };
 
-type Vitals = { stalled: boolean; draining: boolean };
+type Vitals = "serving" | "stalled" | "draining";
 
 export async function start(options: Options, store: Store): Promise<Service> {
 	const watcher: Watcher = {
@@ -122,13 +123,11 @@ export async function start(options: Options, store: Store): Promise<Service> {
 
 	let draining = false;
 	let firedAt = Date.now();
-	const vitals = (): Vitals => ({
-		stalled: !draining && Date.now() - firedAt > options.tickStallMs,
-		draining,
-	});
+	const vitals = (): Vitals =>
+		draining ? "draining" : Date.now() - firedAt > options.tickStallMs ? "stalled" : "serving";
 
 	const followers = new Map<WebSocket, Follower>();
-	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_REQUEST_BYTES });
+	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
 		void respond(incoming, store, options.token, options.key, vitals()).then((answer) =>
 			reply(answer, outgoing),
@@ -337,29 +336,31 @@ function refuseUpgrade(socket: Duplex, status = "401 Unauthorized"): void {
 }
 
 function readiness(
-	vitals: Vitals,
-	store: Store,
 	incoming: IncomingMessage,
+	store: Store,
 	token: string | null,
+	vitals: Vitals,
 ): Response {
-	if (vitals.draining) return unavailable(LEAVING);
-	if (token === null || !bearerMatches(incoming, token)) return json({ status: "ready" });
+	if (vitals === "draining") return unavailable(LEAVING);
 
-	const { origin, peers, pending, maxPending, convergedAt, origins, marks, rows } = store.info();
+	const trusted = token !== null && bearerMatches(incoming, token);
+	if (!trusted) return json({ status: "ready" });
+
+	const info = store.info();
 
 	return json({
 		status: "ready",
-		origin,
-		peers,
-		pending,
-		max_pending: maxPending,
-		watching: vitals.stalled ? "stalled" : "scheduled",
+		origin: info.origin,
+		peers: info.peers,
+		pending: info.pending,
+		max_pending: info.maxPending,
+		watching: vitals === "stalled" ? "stalled" : "scheduled",
 		sync: {
-			state: convergedAt !== null ? "converged" : peers > 0 ? "catching-up" : "alone",
-			converged_at: convergedAt,
-			origins,
-			marks,
-			rows,
+			state: info.convergedAt !== null ? "converged" : info.peers > 0 ? "catching-up" : "alone",
+			converged_at: info.convergedAt,
+			origins: info.origins,
+			marks: info.marks,
+			rows: info.rows,
 		},
 	});
 }
@@ -377,9 +378,9 @@ async function route(
 	vitals: Vitals,
 ): Promise<Response> {
 	const path = pathOf(incoming);
-	if (path === "/health") return vitals.stalled ? unavailable(STALLED) : new Response("OK");
-	if (path === "/ready") return readiness(vitals, store, incoming, token);
-	if (path === "/openapi.yaml") return served(SPEC, "application/yaml");
+	if (path === "/health") return vitals === "stalled" ? unavailable(STALLED) : new Response("OK");
+	if (path === "/ready") return readiness(incoming, store, token, vitals);
+	if (path === "/openapi.yaml") return spec();
 	if (path === "/docs") return rendered();
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
@@ -415,7 +416,7 @@ async function create(request: Request, store: Store): Promise<Response> {
 	}
 
 	if (store.full()) {
-		return unavailable("this instance is watching as many payments as it can");
+		return unavailable(AT_CAPACITY);
 	}
 
 	const key = request.headers.get("idempotency-key");
@@ -527,7 +528,7 @@ async function watchOnly(request: Request, store: Store, key: Uint8Array): Promi
 	}
 
 	if (store.full()) {
-		return unavailable("this instance is watching as many payments as it can");
+		return unavailable(AT_CAPACITY);
 	}
 	const now = unixNow();
 	if (asked.expiresAt <= now) {
@@ -590,7 +591,7 @@ function pathOf(incoming: IncomingMessage): string {
 }
 
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
-	if (Number(incoming.headers["content-length"] ?? 0) > MAX_REQUEST_BYTES) throw new BodyTooLarge();
+	if (Number(incoming.headers["content-length"] ?? 0) > MAX_INBOUND_BYTES) throw new BodyTooLarge();
 
 	const headers = new Headers();
 	for (const [name, value] of Object.entries(incoming.headers)) {
@@ -600,7 +601,7 @@ async function asRequest(incoming: IncomingMessage): Promise<Request> {
 	let bytes = 0;
 	for await (const chunk of incoming) {
 		bytes += (chunk as Buffer).length;
-		if (bytes > MAX_REQUEST_BYTES) throw new BodyTooLarge();
+		if (bytes > MAX_INBOUND_BYTES) throw new BodyTooLarge();
 		chunks.push(chunk as Buffer);
 	}
 
@@ -617,8 +618,8 @@ function unreadable(error: unknown): Response {
 	throw error;
 }
 
-function served(body: string, type: string): Response {
-	return new Response(body, { headers: { "content-type": type } });
+function spec(): Response {
+	return new Response(SPEC, { headers: { "content-type": "application/yaml" } });
 }
 
 function rendered(): Response {
@@ -672,7 +673,7 @@ function oversized(error: unknown): Response {
 	return problem(413, {
 		type: INVALID_REQUEST,
 		title: "The request body is larger than this gateway will read",
-		detail: `the ceiling is ${MAX_REQUEST_BYTES} bytes, far above any request this API defines`,
+		detail: `the ceiling is ${MAX_INBOUND_BYTES} bytes, far above any request this API defines`,
 	});
 }
 

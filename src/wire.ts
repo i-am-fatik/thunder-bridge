@@ -175,13 +175,14 @@ function readAddresses(value: unknown): string[] {
 	if (!listed || value.length === 0) {
 		throw new MalformedRequest("ln_addresses must be a non-empty list of lightning addresses");
 	}
-	if (value.length > MAX_ADDRESSES) {
+	const addresses = value as string[];
+	if (addresses.length > MAX_ADDRESSES) {
 		throw new MalformedRequest(`ln_addresses takes at most ${MAX_ADDRESSES} addresses`);
 	}
-	if (value.some((one: string) => one.length > MAX_ADDRESS_CHARS)) {
+	if (addresses.some((one) => one.length > MAX_ADDRESS_CHARS)) {
 		throw new MalformedRequest(`a lightning address is at most ${MAX_ADDRESS_CHARS} characters`);
 	}
-	return value as string[];
+	return addresses;
 }
 
 function readAmount(value: unknown, field: string): number {

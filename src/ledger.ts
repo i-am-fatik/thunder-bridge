@@ -185,6 +185,10 @@ const COLUMNS: Record<Source, string> = {
 
 type Row = { payment: string };
 
+type AcceptedRow = Row & { id: string };
+
+type Missing = { id: string; url: string; secret: string | null };
+
 type Held = { fingerprint: string; paymentId: string | null; leaseUntil: number };
 
 type Statements = {
@@ -193,10 +197,10 @@ type Statements = {
 	count: StatementSync;
 	paymentsByIds: StatementSync;
 	listing: StatementSync;
-	rows: Record<Source, StatementSync>;
+	factCounts: Record<Source, StatementSync>;
 	insertAccepted: StatementSync;
-	schedule: StatementSync;
-	remember: StatementSync;
+	insertSchedule: StatementSync;
+	rememberForRollback: StatementSync;
 	forget: StatementSync;
 	forgetForRollback: StatementSync;
 	claim: StatementSync;
@@ -208,7 +212,6 @@ type Statements = {
 	pruneAccepted: StatementSync;
 	pruneSettled: StatementSync;
 	unowed: StatementSync;
-	owedUrls: StatementSync;
 	settlement: StatementSync;
 	recentlyPaid: StatementSync;
 	insertPaid: StatementSync;
@@ -255,7 +258,7 @@ export class Ledger {
 		).value;
 
 		this.statements = {
-			read: this.db.prepare("SELECT payment FROM accepted WHERE id = ? ORDER BY origin, seq"),
+			read: this.db.prepare("SELECT id, payment FROM accepted WHERE id = ? ORDER BY origin, seq"),
 			all: this.db.prepare(
 				"SELECT accepted.id AS id, accepted.payment AS payment FROM accepted JOIN schedule ON schedule.id = accepted.id ORDER BY accepted.id, accepted.origin, accepted.seq",
 			),
@@ -264,16 +267,16 @@ export class Ledger {
 				"SELECT id, payment FROM accepted WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id, origin, seq",
 			),
 			listing: this.db.prepare(
-				"SELECT payment FROM accepted WHERE id IN (SELECT id FROM schedule) GROUP BY id ORDER BY acceptedAt DESC LIMIT ?",
+				"SELECT accepted.id AS id FROM accepted JOIN schedule ON schedule.id = accepted.id GROUP BY accepted.id ORDER BY max(accepted.acceptedAt) DESC LIMIT ?",
 			),
-			rows: bySource((source) => this.db.prepare(`SELECT count(*) AS rows FROM ${source}`)),
+			factCounts: bySource((source) => this.db.prepare(`SELECT count(*) AS n FROM ${source}`)),
 			insertAccepted: this.db.prepare(
 				"INSERT INTO accepted (origin, seq, id, payment, acceptedAt, expiresAt, mac) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
 			),
-			schedule: this.db.prepare(
+			insertSchedule: this.db.prepare(
 				"INSERT INTO schedule (id, expiresAt, dueAt) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING",
 			),
-			remember: this.db.prepare(
+			rememberForRollback: this.db.prepare(
 				"INSERT INTO pending (id, expiresAt, dueAt, payment) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET payment = excluded.payment",
 			),
 			forget: this.db.prepare("DELETE FROM schedule WHERE id = ?"),
@@ -288,7 +291,9 @@ export class Ledger {
 			pruneForRollback: this.db.prepare("DELETE FROM pending WHERE expiresAt <= ?"),
 			pruneAccepted: this.db.prepare("DELETE FROM accepted WHERE expiresAt <= ?"),
 			unowed: this.db.prepare(`
-				SELECT DISTINCT accepted.id AS id
+				SELECT DISTINCT accepted.id AS id,
+					json_extract(hook.value, '$.url') AS url,
+					json_extract(hook.value, '$.secret') AS secret
 				FROM accepted
 				JOIN paid ON paid.id = accepted.id
 				JOIN json_each(accepted.payment, '$.webhooks') AS hook
@@ -300,9 +305,6 @@ export class Ledger {
 					WHERE delivered.id = accepted.id AND delivered.url = json_extract(hook.value, '$.url')
 				)
 			`),
-			owedUrls: this.db.prepare(
-				"SELECT url FROM outbox WHERE id = ? UNION SELECT url FROM delivered WHERE id = ?",
-			),
 			pruneSettled: this.db.prepare(
 				"DELETE FROM accepted WHERE id IN (SELECT id FROM paid WHERE settledAt <= ?)",
 			),
@@ -372,31 +374,21 @@ export class Ledger {
 	}
 
 	read(id: string): Payment | null {
-		const rows = (this.statements.read.all(id) as Row[]).map(revive);
-
-		return rows.length === 0 ? null : withStatus(oneFromEvery(rows));
+		return groupById(this.statements.read.all(id) as AcceptedRow[])[0] ?? null;
 	}
 
 	all(): Payment[] {
-		return groupById(this.statements.all.all() as (Row & { id: string })[]);
+		return groupById(this.statements.all.all() as AcceptedRow[]);
 	}
 
-	rows(): Record<Source, number> {
-		return bySource(
-			(source) => (this.statements.rows[source].get() as { rows: number }).rows,
-		);
+	count(): number {
+		return (this.statements.count.get() as { rows: number }).rows;
 	}
 
 	private paymentsFor(ids: string[]): Payment[] {
 		if (ids.length === 0) return [];
 
-		return groupById(this.statements.paymentsByIds.all(JSON.stringify(ids)) as (Row & {
-			id: string;
-		})[]);
-	}
-
-	count(): number {
-		return (this.statements.count.get() as { rows: number }).rows;
+		return groupById(this.statements.paymentsByIds.all(JSON.stringify(ids)) as AcceptedRow[]);
 	}
 
 	accept(payment: Payment): Taken {
@@ -411,47 +403,43 @@ export class Ledger {
 		return this.transact(() => {
 			const held = this.read(payment.id);
 			const webhooks = held ? mergedWebhooks(held.webhooks, payment.webhooks) : payment.webhooks;
+			const told = { ...payment, webhooks };
+			const taken = { ...(held ?? payment), webhooks };
 			const fresh =
-				!held || webhooks.length > held.webhooks.length
-					? this.acceptedFact({ ...payment, webhooks })
-					: null;
+				!held || webhooks.length > held.webhooks.length ? this.acceptedFact(told) : null;
 			if (fresh) this.recordAccepted(fresh);
 
-			this.scheduleWatch(payment.id, payment.expiresAt, dueAt);
-			this.statements.remember.run(payment.id, payment.expiresAt, dueAt, JSON.stringify(payment));
+			this.scheduleWatch(taken.id, taken.expiresAt, dueAt);
+			this.statements.rememberForRollback.run(
+				taken.id,
+				taken.expiresAt,
+				dueAt,
+				JSON.stringify(taken),
+			);
 
-			return {
-				payment: withStatus({ ...(held ?? payment), webhooks }),
-				facts: fresh ? { accepted: [fresh] } : {},
-			};
+			return { payment: withStatus(taken), facts: fresh ? { accepted: [fresh] } : {} };
 		});
 	}
 
 	private acceptedFact(payment: Payment): AcceptedFact {
 		const record = JSON.stringify(payment);
 		const now = unixNow();
+		const seq = this.nextSeq("accepted");
 
-		return this.mine("accepted", (seq) => ({
+		return {
 			origin: this.origin,
 			seq,
 			id: payment.id,
 			payment: record,
 			acceptedAt: now,
 			expiresAt: payment.expiresAt,
-			mac: this.sign("accepted", [
-				this.origin,
-				seq,
-				payment.id,
-				record,
-				now,
-				payment.expiresAt,
-			]),
-		}));
+			mac: this.sign("accepted", [this.origin, seq, payment.id, record, now, payment.expiresAt]),
+		};
 	}
 
 	private scheduleWatch(id: string, expiresAt: number, dueAt: number): void {
 		if (this.settlement(id)) return;
-		this.statements.schedule.run(id, expiresAt, dueAt);
+		this.statements.insertSchedule.run(id, expiresAt, dueAt);
 	}
 
 	private watchAfter(id: string): number {
@@ -497,10 +485,8 @@ export class Ledger {
 	}
 
 	list(limit: number, window: number): PublicPayment[] {
-		const waiting = (this.statements.listing.all(limit) as Row[])
-			.map(revive)
-			.map(withStatus)
-			.map(withoutSecrets);
+		const listed = (this.statements.listing.all(limit) as { id: string }[]).map((one) => one.id);
+		const waiting = this.paymentsFor(listed).map(withoutSecrets);
 		const newestFirst = [...waiting, ...this.recentlySettled(window)].sort(
 			(one, other) => other.createdAt - one.createdAt,
 		);
@@ -521,35 +507,19 @@ export class Ledger {
 		const now = unixNow();
 
 		return this.transact(() => {
-			const paid = this.mine("paid", (seq) => ({
+			const seq = this.nextSeq("paid");
+			const paid = {
 				origin: this.origin,
 				seq,
 				id: settled.id,
 				payment: record,
 				settledAt: now,
 				mac: this.sign("paid", [this.origin, seq, settled.id, record, now]),
-			}));
+			};
 			this.recordPaid(paid);
 
 			const outbox = pending.webhooks.map((hook) => {
-				const fact = this.mine("outbox", (seq) => ({
-					origin: this.origin,
-					seq,
-					id: settled.id,
-					url: hook.url,
-					secret: hook.secret,
-					body,
-					owedAt: now,
-					mac: this.sign("outbox", [
-						this.origin,
-						seq,
-						settled.id,
-						hook.url,
-						hook.secret,
-						body,
-						now,
-					]),
-				}));
+				const fact = this.owedFact(settled.id, hook, body, now);
 				this.recordOutbox(fact, 0);
 				return fact;
 			});
@@ -558,7 +528,7 @@ export class Ledger {
 
 			return {
 				settled: withoutSecrets(settled),
-				facts: { paid: [paid], outbox, delivered: [] },
+				facts: { paid: [paid], outbox },
 			};
 		});
 	}
@@ -571,17 +541,18 @@ export class Ledger {
 	delivered(owed: Delivery): Facts {
 		const now = unixNow();
 		return this.transact(() => {
-			const fact = this.mine("delivered", (seq) => ({
+			const seq = this.nextSeq("delivered");
+			const fact = {
 				origin: this.origin,
 				seq,
 				id: owed.id,
 				url: owed.url,
 				deliveredAt: now,
 				mac: this.sign("delivered", [this.origin, seq, owed.id, owed.url, now]),
-			}));
+			};
 			this.recordDelivered(fact);
 
-			return { paid: [], outbox: [], delivered: [fact] };
+			return { delivered: [fact] };
 		});
 	}
 
@@ -616,6 +587,10 @@ export class Ledger {
 
 	releaseKey(key: string): void {
 		this.statements.releaseRequest.run(key);
+	}
+
+	factCounts(): Record<Source, number> {
+		return bySource((source) => (this.statements.factCounts[source].get() as { n: number }).n);
 	}
 
 	watermarks(): Watermarks {
@@ -716,38 +691,32 @@ export class Ledger {
 		this.statements.pruneDelivered.run(now - graceSecs);
 		this.statements.pruneRequests.run(now - REQUEST_TTL_SECS);
 
-		for (const { id } of this.statements.unowed.all() as { id: string }[]) this.oweMissing(id);
+		for (const missing of this.statements.unowed.all() as Missing[]) this.owe(missing);
 
 		return expired;
 	}
 
-	private oweMissing(id: string): void {
-		const settled = this.settlement(id);
-		const known = this.read(id);
-		if (!settled || !known) return;
+	private owe(missing: Missing): void {
+		const settled = this.settlement(missing.id);
+		if (!settled) return;
 
-		const owed = new Set(
-			(this.statements.owedUrls.all(id, id) as { url: string }[]).map((one) => one.url),
-		);
 		const body = JSON.stringify(paymentToWire(settled));
-		const now = unixNow();
+		this.recordOutbox(this.owedFact(missing.id, missing, body, unixNow()), 0);
+	}
 
-		for (const hook of known.webhooks) {
-			if (owed.has(hook.url)) continue;
-			this.recordOutbox(
-				this.mine("outbox", (seq) => ({
-					origin: this.origin,
-					seq,
-					id,
-					url: hook.url,
-					secret: hook.secret,
-					body,
-					owedAt: now,
-					mac: this.sign("outbox", [this.origin, seq, id, hook.url, hook.secret, body, now]),
-				})),
-				0,
-			);
-		}
+	private owedFact(id: string, hook: Webhook, body: string, owedAt: number): OutboxFact {
+		const seq = this.nextSeq("outbox");
+
+		return {
+			origin: this.origin,
+			seq,
+			id,
+			url: hook.url,
+			secret: hook.secret,
+			body,
+			owedAt,
+			mac: this.sign("outbox", [this.origin, seq, id, hook.url, hook.secret, body, owedAt]),
+		};
 	}
 
 	close(): void {
@@ -790,9 +759,8 @@ export class Ledger {
 		}
 	}
 
-	private mine<T>(source: Source, build: (seq: number) => T): T {
-		const { seq } = this.statements.nextSeq[source].get(this.origin) as { seq: number };
-		return build(seq);
+	private nextSeq(source: Source): number {
+		return (this.statements.nextSeq[source].get(this.origin) as { seq: number }).seq;
 	}
 
 	private recordAccepted(fact: AcceptedFact): void {
@@ -870,7 +838,7 @@ export class Ledger {
 		}
 	}
 
-	private provenAccepted(fact: AcceptedFact): Payment {
+	private provenAccepted(fact: AcceptedFact): void {
 		this.verify(
 			"accepted",
 			[fact.origin, fact.seq, fact.id, fact.payment, fact.acceptedAt, fact.expiresAt],
@@ -888,8 +856,6 @@ export class Ledger {
 		if (carried !== null && carried !== payment.paymentHash) {
 			throw new Error(`accepted fact ${fact.id} carries an invoice for another payment hash`);
 		}
-
-		return payment;
 	}
 
 	private provenPaid(fact: PaidFact): PublicPayment {
@@ -939,11 +905,11 @@ function proves(preimage: string | null, paymentHash: string): void {
 	}
 }
 
-function groupById(rows: (Row & { id: string })[]): Payment[] {
+function groupById(rows: AcceptedRow[]): Payment[] {
 	const held = new Map<string, Payment[]>();
 	for (const row of rows) held.set(row.id, [...(held.get(row.id) ?? []), revive(row)]);
 
-	return [...held.values()].map((accepted) => withStatus(oneFromEvery(accepted)));
+	return [...held.values()].map(oneFromEvery);
 }
 
 function oneFromEvery(accepted: Payment[]): Payment {

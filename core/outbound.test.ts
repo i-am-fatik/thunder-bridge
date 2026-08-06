@@ -1,10 +1,10 @@
 import { expect, test } from "vitest";
 
-import { ask, BODY_LIMIT_BYTES, resolvesPublic } from "./outbound.ts";
+import { ask, resolvesNothingPrivate } from "./outbound.ts";
 
-const ENTRY = "https://wallet.example/pay";
-const ELSEWHERE = "https://other.example/pay";
-const METADATA_SERVICE = "http://169.254.169.254/latest/meta-data/";
+const ENTRY = "https://93.184.216.34/pay";
+const ELSEWHERE = "https://198.51.100.7/pay";
+const READ_LIMIT = 262_144;
 
 function answering(answer: (url: string, sent: RequestInit) => Response): {
 	seen: string[];
@@ -24,23 +24,20 @@ function redirect(to: string, status = 302): Response {
 	return new Response(null, { status, headers: { location: to } });
 }
 
-test("a redirect towards the metadata service is refused and never followed", async () => {
-	const { seen, restore } = answering(() => redirect(METADATA_SERVICE));
-	try {
-		await expect(ask(ENTRY)).rejects.toThrow(/not a public https URL/);
-		expect(seen).toEqual([ENTRY]);
-	} finally {
-		restore();
-	}
-});
-
-test("a redirect towards a private address is refused even when it stays on https", async () => {
-	const { seen, restore } = answering(() => redirect("https://10.0.0.7/admin"));
-	try {
-		await expect(ask(ENTRY)).rejects.toThrow(/not a public https URL/);
-		expect(seen).toEqual([ENTRY]);
-	} finally {
-		restore();
+test("a redirect is refused and never followed when it leaves what we will reach", async () => {
+	for (const somewhere of [
+		"http://other.example/pay",
+		"https://10.0.0.7/admin",
+		"https://169.254.169.254/latest/meta-data/",
+		"https://[fd00::1]/admin",
+	]) {
+		const { seen, restore } = answering(() => redirect(somewhere));
+		try {
+			await expect(ask(ENTRY)).rejects.toThrow(/not a public https URL/);
+			expect(seen).toEqual([ENTRY]);
+		} finally {
+			restore();
+		}
 	}
 });
 
@@ -98,23 +95,33 @@ test("a redirect that keeps the method carries the body on", async () => {
 	}
 });
 
-test("an answer longer than we read comes back marked truncated", async () => {
-	const { restore } = answering(() => new Response("a".repeat(BODY_LIMIT_BYTES + 1)));
+test("a server that never stops talking is cut off, not read to the end", async () => {
+	const chunk = 65_536;
+	let pulled = 0;
+	const forever = new ReadableStream({
+		pull(stream) {
+			pulled += 1;
+			stream.enqueue(new Uint8Array(chunk).fill(97));
+		},
+	});
+	const { restore } = answering(() => new Response(forever));
 	try {
 		const answer = await ask(ENTRY);
+
 		expect(answer.truncated).toBe(true);
-		expect(answer.body.length).toBeLessThanOrEqual(BODY_LIMIT_BYTES + 1);
+		expect(pulled).toBeLessThanOrEqual(READ_LIMIT / chunk + 2);
+		expect(answer.body.length).toBeLessThanOrEqual(READ_LIMIT + chunk);
 	} finally {
 		restore();
 	}
 });
 
 test("an answer that fits is not marked truncated", async () => {
-	const { restore } = answering(() => new Response("a".repeat(BODY_LIMIT_BYTES)));
+	const { restore } = answering(() => new Response("a".repeat(READ_LIMIT)));
 	try {
 		const answer = await ask(ENTRY);
 		expect(answer.truncated).toBe(false);
-		expect(answer.body).toHaveLength(BODY_LIMIT_BYTES);
+		expect(answer.body).toHaveLength(READ_LIMIT);
 	} finally {
 		restore();
 	}
@@ -159,7 +166,7 @@ test("credentials do travel to another path on the same origin", async () => {
 	const sent: RequestInit[] = [];
 	const { restore } = answering((url, options) => {
 		sent.push(options);
-		return url === ENTRY ? redirect("https://wallet.example/moved", 307) : new Response("done");
+		return url === ENTRY ? redirect("https://93.184.216.34/moved", 307) : new Response("done");
 	});
 	try {
 		await ask(ENTRY, { method: "POST", headers: { authorization: "Bearer secret" }, body: "{}" });
@@ -170,11 +177,11 @@ test("credentials do travel to another path on the same origin", async () => {
 });
 
 test("a name that resolves to a private address is not one we reach", async () => {
-	expect(await resolvesPublic("https://127.0.0.1/")).toBe(false);
-	expect(await resolvesPublic("https://[::1]/")).toBe(false);
-	expect(await resolvesPublic("https://10.11.12.13/")).toBe(false);
+	expect(await resolvesNothingPrivate("https://127.0.0.1/")).toBe(false);
+	expect(await resolvesNothingPrivate("https://[::1]/")).toBe(false);
+	expect(await resolvesNothingPrivate("https://10.11.12.13/")).toBe(false);
 });
 
 test("a name nothing answers for is left to the connection to refuse", async () => {
-	expect(await resolvesPublic("https://nothing.example/")).toBe(true);
+	expect(await resolvesNothingPrivate("https://nothing.example/")).toBe(true);
 });

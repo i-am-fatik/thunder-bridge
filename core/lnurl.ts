@@ -1,5 +1,5 @@
 import { decodeInvoice, preimageMatchesHash } from "./bolt11.ts";
-import { ask, BODY_LIMIT_BYTES } from "./outbound.ts";
+import { ask } from "./outbound.ts";
 import { sha256Hex } from "./sha256.ts";
 import { publicHttps } from "./url.ts";
 import { NoWalletAvailable, WalletRefused, type WalletFailure } from "./refusal.ts";
@@ -285,7 +285,7 @@ async function fetchJson<T>(url: string, deadline?: AbortSignal): Promise<T> {
 	const answer = await ask(url, { headers: { accept: "application/json" }, deadline });
 	if (!answer.ok) throw new Error(`${url} answered ${answer.status}`);
 	if (answer.truncated) {
-		throw new Error(`${url} answered with more than the ${BODY_LIMIT_BYTES} bytes we read`);
+		throw new Error(`${url} answered with more than we will read`);
 	}
 
 	return JSON.parse(answer.body) as T;

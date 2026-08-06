@@ -49,7 +49,7 @@ export class Store {
 			},
 			onFacts: (facts) => {
 				for (const settled of this.ledger.absorb(facts)) {
-					this.onChange(withWebhooks(settled, null));
+					this.onChange(asPayment(settled));
 				}
 			},
 			onConverged: () => {
@@ -72,15 +72,15 @@ export class Store {
 			maxPending: this.maxPending,
 			convergedAt: this.convergedAt,
 			origins: origins.size,
-			marks: bySource(marks),
-			rows: this.ledger.rows(),
+			marks: sequenceTotals(marks),
+			rows: this.ledger.factCounts(),
 		};
 	}
 
 	insert(unsaved: UnsavedPayment): Payment {
 		const id = paymentId(this.key, unsaved.paymentHash);
 		const settled = this.ledger.settlement(id);
-		if (settled) return withWebhooks(settled, null);
+		if (settled) return asPayment(settled);
 
 		const taken = this.ledger.accept({ ...unsaved, id });
 		this.spread(taken.facts);
@@ -90,14 +90,14 @@ export class Store {
 	}
 
 	private spread(facts: Facts): void {
-		if ((facts.accepted ?? []).length > 0) announce(this.gossip, { facts, more: false });
+		if (facts.accepted) announce(this.gossip, { facts, more: false });
 	}
 
 	get(id: string): Payment | null {
 		const pending = this.ledger.read(id);
 		const settled = this.ledger.settlement(id);
 
-		return settled ? withWebhooks(settled, pending) : pending;
+		return settled ? asPayment(settled, pending) : pending;
 	}
 
 	paid(id: string, preimage: string): Settled {
@@ -105,15 +105,15 @@ export class Store {
 		const already = this.ledger.settlement(id);
 		if (already) {
 			this.ledger.forget(id);
-			return { payment: withWebhooks(already, pending), won: false };
+			return { payment: asPayment(already, pending), won: false };
 		}
 		if (!pending) throw new Error(`payment ${id} is not on the worklist`);
 
 		const { settled, facts } = this.ledger.settle(pending, preimage);
 		announce(this.gossip, { facts, more: false });
-		this.onChange(withWebhooks(settled, null));
+		this.onChange(asPayment(settled));
 
-		return { payment: withWebhooks(settled, pending), won: true };
+		return { payment: asPayment(settled, pending), won: true };
 	}
 
 	replay(trigger: string, limit: number, window: number): PublicPayment[] {
@@ -169,7 +169,7 @@ export class Store {
 	}
 }
 
-function bySource(marks: Watermarks): Record<Source, number> {
+function sequenceTotals(marks: Watermarks): Record<Source, number> {
 	const summed = SOURCES.map((source) => [
 		source,
 		Object.values(marks[source]).reduce((all, seq) => all + seq, 0),
@@ -178,6 +178,6 @@ function bySource(marks: Watermarks): Record<Source, number> {
 	return Object.fromEntries(summed) as Record<Source, number>;
 }
 
-function withWebhooks(settled: PublicPayment, pending: Payment | null): Payment {
+function asPayment(settled: PublicPayment, pending: Payment | null = null): Payment {
 	return { ...settled, webhooks: pending?.webhooks ?? [] };
 }

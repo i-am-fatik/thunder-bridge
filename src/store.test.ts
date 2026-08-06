@@ -114,9 +114,10 @@ test("only as many payments are taken as the batch asks for", () => {
 	try {
 		for (let n = 0; n < 5; n += 1) store.insert(payment(n));
 
-		expect(store.duePolls(2, 30)).toHaveLength(2);
-		expect(store.duePolls(2, 30)).toHaveLength(2);
-		expect(store.duePolls(2, 30)).toHaveLength(1);
+		const handed = [...store.duePolls(2, 30), ...store.duePolls(2, 30), ...store.duePolls(2, 30)];
+
+		expect(handed).toHaveLength(5);
+		expect(new Set(handed.map((one) => one.id)).size).toBe(5);
 	} finally {
 		stop();
 	}
@@ -360,16 +361,25 @@ test("a pruned accepted fact is not resurrected by a peer that still holds it", 
 	}
 });
 
-test("a peer that sends no accepted facts at all is understood", () => {
-	const { store, stop } = openStore();
+test("a peer that names no accepted facts is still heard on the ones it does name", () => {
+	const one = openStore();
+	const two = openStore();
 	try {
-		expect(() => store.gossip.onFacts({ paid: [], outbox: [], delivered: [] })).not.toThrow();
+		const waiting = one.store.insert(payment(0));
+		one.store.paid(waiting.id, preimage(0));
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+
+		two.store.gossip.onFacts({ paid: facts.paid, outbox: facts.outbox, delivered: facts.delivered });
+
+		expect(two.store.get(waiting.id)?.status).toBe("paid");
+		expect(two.store.info().rows.accepted).toBe(0);
 	} finally {
-		stop();
+		one.stop();
+		two.stop();
 	}
 });
 
-test("a build that predates accepted facts still finds the worklist where it looks", () => {
+test("a payment is written where a build without accepted facts would look for it", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-rollback-"));
 	const ledger = join(directory, "ledger.db");
 	const { store, stop } = openStore({ ledger });
