@@ -13,7 +13,8 @@ round trip. Node runs the TypeScript as written, so there is no bundler and no
 build step to keep working.
 
 The store is one SQLite file through `node:sqlite`, which means no database
-server to run, back up or authorise. Four tables carry the money path.
+server to run, back up or authorise. Four fact tables carry the money path, and one
+local table carries the clock.
 
 ## The store: facts, and one clock
 
@@ -297,7 +298,7 @@ idempotency key. The window in which both rails are payable shrinks from days to
 the minutes a payer spends deciding.
 
 **No cancel endpoint, and no order object.** Cancelling a watch would buy about
-130 saved polls per order and would cost a fourth fact type in the ledger, since
+130 saved polls per order and would cost another fact type in the ledger, since
 a cancellation has to replicate or one instance keeps polling what another
 abandoned. That is a lot of machinery for a rounding error. Revisit it only if
 open offers ever run into `MAX_PENDING`. An order object was tried on paper and

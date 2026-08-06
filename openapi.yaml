@@ -610,7 +610,7 @@ components:
       description: The payment's identifier, as returned by create.
       schema:
         type: string
-        format: uuid
+        pattern: "^[0-9a-f]{64}$"
 
     trigger_secret:
       name: secret
@@ -1043,7 +1043,8 @@ components:
 
     unauthorized:
       description: |
-        This gateway was started with `GATEWAY_TOKEN`, so every call but `/health` needs
+        This gateway was started with `GATEWAY_TOKEN`, so every call but `/health`,
+        `/ready`, `/openapi.yaml` and `/docs` needs
         `Authorization: Bearer <token>`, the WebSocket handshake included. A refused
         handshake is answered with this status and no upgrade.
 
@@ -1065,8 +1066,9 @@ components:
 
     at_capacity:
       description: |
-        This instance is already watching as many payments as its polling budget allows.
-        The condition is transient.
+        The cluster is already watching as many payments as `MAX_PENDING` allows. Every
+        instance holds every payment, so this is a ceiling on the cluster's worklist rather
+        than on one machine, and it clears as payments settle or expire.
       content:
         application/problem+json:
           schema:

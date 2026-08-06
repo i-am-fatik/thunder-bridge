@@ -92,9 +92,8 @@ restart. Delivery is at-least-once, so deduplicate on `id`. The shape and the
 signature scheme are under `webhooks` in the spec.
 
 Failures are RFC 9457 problem documents served as `application/problem+json`.
-Branch on `type`, never on prose. Two types are minted, `invalid-request` and
-`no-wallet-available`, and the spec enumerates what each refusal reason means and
-what to do about it.
+Branch on `type`, never on prose. Five types are minted, and the spec enumerates
+what each refusal reason means and what to do about it.
 
 The resource model follows Open Payments 1.3.3, pinned under
 [docs/standards/](docs/standards). Property names are snake_case rather than that
@@ -112,7 +111,7 @@ standard's camelCase, and there is no authorization server.
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
 | `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per wallet host, and the batch each tick takes |
-| `MAX_PENDING` | `5000` | payments the cluster watches before `POST /incoming-payments` answers 503, never a limit on what an instance knows |
+| `MAX_PENDING` | `5000` | payments the cluster watches before a create or a watch answers 503, never a limit on what an instance knows |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, six attempts then it parks |
 | `SWARM` | on | `0` turns off Hyperswarm DHT discovery |
@@ -123,8 +122,8 @@ Every numeric variable is validated at boot. A nonsense value stops the process
 rather than being coerced.
 
 On `SIGTERM` or `SIGINT` the instance turns `/ready` down, stops taking sockets,
-waits out the tick in flight and closes the ledger, so a redeploy costs no
-in-flight work. A second signal exits at once.
+waits out the tick in flight and closes the ledger, so nothing is dropped mid-poll
+and no webhook debt is lost. A second signal exits at once.
 
 Joining a cluster is one step: start another instance with the same
 `CLUSTER_KEY`. There is no leader, no quorum and no writer to authorise.
