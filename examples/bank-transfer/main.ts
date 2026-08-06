@@ -11,11 +11,11 @@ import {
   minorScaleOf,
   minorUnitsOf,
   msatFor,
-  type Payment,
   preimageMatchesHash,
   type Statement,
   ThunderBridge,
   type Ticker,
+  type TriggerEvent,
 } from "thunder-bridge";
 
 function randomSecret(): string {
@@ -170,10 +170,10 @@ async function serveContent(legs: string[]): Promise<Response> {
   return Response.json({ content: CONTENT, paid_leg: paid.id, preimage: paid.preimage });
 }
 
-async function paidLeg(legs: string[]): Promise<Payment | null> {
+async function paidLeg(legs: string[]): Promise<TriggerEvent | null> {
   for (const id of legs) {
-    const payment = await gateway.getPayment(id);
-    if (payment?.status === "paid") return payment;
+    const watched = await gateway.getWatched(id);
+    if (watched?.status === "paid") return watched;
   }
 
   return null;
