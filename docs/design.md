@@ -15,26 +15,35 @@ build step to keep working.
 The store is one SQLite file through `node:sqlite`, which means no database
 server to run, back up or authorise. Four tables carry the money path.
 
-## The store: work and facts
+## The store: facts, and one clock
 
-The difference between the four tables is whether a row is work to do or a fact
-that happened.
+Every row is either a fact that happened or this instance's own clock, and only
+the facts leave the machine.
 
-`pending` is work. It is local, mutable, and expired rows are deleted, so an
-invoice nobody pays leaves nothing behind. Each row carries a `dueAt`, so the
-queue is a single `UPDATE ... RETURNING` under a lease rather than a sleeping
-task per payment.
+A fact is immutable, carries the origin that minted it and that origin's own
+sequence number, and is stamped with an HMAC under the cluster key. There are
+four. `accepted` says this gateway took a payment on, and carries the invoice, the
+verify URL, the trigger and the webhooks. `paid` records a settlement, `outbox` a
+webhook owed, `delivered` the tombstone saying it landed. Facts are a grow-only
+set, so merging two instances is `INSERT OR IGNORE` and it does not matter what
+order rows arrive in or how many times.
 
-`paid`, `outbox` and `delivered` are facts. A fact is immutable, carries the
-origin that minted it and that origin's own sequence number, and is stamped with
-an HMAC under the cluster key. `paid` records a settlement, `outbox` a webhook
-owed, `delivered` the tombstone saying it landed. Facts are a grow-only set, so
-merging two instances is `INSERT OR IGNORE` and it does not matter what order
-rows arrive in or how many times.
+Taking a payment on is a fact for the same reason settling it is: it happened, at
+one instance, and no later event can make it not have happened. What is not a fact
+is the watching. `schedule` holds one row per payment being watched, with the
+moment it is next due, and that is local: a poll is an idempotent read of somebody
+else's server, so losing the clock costs one extra read and nothing else.
 
-That split is what makes replication trivial. Work is nobody else's business and
-facts cannot conflict, so there is nothing to reconcile and no merge policy to
-get wrong.
+The worklist is therefore not a table anybody replicates. It is a question asked
+of the facts: accepted, minus settled, minus expired. That is what makes
+replication trivial, and it is why nothing has to be reconciled and no merge
+policy can be got wrong. Two instances that accept the same invoice write two
+facts, and the reader unions their webhooks, because a union of grow-only sets
+does not care who went first.
+
+`pending` is still written, and nothing reads it. It is there so a rollback to the
+release before this one finds the worklist where it expects it. The release after
+this one drops it.
 
 ## The file says which build wrote it
 
@@ -114,13 +123,29 @@ Instances find each other on a Hyperswarm topic derived from the cluster key and
 open a `thunder-cluster` channel. The handshake proves the peer holds that key
 before anything is exchanged, and every fact carries its own HMAC on top.
 
-Pending payments are a best-effort push. Facts gap-sync: each side sends what it
-has as one number per origin per table, the other replies with everything above
-that mark, and it repeats until the batch comes back short. Because facts are
-immutable and self-verifying, catching up is just replaying rows nobody can
-forge, so a peer away for a week converges the same way as one that missed a
-second. A resync runs every thirty seconds regardless, so a dropped push heals
-without anyone noticing it was dropped.
+Everything replicates one way. Each side sends what it has as one number per origin
+per table, the other replies with everything above that mark, and it repeats until
+the batch comes back short. Because facts are immutable and self-verifying,
+catching up is just replaying rows nobody can forge, so a peer away for a week
+converges the same way as one that missed a second, and a redeploy onto an empty
+disk is only an instance whose marks are all zero. A resync runs every thirty
+seconds regardless, so nothing depends on a message having been delivered.
+
+An accepted fact proves itself the way a paid fact does. The HMAC has to check
+out, the payment id has to be the keyed hash of the payment hash, the fact and the
+payment it carries have to agree about when it expires, and an invoice that decodes
+has to decode to that same payment hash. A bank-rail watch carries no invoice, so
+there it rests on the key and the id binding alone.
+
+A short reply is also the only honest moment to say "I am in sync", because it
+means the peer held nothing above any of our marks. That is what `/ready` reports
+and it is why the report cannot be faked by counting messages.
+
+The old best-effort pending push and the whole-worklist handshake are still on the
+wire, and they are how an instance running the previous release still hears about a
+payment. A payment heard that way becomes an accepted fact here, so it reaches
+every other instance through the one mechanism. Both arms go away in the release
+that drops `pending`.
 
 The cluster key is the topic, the handshake and the write gate at once. That is
 why joining is one step and why there is no writer to authorise.

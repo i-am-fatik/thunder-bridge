@@ -1,6 +1,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
+import { decodeInvoice } from "../core/bolt11.ts";
+
 import {
 	withoutSecrets,
 	type Delivery,
@@ -31,6 +33,28 @@ const SCHEMA = `
 	);
 	CREATE INDEX IF NOT EXISTS pending_by_expiry ON pending (expiresAt);
 	CREATE INDEX IF NOT EXISTS pending_by_due ON pending (dueAt);
+
+	CREATE TABLE IF NOT EXISTS accepted (
+		origin TEXT NOT NULL,
+		seq INTEGER NOT NULL,
+		id TEXT NOT NULL,
+		payment TEXT NOT NULL,
+		acceptedAt INTEGER NOT NULL,
+		expiresAt INTEGER NOT NULL,
+		mac TEXT NOT NULL,
+		PRIMARY KEY (origin, seq)
+	);
+	CREATE INDEX IF NOT EXISTS accepted_by_id ON accepted (id);
+	CREATE INDEX IF NOT EXISTS accepted_by_expiry ON accepted (expiresAt);
+
+	CREATE TABLE IF NOT EXISTS schedule (
+		id TEXT PRIMARY KEY,
+		expiresAt INTEGER NOT NULL,
+		dueAt INTEGER,
+		announced INTEGER NOT NULL DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS schedule_by_expiry ON schedule (expiresAt);
+	CREATE INDEX IF NOT EXISTS schedule_by_due ON schedule (dueAt);
 
 	CREATE TABLE IF NOT EXISTS paid (
 		origin TEXT NOT NULL,
@@ -96,9 +120,19 @@ const TAKEOVER_SPREAD = 8;
 const REQUEST_TTL_SECS = 86_400;
 const GAP_BATCH = 500;
 
-export const SOURCES = ["paid", "outbox", "delivered"] as const;
+export const SOURCES = ["accepted", "paid", "outbox", "delivered"] as const;
 
 export type Source = (typeof SOURCES)[number];
+
+export type AcceptedFact = {
+	origin: string;
+	seq: number;
+	id: string;
+	payment: string;
+	acceptedAt: number;
+	expiresAt: number;
+	mac: string;
+};
 
 export type PaidFact = {
 	origin: string;
@@ -129,13 +163,19 @@ export type DeliveredFact = {
 	mac: string;
 };
 
-export type Facts = { paid: PaidFact[]; outbox: OutboxFact[]; delivered: DeliveredFact[] };
+export type Facts = {
+	accepted?: AcceptedFact[];
+	paid?: PaidFact[];
+	outbox?: OutboxFact[];
+	delivered?: DeliveredFact[];
+};
 
 export type Watermarks = Record<Source, Record<string, number>>;
 
 export type Tuning = { takeoverAfterSecs: number; deliveryBackoffSecs: number };
 
 const COLUMNS: Record<Source, string> = {
+	accepted: "origin, seq, id, payment, acceptedAt, expiresAt, mac",
 	paid: "origin, seq, id, payment, settledAt, mac",
 	outbox: "origin, seq, id, url, secret, body, owedAt, mac",
 	delivered: "origin, seq, id, url, deliveredAt, mac",
@@ -149,13 +189,19 @@ type Statements = {
 	read: StatementSync;
 	all: StatementSync;
 	count: StatementSync;
+	insertAccepted: StatementSync;
+	acceptedMine: StatementSync;
+	schedule: StatementSync;
 	remember: StatementSync;
 	forget: StatementSync;
+	forgetForRollback: StatementSync;
 	claim: StatementSync;
 	polled: StatementSync;
 	justExpired: StatementSync;
 	announce: StatementSync;
 	prune: StatementSync;
+	pruneForRollback: StatementSync;
+	pruneAccepted: StatementSync;
 	settlement: StatementSync;
 	recentlyPaid: StatementSync;
 	insertPaid: StatementSync;
@@ -202,22 +248,34 @@ export class Ledger {
 		).value;
 
 		this.statements = {
-			read: this.db.prepare("SELECT payment FROM pending WHERE id = ?"),
-			all: this.db.prepare("SELECT payment FROM pending"),
-			count: this.db.prepare("SELECT count(*) AS rows FROM pending"),
+			read: this.db.prepare("SELECT payment FROM accepted WHERE id = ? ORDER BY origin, seq"),
+			all: this.db.prepare(
+				"SELECT accepted.id AS id, accepted.payment AS payment FROM accepted JOIN schedule ON schedule.id = accepted.id ORDER BY accepted.id, accepted.origin, accepted.seq",
+			),
+			count: this.db.prepare("SELECT count(*) AS rows FROM schedule"),
+			insertAccepted: this.db.prepare(
+				"INSERT INTO accepted (origin, seq, id, payment, acceptedAt, expiresAt, mac) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
+			),
+			acceptedMine: this.db.prepare(
+				"SELECT payment FROM accepted WHERE origin = ? AND id = ? ORDER BY seq",
+			),
+			schedule: this.db.prepare(
+				"INSERT INTO schedule (id, expiresAt, dueAt) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING",
+			),
 			remember: this.db.prepare(
 				"INSERT INTO pending (id, expiresAt, dueAt, payment) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET payment = excluded.payment",
 			),
-			forget: this.db.prepare("DELETE FROM pending WHERE id = ?"),
+			forget: this.db.prepare("DELETE FROM schedule WHERE id = ?"),
+			forgetForRollback: this.db.prepare("DELETE FROM pending WHERE id = ?"),
 			claim: this.db.prepare(
-				"UPDATE pending SET dueAt = ? WHERE id IN (SELECT id FROM pending WHERE dueAt <= ? ORDER BY dueAt LIMIT ?) RETURNING payment",
+				"UPDATE schedule SET dueAt = ? WHERE id IN (SELECT id FROM schedule WHERE dueAt <= ? ORDER BY dueAt LIMIT ?) RETURNING id",
 			),
-			polled: this.db.prepare("UPDATE pending SET dueAt = ? WHERE id = ?"),
-			justExpired: this.db.prepare(
-				"SELECT payment FROM pending WHERE expiresAt <= ? AND announced = 0",
-			),
-			announce: this.db.prepare("UPDATE pending SET announced = 1 WHERE expiresAt <= ?"),
-			prune: this.db.prepare("DELETE FROM pending WHERE expiresAt <= ?"),
+			polled: this.db.prepare("UPDATE schedule SET dueAt = ? WHERE id = ?"),
+			justExpired: this.db.prepare("SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0"),
+			announce: this.db.prepare("UPDATE schedule SET announced = 1 WHERE expiresAt <= ?"),
+			prune: this.db.prepare("DELETE FROM schedule WHERE expiresAt <= ?"),
+			pruneForRollback: this.db.prepare("DELETE FROM pending WHERE expiresAt <= ?"),
+			pruneAccepted: this.db.prepare("DELETE FROM accepted WHERE expiresAt <= ?"),
 			settlement: this.db.prepare("SELECT payment FROM paid WHERE id = ? LIMIT 1"),
 			recentlyPaid: this.db.prepare(
 				"SELECT payment FROM paid ORDER BY settledAt DESC, seq DESC LIMIT ?",
@@ -271,38 +329,90 @@ export class Ledger {
 				),
 			),
 		};
+
+		this.adoptWorklistWrittenBeforeAccepted();
+	}
+
+	private adoptWorklistWrittenBeforeAccepted(): void {
+		const orphans = this.db
+			.prepare("SELECT payment, dueAt FROM pending WHERE id NOT IN (SELECT id FROM accepted)")
+			.all() as (Row & { dueAt: number | null })[];
+
+		for (const row of orphans) this.keep(revive(row), row.dueAt ?? unixNow());
 	}
 
 	read(id: string): Payment | null {
-		const row = this.statements.read.get(id) as Row | undefined;
-		return row ? revive(row) : null;
+		const rows = (this.statements.read.all(id) as Row[]).map(revive);
+
+		return rows.length === 0 ? null : withStatus(oneFromEvery(rows));
 	}
 
 	all(): Payment[] {
-		return (this.statements.all.all() as Row[]).map(revive);
+		const held = new Map<string, Payment[]>();
+		for (const row of this.statements.all.all() as (Row & { id: string })[]) {
+			held.set(row.id, [...(held.get(row.id) ?? []), revive(row)]);
+		}
+
+		return [...held.values()].map((accepted) => withStatus(oneFromEvery(accepted)));
 	}
 
 	count(): number {
 		return (this.statements.count.get() as { rows: number }).rows;
 	}
 
-	remember(payment: Payment): Payment {
+	accept(payment: Payment): Payment {
 		return this.keep(payment, unixNow());
 	}
 
-	standby(payment: Payment): Payment {
+	mirror(payment: Payment): Payment {
 		return this.keep(payment, this.watchAfter(payment.id));
 	}
 
 	private keep(payment: Payment, dueAt: number): Payment {
-		const known = this.read(payment.id);
-		const merged = known
-			? { ...known, webhooks: mergedWebhooks(known.webhooks, payment.webhooks) }
-			: payment;
+		return this.transact(() => {
+			const mine = (this.statements.acceptedMine.all(this.origin, payment.id) as Row[]).map(revive);
+			const held = mine.length === 0 ? null : oneFromEvery(mine);
+			const webhooks = held ? mergedWebhooks(held.webhooks, payment.webhooks) : payment.webhooks;
+			if (!held || webhooks.length > held.webhooks.length) {
+				this.recordAccepted(this.acceptedFact({ ...payment, webhooks }));
+			}
+			this.scheduleWatch(payment.id, payment.expiresAt, dueAt);
+			this.statements.remember.run(
+				payment.id,
+				payment.expiresAt,
+				dueAt,
+				JSON.stringify(payment),
+			);
 
-		this.statements.remember.run(merged.id, merged.expiresAt, dueAt, JSON.stringify(merged));
+			return this.read(payment.id) ?? withStatus(payment);
+		});
+	}
 
-		return withStatus(merged);
+	private acceptedFact(payment: Payment): AcceptedFact {
+		const record = JSON.stringify(payment);
+		const now = unixNow();
+
+		return this.mine("accepted", (seq) => ({
+			origin: this.origin,
+			seq,
+			id: payment.id,
+			payment: record,
+			acceptedAt: now,
+			expiresAt: payment.expiresAt,
+			mac: this.sign("accepted", [
+				this.origin,
+				seq,
+				payment.id,
+				record,
+				now,
+				payment.expiresAt,
+			]),
+		}));
+	}
+
+	private scheduleWatch(id: string, expiresAt: number, dueAt: number): void {
+		if (this.settlement(id)) return;
+		this.statements.schedule.run(id, expiresAt, dueAt);
 	}
 
 	private watchAfter(id: string): number {
@@ -316,11 +426,14 @@ export class Ledger {
 
 	forget(id: string): void {
 		this.statements.forget.run(id);
+		this.statements.forgetForRollback.run(id);
 	}
 
 	claim(limit: number, leaseSecs: number): Payment[] {
 		const now = unixNow();
-		return (this.statements.claim.all(now + leaseSecs, now, limit) as Row[]).map(revive);
+		const due = this.statements.claim.all(now + leaseSecs, now, limit) as { id: string }[];
+
+		return due.flatMap((one) => this.read(one.id) ?? []);
 	}
 
 	polled(id: string, dueAt: number | null): void {
@@ -494,6 +607,7 @@ export class Ledger {
 
 		return {
 			facts: {
+				accepted: gap<AcceptedFact>("accepted"),
 				paid: gap<PaidFact>("paid"),
 				outbox: gap<OutboxFact>("outbox"),
 				delivered: gap<DeliveredFact>("delivered"),
@@ -506,7 +620,14 @@ export class Ledger {
 		return this.transact(() => {
 			const settled: PublicPayment[] = [];
 
-			for (const fact of inSeqOrder(facts.paid)) {
+			for (const fact of inSeqOrder(facts.accepted ?? [])) {
+				if (this.known("accepted", fact)) continue;
+				this.provenAccepted(fact);
+				this.recordAccepted(fact);
+				this.scheduleWatch(fact.id, fact.expiresAt, this.watchAfter(fact.id));
+			}
+
+			for (const fact of inSeqOrder(facts.paid ?? [])) {
 				if (this.known("paid", fact)) continue;
 				const payment = this.provenPaid(fact);
 				this.recordPaid(fact);
@@ -514,7 +635,7 @@ export class Ledger {
 				settled.push(payment);
 			}
 
-			for (const fact of inSeqOrder(facts.outbox)) {
+			for (const fact of inSeqOrder(facts.outbox ?? [])) {
 				if (this.known("outbox", fact)) continue;
 				this.verify(
 					"outbox",
@@ -524,7 +645,7 @@ export class Ledger {
 				this.recordOutbox(fact, this.takeoverAt(fact));
 			}
 
-			for (const fact of inSeqOrder(facts.delivered)) {
+			for (const fact of inSeqOrder(facts.delivered ?? [])) {
 				if (this.known("delivered", fact)) continue;
 				this.verify(
 					"delivered",
@@ -540,9 +661,13 @@ export class Ledger {
 
 	sweep(graceSecs: number): Payment[] {
 		const now = unixNow();
-		const expired = (this.statements.justExpired.all(now) as Row[]).map(revive);
+		const expired = (this.statements.justExpired.all(now) as { id: string }[]).flatMap(
+			(one) => this.read(one.id) ?? [],
+		);
 		this.statements.announce.run(now);
 		this.statements.prune.run(now - graceSecs);
+		this.statements.pruneForRollback.run(now - graceSecs);
+		this.statements.pruneAccepted.run(now - graceSecs);
 		this.statements.pruneOutbox.run(now - graceSecs);
 		this.statements.prunePaid.run(now - graceSecs);
 		this.statements.pruneDelivered.run(now - graceSecs);
@@ -594,6 +719,19 @@ export class Ledger {
 	private mine<T>(source: Source, build: (seq: number) => T): T {
 		const { seq } = this.statements.nextSeq[source].get(this.origin) as { seq: number };
 		return build(seq);
+	}
+
+	private recordAccepted(fact: AcceptedFact): void {
+		this.statements.insertAccepted.run(
+			fact.origin,
+			fact.seq,
+			fact.id,
+			fact.payment,
+			fact.acceptedAt,
+			fact.expiresAt,
+			fact.mac,
+		);
+		this.advance("accepted", fact);
 	}
 
 	private recordPaid(fact: PaidFact): void {
@@ -658,6 +796,28 @@ export class Ledger {
 		}
 	}
 
+	private provenAccepted(fact: AcceptedFact): Payment {
+		this.verify(
+			"accepted",
+			[fact.origin, fact.seq, fact.id, fact.payment, fact.acceptedAt, fact.expiresAt],
+			fact.mac,
+		);
+
+		const payment = JSON.parse(fact.payment) as Payment;
+		if (payment.id !== fact.id || fact.id !== paymentId(this.key, payment.paymentHash)) {
+			throw new Error(`accepted fact ${fact.id} does not name the invoice it watches`);
+		}
+		if (payment.expiresAt !== fact.expiresAt) {
+			throw new Error(`accepted fact ${fact.id} disagrees with itself about when it expires`);
+		}
+		const carried = payment.bolt11 === null ? null : decodeInvoice(payment.bolt11).paymentHash;
+		if (carried !== null && carried !== payment.paymentHash) {
+			throw new Error(`accepted fact ${fact.id} carries an invoice for another payment hash`);
+		}
+
+		return payment;
+	}
+
 	private provenPaid(fact: PaidFact): PublicPayment {
 		this.verify("paid", [fact.origin, fact.seq, fact.id, fact.payment, fact.settledAt], fact.mac);
 
@@ -703,6 +863,13 @@ function proves(preimage: string | null, paymentHash: string): void {
 	if (hashed !== paymentHash) {
 		throw new Error(`the preimage for ${paymentHash} does not hash to it`);
 	}
+}
+
+function oneFromEvery(accepted: Payment[]): Payment {
+	return accepted.reduce((one, other) => ({
+		...one,
+		webhooks: mergedWebhooks(one.webhooks, other.webhooks),
+	}));
 }
 
 function mergedWebhooks(known: Webhook[], added: Webhook[]): Webhook[] {

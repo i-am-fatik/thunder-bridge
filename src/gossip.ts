@@ -20,6 +20,7 @@ export type Gossip = {
 	peers: Map<string, (note: Note) => void>;
 	onAdd: (payment: Payment) => void;
 	onFacts: (facts: Facts) => void;
+	onConverged: () => void;
 	watermarks: () => Watermarks;
 	held: () => Payment[];
 	since: (theirs: Watermarks) => { facts: Facts; more: boolean };
@@ -78,6 +79,7 @@ function receive(gossip: Gossip, note: Note, reply: { send(note: Note): void }):
 	} else if ("facts" in note) {
 		gossip.onFacts(note.facts);
 		if (note.more) reply.send({ have: gossip.watermarks() });
+		else gossip.onConverged();
 	} else if ("pending" in note) {
 		for (const payment of note.pending) gossip.onAdd(payment);
 	} else {

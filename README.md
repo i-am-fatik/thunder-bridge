@@ -112,7 +112,7 @@ standard's camelCase, and there is no authorization server.
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
 | `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per wallet host, and the batch each tick takes |
-| `MAX_PENDING` | `5000` | pending rows before `POST /incoming-payments` answers 503 |
+| `MAX_PENDING` | `5000` | payments the cluster watches before `POST /incoming-payments` answers 503, never a limit on what an instance knows |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, six attempts then it parks |
 | `SWARM` | on | `0` turns off Hyperswarm DHT discovery |

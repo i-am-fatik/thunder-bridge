@@ -131,6 +131,42 @@ test("every instance takes on every pending payment, whoever created it", async 
 	}
 });
 
+test("both instances say they are in sync and agree on what they hold", async () => {
+	const cluster = await connected();
+	try {
+		cluster.first.insert(payment(0));
+
+		await until(
+			() => cluster.first.info().marks.accepted === cluster.second.info().marks.accepted,
+			"the accepted marks to match",
+		);
+		await until(
+			() =>
+				cluster.first.info().convergedAt !== null && cluster.second.info().convergedAt !== null,
+			"both instances to hear a reply that came back short",
+		);
+
+		expect(cluster.second.info().origins).toBe(cluster.first.info().origins);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("two instances at their cap still both hold every payment", async () => {
+	const cluster = await connected({ maxPending: 2 });
+	try {
+		const made = [0, 1, 2].map((n) => cluster.first.insert(spread(n)).id);
+		expect(cluster.first.full()).toBe(true);
+
+		await until(
+			() => made.every((one) => cluster.second.get(one) !== null),
+			"the whole worklist to reach a peer that is already full",
+		);
+	} finally {
+		cluster.stop();
+	}
+});
+
 test("a mirrored payment stands by, so the instance that took it on polls it first", async () => {
 	const cluster = await connected();
 	try {

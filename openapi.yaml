@@ -117,6 +117,33 @@ paths:
                   watching:
                     type: string
                     enum: [scheduled, stalled]
+                  sync:
+                    type: object
+                    description: |
+                      Whether this instance holds what its peers hold. `converged` means a peer
+                      answered our watermarks with a batch that came back short, so it held
+                      nothing we lack. `catching-up` means peers are connected and that has not
+                      happened yet, `alone` means nobody answered, which is the normal state of a
+                      single-instance deployment. Readiness never refuses on it: one surviving
+                      instance has to keep taking payments.
+                    properties:
+                      state:
+                        type: string
+                        enum: [converged, catching-up, alone]
+                      converged_at:
+                        type: [integer, "null"]
+                        description: Unix seconds of the last short reply.
+                      origins:
+                        type: integer
+                        description: Instances whose facts this one has recorded.
+                      marks:
+                        type: object
+                        description: |
+                          Sum of the sequence numbers held per fact source. Curl two instances and
+                          compare: equal marks with equal `origins` is a strong fingerprint that
+                          they hold the same facts. A fingerprint, not a hash.
+                        additionalProperties:
+                          type: integer
                 required: [status]
         "503":
           description: This instance is draining and is not taking new work.

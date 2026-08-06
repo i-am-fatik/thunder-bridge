@@ -829,6 +829,7 @@ test("readiness says only that it is ready until a bearer proves the instance is
 		pending: 0,
 		max_pending: 5000,
 		watching: "scheduled",
+		sync: { state: "alone", converged_at: null, origins: 0 },
 	});
 	mine.stop();
 });

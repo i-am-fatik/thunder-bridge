@@ -345,7 +345,7 @@ function readiness(
 	if (vitals.draining) return unavailable(LEAVING);
 	if (token === null || !bearerMatches(incoming, token)) return json({ status: "ready" });
 
-	const { origin, peers, pending, maxPending } = store.info();
+	const { origin, peers, pending, maxPending, convergedAt, origins, marks } = store.info();
 
 	return json({
 		status: "ready",
@@ -354,6 +354,12 @@ function readiness(
 		pending,
 		max_pending: maxPending,
 		watching: vitals.stalled ? "stalled" : "scheduled",
+		sync: {
+			state: convergedAt !== null ? "converged" : peers > 0 ? "catching-up" : "alone",
+			converged_at: convergedAt,
+			origins,
+			marks,
+		},
 	});
 }
 

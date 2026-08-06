@@ -250,6 +250,110 @@ test("the store reports itself full once the worklist reaches its cap", () => {
 	}
 });
 
+test("the fact channel alone carries a payment to another instance", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const waiting = one.store.insert(payment(0));
+
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+		two.store.gossip.onFacts(facts);
+
+		expect(two.store.get(waiting.id)?.paymentHash).toBe(waiting.paymentHash);
+		expect(two.store.info().pending).toBe(1);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a payment past the cap is still recorded and still offered to a peer", () => {
+	const one = openStore({ maxPending: 1 });
+	const two = openStore({ maxPending: 1 });
+	try {
+		one.store.insert(payment(0));
+		const past = one.store.insert(payment(1));
+		expect(one.store.full()).toBe(true);
+
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+		two.store.gossip.onFacts(facts);
+
+		expect(two.store.get(past.id)?.paymentHash).toBe(past.paymentHash);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("an accepted fact nobody signed with the cluster key is refused", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		one.store.insert(payment(0));
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+		const forged = (facts.accepted ?? []).map((fact) => ({ ...fact, id: "0".repeat(64) }));
+
+		expect(() => two.store.gossip.onFacts({ accepted: forged })).toThrow(/cluster key/);
+		expect(two.store.info().pending).toBe(0);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a pruned accepted fact is not resurrected by a peer that still holds it", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		one.store.insert({ ...payment(0), expiresAt: 1_700_000_100 });
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+
+		two.store.gossip.onFacts(facts);
+		expect(two.store.info().pending).toBe(1);
+
+		two.store.sweep(0);
+		expect(two.store.info().pending).toBe(0);
+
+		two.store.gossip.onFacts(facts);
+		expect(two.store.info().pending).toBe(0);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a peer that sends no accepted facts at all is understood", () => {
+	const { store, stop } = openStore();
+	try {
+		expect(() => store.gossip.onFacts({ paid: [], outbox: [], delivered: [] })).not.toThrow();
+	} finally {
+		stop();
+	}
+});
+
+test("a ledger written before accepted facts existed keeps its worklist", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-adopt-"));
+	const ledger = join(directory, "ledger.db");
+	const before = openStore({ ledger });
+	const waiting = before.store.insert(payment(0));
+	before.stop();
+
+	const written = new DatabaseSync(ledger);
+	written.exec("DELETE FROM accepted");
+	written.exec("DELETE FROM schedule");
+	written.exec("DELETE FROM progress WHERE source = 'accepted'");
+	written.close();
+
+	const { store, stop } = openStore({ ledger });
+	try {
+		expect(store.get(waiting.id)?.paymentHash).toBe(waiting.paymentHash);
+		expect(store.info().pending).toBe(1);
+	} finally {
+		stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
 test("a ledger from before the schema was versioned keeps its payments and gets stamped", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-unstamped-"));
 	const ledger = join(directory, "ledger.db");
