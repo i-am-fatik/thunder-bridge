@@ -1,13 +1,13 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { checkSettled } from "../core/lnurl.ts";
+import { ask } from "../core/outbound.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Store } from "./store.ts";
 
 const EAGER_WINDOW_SECS = 300;
 const STALENESS = 0.1;
 const LEASE_SECS = 30;
-const WEBHOOK_TIMEOUT_MS = 15_000;
 
 export const WATCH_HORIZON_SECS = 259_200;
 
@@ -84,14 +84,9 @@ async function notify(owed: Delivery): Promise<boolean> {
 	}
 
 	try {
-		const response = await fetch(owed.url, {
-			method: "POST",
-			headers,
-			body: owed.body,
-			signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-		});
-		if (!response.ok) console.warn(`webhook for ${owed.id} rejected with ${response.status}`);
-		return response.ok;
+		const answer = await ask(owed.url, { method: "POST", headers, body: owed.body });
+		if (!answer.ok) console.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
+		return answer.ok;
 	} catch (error: unknown) {
 		console.warn(`webhook for ${owed.id} failed: ${String(error)}`);
 		return false;

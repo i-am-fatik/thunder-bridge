@@ -1,10 +1,10 @@
 import { decodeInvoice, preimageMatchesHash } from "./bolt11.ts";
+import { ask, BODY_LIMIT_BYTES } from "./outbound.ts";
 import { sha256Hex } from "./sha256.ts";
 import { publicHttps } from "./url.ts";
 import { NoWalletAvailable, WalletRefused, type WalletFailure } from "./refusal.ts";
 
 const VERIFY_WITHOUT_PREIMAGE = ["zeuspay.com", "zeusnuts.com", "ecash.love"];
-const HTTP_TIMEOUT_MS = 15_000;
 const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const BECH32_GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 const CHECKSUM_SLOTS = [0, 1, 2, 3, 4, 5];
@@ -282,12 +282,11 @@ function splitAddress(address: string): [string, string] {
 }
 
 async function fetchJson<T>(url: string, deadline?: AbortSignal): Promise<T> {
-	if (!publicHttps(url)) throw new Error(`${url} is not a public https URL`);
-	const capped = AbortSignal.timeout(HTTP_TIMEOUT_MS);
-	const response = await fetch(url, {
-		signal: deadline ? AbortSignal.any([deadline, capped]) : capped,
-		headers: { accept: "application/json" },
-	});
-	if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-	return (await response.json()) as T;
+	const answer = await ask(url, { headers: { accept: "application/json" }, deadline });
+	if (!answer.ok) throw new Error(`${url} answered ${answer.status}`);
+	if (answer.truncated) {
+		throw new Error(`${url} answered with more than the ${BODY_LIMIT_BYTES} bytes we read`);
+	}
+
+	return JSON.parse(answer.body) as T;
 }
