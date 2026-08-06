@@ -145,6 +145,18 @@ test("a payment pushed the way the last release pushed it becomes a fact and tra
 	}
 });
 
+test("a pushed payment whose id does not name its own invoice never becomes a fact", async () => {
+	const cluster = await connected();
+	try {
+		cluster.first.gossip.onAdd({ ...payment(1), id: "0".repeat(64) });
+
+		expect(cluster.first.info().rows.accepted).toBe(0);
+		expect(cluster.first.get("0".repeat(64))).toBeNull();
+	} finally {
+		cluster.stop();
+	}
+});
+
 test("both instances say they are in sync and agree on what they hold", async () => {
 	const cluster = await connected();
 	try {

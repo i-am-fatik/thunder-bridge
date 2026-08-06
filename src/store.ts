@@ -42,6 +42,7 @@ export class Store {
 			key: this.key,
 			peers: new Map(),
 			onAdd: (payment) => {
+				if (payment.id !== paymentId(this.key, payment.paymentHash)) return;
 				if (this.ledger.settlement(payment.id)) return;
 				const taken = this.ledger.mirror(payment);
 				this.spread(taken.facts);
