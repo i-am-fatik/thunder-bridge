@@ -10,7 +10,7 @@ const REDIRECTS = [301, 302, 303, 307, 308];
 const KEEPS_THE_METHOD = [307, 308];
 const CREDENTIALS = ["authorization", "cookie", "proxy-authorization"];
 
-const BODY_LIMIT_BYTES = 262_144;
+export const BODY_LIMIT_BYTES = 262_144;
 
 export type Sent = {
 	method?: string;
