@@ -158,6 +158,15 @@ transaction, so there is no window where a payment is settled and its webhook is
 not yet owed. Retries live on the row, so restarting mid-delivery leaves the debt
 intact.
 
+The settler can only owe the webhooks it knew about. Two instances that accepted
+the same invoice with different webhooks, or an accepted fact that arrives after
+the settlement, would otherwise leave one hook owed by nobody. So the sweep asks
+once a minute whether any settled payment carries a webhook that no outbox row and
+no delivered tombstone mentions, and owes it. It is done in the sweep rather than
+while absorbing facts because a catch-up can split a paid fact and its outbox rows
+across two batches, and a minute of slack is the difference between noticing a
+missing hook and inventing one.
+
 The outbox replicates too, which closes the case where the instance that settled
 a payment dies before delivering. Every instance holding the row schedules it
 locally: the origin tries immediately, everyone else waits

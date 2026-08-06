@@ -207,6 +207,8 @@ type Statements = {
 	pruneForRollback: StatementSync;
 	pruneAccepted: StatementSync;
 	pruneSettled: StatementSync;
+	unowed: StatementSync;
+	owedUrls: StatementSync;
 	settlement: StatementSync;
 	recentlyPaid: StatementSync;
 	insertPaid: StatementSync;
@@ -285,6 +287,22 @@ export class Ledger {
 			prune: this.db.prepare("DELETE FROM schedule WHERE expiresAt <= ?"),
 			pruneForRollback: this.db.prepare("DELETE FROM pending WHERE expiresAt <= ?"),
 			pruneAccepted: this.db.prepare("DELETE FROM accepted WHERE expiresAt <= ?"),
+			unowed: this.db.prepare(`
+				SELECT DISTINCT accepted.id AS id
+				FROM accepted
+				JOIN paid ON paid.id = accepted.id
+				JOIN json_each(accepted.payment, '$.webhooks') AS hook
+				WHERE NOT EXISTS (
+					SELECT 1 FROM outbox
+					WHERE outbox.id = accepted.id AND outbox.url = json_extract(hook.value, '$.url')
+				) AND NOT EXISTS (
+					SELECT 1 FROM delivered
+					WHERE delivered.id = accepted.id AND delivered.url = json_extract(hook.value, '$.url')
+				)
+			`),
+			owedUrls: this.db.prepare(
+				"SELECT url FROM outbox WHERE id = ? UNION SELECT url FROM delivered WHERE id = ?",
+			),
 			pruneSettled: this.db.prepare(
 				"DELETE FROM accepted WHERE id IN (SELECT id FROM paid WHERE settledAt <= ?)",
 			),
@@ -698,7 +716,38 @@ export class Ledger {
 		this.statements.pruneDelivered.run(now - graceSecs);
 		this.statements.pruneRequests.run(now - REQUEST_TTL_SECS);
 
+		for (const { id } of this.statements.unowed.all() as { id: string }[]) this.oweMissing(id);
+
 		return expired;
+	}
+
+	private oweMissing(id: string): void {
+		const settled = this.settlement(id);
+		const known = this.read(id);
+		if (!settled || !known) return;
+
+		const owed = new Set(
+			(this.statements.owedUrls.all(id, id) as { url: string }[]).map((one) => one.url),
+		);
+		const body = JSON.stringify(paymentToWire(settled));
+		const now = unixNow();
+
+		for (const hook of known.webhooks) {
+			if (owed.has(hook.url)) continue;
+			this.recordOutbox(
+				this.mine("outbox", (seq) => ({
+					origin: this.origin,
+					seq,
+					id,
+					url: hook.url,
+					secret: hook.secret,
+					body,
+					owedAt: now,
+					mac: this.sign("outbox", [this.origin, seq, id, hook.url, hook.secret, body, now]),
+				})),
+				0,
+			);
+		}
 	}
 
 	close(): void {

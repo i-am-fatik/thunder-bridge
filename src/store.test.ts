@@ -250,6 +250,28 @@ test("the store reports itself full once the worklist reaches its cap", () => {
 	}
 });
 
+test("a webhook only the other instance knew about is owed once the sweep notices", () => {
+	const one = openStore();
+	const two = openStore();
+	const theirs = "https://elsewhere.example/hook";
+	try {
+		const mine = one.store.insert(payment(0));
+		two.store.insert({ ...payment(0), webhooks: [{ url: theirs, secret: null }] });
+		one.store.paid(mine.id, preimage(0));
+
+		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
+		expect(two.store.get(mine.id)?.status).toBe("paid");
+		expect(two.store.dueDeliveries(10, 30)).toEqual([]);
+
+		two.store.sweep(3600);
+
+		expect(two.store.dueDeliveries(10, 30).map((owed) => owed.url)).toEqual([theirs]);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
 test("an accepted fact does not outlive the settlement that closed it", () => {
 	const { store, stop } = openStore();
 	try {
