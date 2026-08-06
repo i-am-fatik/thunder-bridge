@@ -320,7 +320,7 @@ test("the next poll never lands after the invoice has expired", () => {
 	near(nextDue(payment({ createdAt: now - 600, expiresAt: now + 3600 }), 5000), now + 60);
 	expect(nextDue(payment({ createdAt: now - 600, expiresAt: now + 10 }), 5000)).toBe(now + 10);
 	expect(nextDue(payment({ createdAt: now, expiresAt: now }), 5000)).toBeNull();
-	expect(nextDue(payment({ createdAt: now - 2_592_000, expiresAt: now + 3600 }), 5000)).toBeNull();
+	expect(nextDue(payment({ createdAt: now - 259_200, expiresAt: now + 3600 }), 5000)).toBeNull();
 });
 
 test("the signature is an hmac a receiver can recompute", async () => {
@@ -347,6 +347,5 @@ test("a payment is never left staler than a tenth of its own age", () => {
 	expect(pollDelayMs(300, 5000)).toBe(30_000);
 	expect(pollDelayMs(3600, 5000)).toBe(360_000);
 	expect(pollDelayMs(86_400, 5000)).toBe(8_640_000);
-	expect(pollDelayMs(864_000, 5000)).toBe(86_400_000);
-	expect(pollDelayMs(2_592_000, 5000)).toBe(86_400_000);
+	expect(pollDelayMs(259_199, 5000)).toBe(25_919_900);
 });

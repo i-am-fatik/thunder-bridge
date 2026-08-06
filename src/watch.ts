@@ -6,10 +6,10 @@ import type { Store } from "./store.ts";
 
 const EAGER_WINDOW_SECS = 300;
 const STALENESS = 0.1;
-const DAILY_DELAY_MS = 86_400_000;
-const GIVE_UP_AFTER_SECS = 2_592_000;
 const LEASE_SECS = 30;
 const WEBHOOK_TIMEOUT_MS = 15_000;
+
+export const WATCH_HORIZON_SECS = 259_200;
 
 export type Budget = { perSecond: number; nextAt: Map<string, number> };
 
@@ -101,7 +101,7 @@ async function notify(owed: Delivery): Promise<boolean> {
 export function nextDue(payment: Payment, eagerMs: number): number | null {
 	const now = unixNow();
 	const waited = now - payment.createdAt;
-	if (now >= payment.expiresAt || waited >= GIVE_UP_AFTER_SECS) return null;
+	if (now >= payment.expiresAt || waited >= WATCH_HORIZON_SECS) return null;
 
 	return Math.min(now + Math.ceil(pollDelayMs(waited, eagerMs) / 1000), payment.expiresAt);
 }
@@ -123,7 +123,7 @@ function hostOf(url: string): string {
 
 export function pollDelayMs(waitedSecs: number, eagerMs: number): number {
 	if (waitedSecs < EAGER_WINDOW_SECS) return eagerMs;
-	return Math.min(waitedSecs * STALENESS * 1000, DAILY_DELAY_MS);
+	return waitedSecs * STALENESS * 1000;
 }
 
 export async function sign(secret: string, body: string): Promise<string> {

@@ -565,7 +565,7 @@ const WATCHED_HASH = "cc".repeat(32);
 const WATCHABLE = {
 	payment_hash: WATCHED_HASH,
 	verify_url: "https://coinos.io/api/lnurl/verify/blind",
-	expires_at: new Date(1_900_000_000 * 1000).toISOString(),
+	expires_at: new Date(Date.now() + 3_600_000).toISOString(),
 };
 
 function postWatch(app: App, body: unknown): Promise<Response> {
@@ -660,7 +660,7 @@ test("a payment the gateway minted itself can never be re-registered as a blind 
 	const fishing = await postWatch(app, {
 		payment_hash: minted.paymentHash,
 		verify_url: minted.verifyUrl,
-		expires_at: new Date(minted.expiresAt * 1000).toISOString(),
+		expires_at: WATCHABLE.expires_at,
 	});
 
 	expect(fishing.status).toBe(409);
@@ -686,6 +686,21 @@ test("a blind watch is refused when there is nothing left to watch or nothing to
 
 	const unhashed = await postWatch(app, { ...WATCHABLE, payment_hash: "nope" });
 	expect(unhashed.status).toBe(400);
+
+	app.stop();
+});
+
+test("a watch reaching past the three days the gateway promises is refused, and stores nothing", async () => {
+	const app = await running();
+
+	const tooFar = await postWatch(app, {
+		...WATCHABLE,
+		expires_at: new Date(Date.now() + 4 * 86_400_000).toISOString(),
+	});
+	expect(tooFar.status).toBe(400);
+	expect(String(((await tooFar.json()) as Problem)["detail"])).toContain("3 days");
+
+	expect((await postWatch(app, WATCHABLE)).status).toBe(201);
 
 	app.stop();
 });

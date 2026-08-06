@@ -257,6 +257,11 @@ paths:
         on settlement can be watched here. The SDK's `bankTransfer` uses that to put a bank
         transfer on the same footing.
 
+        This gateway watches for at most three days, and makes that promise to every
+        payment equally. An `expires_at` further off is refused with `400` rather than
+        accepted and dropped later, so ask for a window inside three days and re-register on
+        a "still waiting" click if the payer needs longer.
+
         A hash already watched answers `409` and discloses nothing about what is stored,
         because a payment hash sits in every invoice a payer holds while the payment id is the
         read capability. Repeating your own registration byte for byte still answers `201`, so
@@ -711,7 +716,8 @@ components:
           format: date-time
           description: |
             The invoice's own expiry. Polling stops here, so a value already in the past is
-            refused rather than watched forever.
+            refused, and so is one more than three days off, which is as long as this gateway
+            watches anything.
         trigger:
           $ref: "#/components/schemas/trigger"
         sealed:

@@ -45,7 +45,7 @@ const VENUES = (Deno.env.get("PRICE_VENUES") ?? "coinbase,kraken,bitstamp,coinma
   .filter(Boolean);
 const PUBLIC_URL = Deno.env.get("PUBLIC_URL");
 const CONTENT = "The money landed. Here is the thing you paid for.";
-const PAY_WITHIN_DAYS = 3;
+const PAY_WITHIN_DAYS = 2;
 const VERIFY_PATH = "/verify/bank";
 const FIO_WINDOW_MS = 30_000;
 const REMEMBERED = ["fio", "statement"];

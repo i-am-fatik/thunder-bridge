@@ -159,6 +159,10 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
 - **The proof is the recipient's word, cryptographically.** The preimage proves
   their server released it. It protects the payer against this service, not
   against a recipient inflating their own totals.
+- **Nothing is watched for longer than three days.** Every payment gets that same
+  promise, and `POST /watched-payments` refuses an `expires_at` past it rather
+  than taking on a watch it will drop. A wallet's 30-day invoice stays payable
+  after day three, it just is not being watched here.
 - **Every outbound URL must be public https.** A webhook to a private address is
   refused along with everything else on the local network.
 

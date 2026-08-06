@@ -25,7 +25,7 @@ import {
 	statusForWallets,
 } from "./problem.ts";
 import { Store } from "./store.ts";
-import { tick, unixNow, type Watcher } from "./watch.ts";
+import { tick, unixNow, WATCH_HORIZON_SECS, type Watcher } from "./watch.ts";
 import {
 	fingerprint,
 	paymentToWire,
@@ -456,8 +456,14 @@ async function watchOnly(request: Request, store: Store, key: Uint8Array): Promi
 	if (store.full()) {
 		return unavailable("this instance is watching as many payments as it can");
 	}
-	if (asked.expiresAt <= unixNow()) {
+	const now = unixNow();
+	if (asked.expiresAt <= now) {
 		return invalidRequest("expires_at is already in the past, there is nothing left to watch");
+	}
+	if (asked.expiresAt > now + WATCH_HORIZON_SECS) {
+		return invalidRequest(
+			`expires_at is further off than the ${WATCH_HORIZON_SECS / 86_400} days this gateway will watch for`,
+		);
 	}
 
 	const known = store.get(paymentId(key, asked.paymentHash));
@@ -473,7 +479,7 @@ async function watchOnly(request: Request, store: Store, key: Uint8Array): Promi
 		bolt11: null,
 		preimage: null,
 		expiresAt: asked.expiresAt,
-		createdAt: unixNow(),
+		createdAt: now,
 		verifyUrl: asked.verifyUrl,
 		trigger: asked.trigger,
 		sealed: asked.sealed,
