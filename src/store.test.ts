@@ -250,6 +250,49 @@ test("the store reports itself full once the worklist reaches its cap", () => {
 	}
 });
 
+test("a ledger from before the schema was versioned keeps its payments and gets stamped", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-unstamped-"));
+	const ledger = join(directory, "ledger.db");
+	const before = openStore({ ledger });
+	const waiting = before.store.insert(payment(0));
+	before.stop();
+
+	const unstamped = new DatabaseSync(ledger);
+	unstamped.exec("PRAGMA user_version = 0");
+	unstamped.close();
+
+	const { store, stop } = openStore({ ledger });
+	try {
+		expect(store.get(waiting.id)).not.toBeNull();
+		expect(schemaVersionOf(ledger)).toBe(1);
+	} finally {
+		stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a ledger a newer build wrote is refused instead of opened", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-newer-"));
+	const ledger = join(directory, "ledger.db");
+	const newer = new DatabaseSync(ledger);
+	newer.exec("PRAGMA user_version = 99");
+	newer.close();
+
+	try {
+		expect(() => openStore({ ledger })).toThrow(/schema 99/);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+function schemaVersionOf(path: string): number {
+	const db = new DatabaseSync(path);
+	const stamped = db.prepare("PRAGMA user_version").get() as { user_version: number };
+	db.close();
+
+	return stamped.user_version;
+}
+
 test("a ledger left over from before the request cache changed shape still boots", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-stale-"));
 	const ledger = join(directory, "ledger.db");
