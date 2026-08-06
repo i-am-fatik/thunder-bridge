@@ -192,7 +192,6 @@ type Statements = {
 	all: StatementSync;
 	count: StatementSync;
 	insertAccepted: StatementSync;
-	acceptedMine: StatementSync;
 	schedule: StatementSync;
 	remember: StatementSync;
 	forget: StatementSync;
@@ -257,9 +256,6 @@ export class Ledger {
 			count: this.db.prepare("SELECT count(*) AS rows FROM schedule"),
 			insertAccepted: this.db.prepare(
 				"INSERT INTO accepted (origin, seq, id, payment, acceptedAt, expiresAt, mac) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
-			),
-			acceptedMine: this.db.prepare(
-				"SELECT payment FROM accepted WHERE origin = ? AND id = ? ORDER BY seq",
 			),
 			schedule: this.db.prepare(
 				"INSERT INTO schedule (id, expiresAt, dueAt) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING",
@@ -372,8 +368,7 @@ export class Ledger {
 
 	private keep(payment: Payment, dueAt: number): Taken {
 		return this.transact(() => {
-			const mine = (this.statements.acceptedMine.all(this.origin, payment.id) as Row[]).map(revive);
-			const held = mine.length === 0 ? null : oneFromEvery(mine);
+			const held = this.read(payment.id);
 			const webhooks = held ? mergedWebhooks(held.webhooks, payment.webhooks) : payment.webhooks;
 			const fresh =
 				!held || webhooks.length > held.webhooks.length

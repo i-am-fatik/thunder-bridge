@@ -81,8 +81,8 @@ export class Store {
 		if (settled) return withWebhooks(settled, null);
 
 		const taken = this.ledger.accept({ ...unsaved, id });
-		announce(this.gossip, { add: taken.payment });
 		this.spread(taken.facts);
+		announce(this.gossip, { add: taken.payment });
 
 		return taken.payment;
 	}
