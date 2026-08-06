@@ -62,6 +62,18 @@ const BEARER = "Bearer ";
 const TICKET_TTL_SECS = 60;
 const UNGATED = new Set(["/health", "/openapi.yaml", "/docs"]);
 const SPEC = readFileSync(new URL("../openapi.yaml", import.meta.url), "utf8");
+const RENDERER = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.64.0/dist/browser/standalone.js";
+const RENDERER_HASH = "sha384-ei8P62VHbV+6AdLO3hN333PsTEYp6k9OAVhlYvpmer+zdPIf8jSbdgh9ojiLWX3T";
+const RENDERER_ORIGIN = "https://cdn.jsdelivr.net";
+const DOCS_POLICY = [
+	"default-src 'none'",
+	`script-src ${RENDERER_ORIGIN} 'unsafe-inline'`,
+	"style-src 'unsafe-inline'",
+	`font-src ${RENDERER_ORIGIN} data:`,
+	"img-src 'self' data:",
+	"connect-src 'self'",
+	"frame-ancestors 'none'",
+].join("; ");
 const DOCS = `<!doctype html>
 <html lang="en">
 	<head>
@@ -70,8 +82,9 @@ const DOCS = `<!doctype html>
 		<title>Thunder Bridge</title>
 	</head>
 	<body>
-		<script id="api-reference" data-url="/openapi.yaml"></script>
-		<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+		<noscript><a href="/openapi.yaml">the specification, unrendered</a></noscript>
+		<script id="api-reference" data-url="/openapi.yaml" data-configuration='{"withDefaultFonts":false}'></script>
+		<script src="${RENDERER}" integrity="${RENDERER_HASH}" crossorigin="anonymous"></script>
 	</body>
 </html>
 `;
@@ -307,7 +320,7 @@ async function route(
 	const path = pathOf(incoming);
 	if (path === "/health") return new Response("OK");
 	if (path === "/openapi.yaml") return served(SPEC, "application/yaml");
-	if (path === "/docs") return served(DOCS, "text/html; charset=utf-8");
+	if (path === "/docs") return rendered();
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
@@ -539,6 +552,16 @@ function unreadable(error: unknown): Response {
 
 function served(body: string, type: string): Response {
 	return new Response(body, { headers: { "content-type": type } });
+}
+
+function rendered(): Response {
+	return new Response(DOCS, {
+		headers: {
+			"content-type": "text/html; charset=utf-8",
+			"content-security-policy": DOCS_POLICY,
+			"x-content-type-options": "nosniff",
+		},
+	});
 }
 
 function json(body: unknown, status = 200): Response {
