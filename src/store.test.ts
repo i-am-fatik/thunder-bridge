@@ -251,6 +251,27 @@ test("the store reports itself full once the worklist reaches its cap", () => {
 	}
 });
 
+test("a pruned origin does not start its sequence over and lose what it takes on next", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const first = one.store.insert(payment(0));
+		one.store.paid(first.id, preimage(0));
+		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
+
+		one.store.sweep(0);
+		expect(one.store.info().rows.accepted).toBe(0);
+
+		const second = one.store.insert(payment(1));
+		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
+
+		expect(two.store.get(second.id)?.paymentHash).toBe(second.paymentHash);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
 test("a webhook only the other instance knew about is owed once the sweep notices", () => {
 	const one = openStore();
 	const two = openStore();

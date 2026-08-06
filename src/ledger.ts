@@ -353,7 +353,12 @@ export class Ledger {
 			),
 			origins: bySource((source) => this.db.prepare(`SELECT DISTINCT origin FROM ${source}`)),
 			nextSeq: bySource((source) =>
-				this.db.prepare(`SELECT coalesce(max(seq), 0) + 1 AS seq FROM ${source} WHERE origin = ?`),
+				this.db.prepare(`
+					SELECT max(
+						coalesce((SELECT max(seq) FROM ${source} WHERE origin = ?), 0),
+						coalesce((SELECT seq FROM progress WHERE source = '${source}' AND origin = ?), 0)
+					) + 1 AS seq
+				`),
 			),
 			since: bySource((source) =>
 				this.db.prepare(
@@ -760,7 +765,9 @@ export class Ledger {
 	}
 
 	private nextSeq(source: Source): number {
-		return (this.statements.nextSeq[source].get(this.origin) as { seq: number }).seq;
+		const held = this.statements.nextSeq[source].get(this.origin, this.origin);
+
+		return (held as { seq: number }).seq;
 	}
 
 	private recordAccepted(fact: AcceptedFact): void {
