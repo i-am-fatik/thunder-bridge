@@ -20,17 +20,18 @@ export type Watcher = {
 };
 
 export async function tick(watcher: Watcher): Promise<void> {
-	await pollDue(watcher);
-	await deliverDue(watcher);
+	await Promise.all([pollDue(watcher), deliverDue(watcher)]);
 }
 
 async function pollDue(watcher: Watcher): Promise<void> {
 	const due = watcher.store.duePolls(watcher.budget.perSecond, LEASE_SECS);
-	for (const payment of due) {
-		await poll(watcher, payment).catch((error: unknown) => {
-			console.error(`poll for ${payment.id} stopped: ${String(error)}`);
-		});
-	}
+	await Promise.all(
+		due.map((payment) =>
+			poll(watcher, payment).catch((error: unknown) => {
+				console.error(`poll for ${payment.id} stopped: ${String(error)}`);
+			}),
+		),
+	);
 }
 
 async function poll(watcher: Watcher, payment: Payment): Promise<void> {
@@ -53,11 +54,13 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 
 async function deliverDue(watcher: Watcher): Promise<void> {
 	const owed = watcher.store.dueDeliveries(watcher.budget.perSecond, LEASE_SECS);
-	for (const one of owed) {
-		await deliver(watcher, one).catch((error: unknown) => {
-			console.error(`webhook for ${one.id} stopped: ${String(error)}`);
-		});
-	}
+	await Promise.all(
+		owed.map((one) =>
+			deliver(watcher, one).catch((error: unknown) => {
+				console.error(`webhook for ${one.id} stopped: ${String(error)}`);
+			}),
+		),
+	);
 }
 
 async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {

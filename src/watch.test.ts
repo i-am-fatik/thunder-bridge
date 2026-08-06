@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { expect, test } from "vitest";
 
 import type { Delivery, Payment } from "./payment.ts";
@@ -26,6 +28,22 @@ function intercepting(answer: (call: Call) => Response): { calls: Call[]; restor
 	}) as typeof fetch;
 
 	return { calls, restore: () => void (globalThis.fetch = real) };
+}
+
+function counting(answer: (url: string) => Response): { peak: () => number; restore: () => void } {
+	const real = globalThis.fetch;
+	let live = 0;
+	let peak = 0;
+	globalThis.fetch = (async (target: string | URL | Request) => {
+		live += 1;
+		peak = Math.max(peak, live);
+		await sleep(20);
+		live -= 1;
+
+		return answer(String(target));
+	}) as unknown as typeof fetch;
+
+	return { peak: () => peak, restore: () => void (globalThis.fetch = real) };
 }
 
 function payment(overrides: Partial<Payment> = {}): Payment {
@@ -255,6 +273,38 @@ test("a settlement the store refuses leaves the rest of the batch alone", async 
 		expect(handed).toEqual([PREIMAGE, PREIMAGE]);
 	} finally {
 		console.error = quiet;
+		wire.restore();
+	}
+});
+
+test("the polls in one batch go out together, so a slow wallet does not hold up the rest", async () => {
+	const wire = counting(() => verified(false));
+	const { parked, watcher } = queueing([payment({ id: "one" }), payment({ id: "two" })], settlesAs(true));
+
+	try {
+		await tick(watcher);
+
+		expect(wire.peak()).toBe(2);
+		expect(parked).toHaveLength(2);
+	} finally {
+		wire.restore();
+	}
+});
+
+test("a poll and a webhook owed in the same tick go out together, not one after the other", async () => {
+	const wire = counting((url) => (url === VERIFY_URL ? verified(false) : new Response("", { status: 200 })));
+	const store = {
+		duePolls: () => [payment()],
+		dueDeliveries: () => [owed()],
+		polled: () => {},
+		delivered: () => {},
+	} as unknown as Store;
+
+	try {
+		await tick({ store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() } });
+
+		expect(wire.peak()).toBe(2);
+	} finally {
 		wire.restore();
 	}
 });
