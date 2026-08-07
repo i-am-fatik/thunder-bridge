@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { preimageMatchesHash } from "../../core/bolt11.js";
+import { checkSettled } from "../../core/lnurl.js";
+import { bankVerifyEndpoint, type Credit } from "../src/bank";
 import { ThunderBridge } from "../src/client";
 import { NoWalletAvailableError } from "../src/errors";
 import {
@@ -267,5 +270,57 @@ describe("blindLightningRail", () => {
     stubFetch(railsServing({ [PAY_REQUEST]: () => jsonResponse({ status: "ERROR" }, 404) }));
 
     await expect(blind()(ORDER)).rejects.toBeInstanceOf(NoWalletAvailableError);
+  });
+});
+
+describe("a leg the bank rail built, against the gateway's own settlement check", () => {
+  function paidInto(...credits: Credit[]): void {
+    const handler = bankVerifyEndpoint({ secret: SECRET, statement: async () => credits });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: RequestInfo | URL) => handler(new Request(String(url)))),
+    );
+  }
+
+  async function toldToTheGateway(): Promise<{ paymentHash: string; verifyUrl: string }> {
+    const calls = stubFetch(railsServing());
+    await bank()(ORDER);
+    const told = bodyOf(`${GATEWAY}/watched-payments`, calls);
+
+    return { paymentHash: String(told["payment_hash"]), verifyUrl: String(told["verify_url"]) };
+  }
+
+  it("settles once the money is on the statement, with nothing added to the gateway", async () => {
+    const told = await toldToTheGateway();
+    paidInto({
+      amountMinor: ORDER.amountMinor,
+      currency: ORDER.currency,
+      reference: `PLATBA ${ORDER.reference} DIKY`,
+      bookedAt: 1_780_000_000,
+    });
+
+    const preimage = await checkSettled(told.verifyUrl, told.paymentHash);
+
+    expect(preimage).toMatch(/^[0-9a-f]{64}$/);
+    expect(preimageMatchesHash(String(preimage), told.paymentHash)).toBe(true);
+  });
+
+  it("stays unsettled while nothing has landed", async () => {
+    const told = await toldToTheGateway();
+    paidInto();
+
+    expect(await checkSettled(told.verifyUrl, told.paymentHash)).toBeNull();
+  });
+
+  it("does not settle on a credit for a different order", async () => {
+    const told = await toldToTheGateway();
+    paidInto({
+      amountMinor: ORDER.amountMinor,
+      currency: ORDER.currency,
+      reference: "ORDER-SOMEONE-ELSE",
+      bookedAt: 1_780_000_000,
+    });
+
+    expect(await checkSettled(told.verifyUrl, told.paymentHash)).toBeNull();
   });
 });
