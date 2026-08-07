@@ -35,6 +35,7 @@ const RECONNECT_DELAY_MS = 3_000;
 const RECONNECT_CAP_MS = 30_000;
 const UNANSWERED_ATTEMPTS = 5;
 const TRIGGER_MIN_CHARS = 16;
+const STRANGER_PROBE = "is-this-gateway-yours";
 
 function unguessable(trigger: string): string {
   if (trigger.length < TRIGGER_MIN_CHARS) {
@@ -135,6 +136,7 @@ export class ThunderBridge {
   private readonly baseUrl: string;
   private readonly verify: boolean;
   private readonly token: string | null;
+  private strangers: Promise<boolean> | null = null;
 
   constructor(baseUrl: string, options?: ThunderBridgeOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
@@ -149,6 +151,25 @@ export class ThunderBridge {
    */
   get isPrivate(): boolean {
     return this.token !== null;
+  }
+
+  /**
+   * Whether the gateway turns away a caller carrying no token, asked by making
+   * one unauthenticated read it would have to refuse. `isPrivate` answers only
+   * whether you configured a token, which is your side of the arrangement and
+   * says nothing about the gateway's, so a made-up token against a public
+   * instance reads as private and is not. Asked once and remembered, because an
+   * instance does not change its mind. Anything other than a refusal counts as
+   * open, so an unreachable gateway fails closed
+   */
+  async refusesStrangers(): Promise<boolean> {
+    this.strangers ??= fetch(`${this.baseUrl}/incoming-payments/${STRANGER_PROBE}`, {
+      headers: { accept: "application/json" },
+    })
+      .then((answer) => answer.status === 401)
+      .catch(() => false);
+
+    return await this.strangers;
   }
 
   /**

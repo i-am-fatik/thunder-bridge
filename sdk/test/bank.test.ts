@@ -36,11 +36,19 @@ function statementOf(...credits: Credit[]): Statement {
   return async () => credits;
 }
 
-function watching(answer?: (body: Record<string, unknown>) => Response): FetchCall[] {
+const PROBE = "/incoming-payments/is-this-gateway-yours";
+
+function watching(
+  answer?: (body: Record<string, unknown>) => Response,
+  servesStrangers = false,
+): FetchCall[] {
   const calls: FetchCall[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith(PROBE)) {
+        return jsonResponse({}, servesStrangers ? 404 : 401);
+      }
       calls.push({ url: String(input), init });
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       if (answer) return answer(body);
@@ -149,16 +157,32 @@ describe("bankTransfer", () => {
     );
   });
 
-  it("refuses a gateway with no token, because its operator would read the order book", async () => {
-    watching();
+  it("refuses a gateway that serves strangers, because its operator would read the order book", async () => {
+    watching(undefined, true);
 
     await expect(bankTransfer(asking({ gateway: new ThunderBridge(GATEWAY) }))).rejects.toThrow(
       "not yours",
     );
   });
 
+  it("refuses a gateway that serves strangers even when a token was configured against it", async () => {
+    watching(undefined, true);
+
+    await expect(
+      bankTransfer(asking({ gateway: new ThunderBridge(GATEWAY, { token: "wishful" }) })),
+    ).rejects.toThrow("not yours");
+  });
+
+  it("accepts a gateway that refuses strangers, whatever the caller configured", async () => {
+    watching();
+
+    const transfer = await bankTransfer(asking({ gateway: new ThunderBridge(GATEWAY) }));
+
+    expect(transfer.id).toBe(WATCH_ID);
+  });
+
   it("registers on a public gateway only when told the order book is not worth hiding", async () => {
-    const calls = watching();
+    const calls = watching(undefined, true);
 
     const transfer = await bankTransfer(
       asking({ gateway: new ThunderBridge(GATEWAY), allowPublicGateway: true }),

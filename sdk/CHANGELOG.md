@@ -42,6 +42,13 @@ gone. Breaking for a client that talks to an instance still emitting it.
 
 ### Fixed
 
+- `bankTransfer` asked the wrong side whether a gateway was private. `isPrivate` reports
+  whether *you* configured a token, so a made-up token against a public instance read as
+  private and the rail registered happily, handing that operator the amount and the
+  reference off every verify URL. It now asks the gateway itself through the new
+  `refusesStrangers()`, one unauthenticated read a private instance has to refuse, asked
+  once per client and remembered. Anything but a refusal counts as open, so an
+  unreachable gateway fails closed. `isPrivate` stays, it just no longer guards the rail.
 - A trigger secret shorter than 16 characters is now refused wherever one is given.
   Following a trigger is an unauthenticated WebSocket the gateway does not rate limit,
   and the socket opening is itself the confirmation, so a short secret was brute

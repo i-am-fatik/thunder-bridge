@@ -42,6 +42,7 @@ const ORDER: Order = { reference: "ORDER-2026-77", amountMinor: 48_055, currency
 
 function railsServing(overrides: Routes = {}): Routes {
   return {
+    [`${GATEWAY}/incoming-payments/is-this-gateway-yours`]: () => jsonResponse({}, 401),
     [`${GATEWAY}/watched-payments`]: () =>
       jsonResponse(
         {

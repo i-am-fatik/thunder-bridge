@@ -109,7 +109,7 @@ them and this table does not repeat them.
 | `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your domain |
 | `seal(secret, plaintext)`, `unseal` | the blob the gateway stores and cannot read |
 | `toLnurl(url)` | bech32-encode an endpoint url |
-| `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway with no token |
+| `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway that serves strangers |
 | `bankVerifyEndpoint(config)` | the other half, the LUD-21 shape backed by your own statement |
 | `fioStatement(config)` | a `Statement` reading a Fio account, several tokens used strictly in turn |
 
