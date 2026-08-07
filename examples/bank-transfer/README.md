@@ -85,8 +85,9 @@ IBAN=CZ6508000000192000145399 FIO_TOKEN=... \
 curl -s -X POST localhost:8000/order | jq
 ```
 
-The `spd` in the answer is what goes in the QR. `spdToSvg(spd)` renders it,
-`invoiceToSvg(bolt11)` renders the other one.
+Every leg in the answer has the same shape whichever rail made it, so `qrToSvg(leg.qr)`
+renders any of them and `leg.rail` says which one the payer is looking at. `leg.scan`
+is the payload itself, a Short Payment Descriptor or a BOLT11 invoice.
 
 `/content` asks the gateway about each leg and unlocks on the first that is paid,
 which is the right shape here because an invocation ends when it answers and a
