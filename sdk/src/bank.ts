@@ -15,6 +15,12 @@ export interface Credit {
   currency: string;
   /** Whatever the payer wrote, wherever this bank puts it. Matching is a substring, so noise around it is fine */
   reference: string;
+
+  /**
+   * Unix seconds. A bank that books a day rather than an instant, as Fio does,
+   * gives the day's midnight in its own zone, so rendering this in UTC can show
+   * the day before. Nothing here matches on it, it is yours to read
+   */
   bookedAt: number;
 }
 
