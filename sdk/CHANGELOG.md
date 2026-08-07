@@ -42,6 +42,15 @@ gone. Breaking for a client that talks to an instance still emitting it.
 
 ### Fixed
 
+- A trigger secret shorter than 16 characters is now refused wherever one is given.
+  Following a trigger is an unauthenticated WebSocket the gateway does not rate limit,
+  and the socket opening is itself the confirmation, so a short secret was brute
+  forceable online. Every stream carries preimages, so guessing one is worth real money.
+- The `trigger` doc comment claimed only its sha256 ever reaches the gateway. That is
+  true of registering, and false of following: `followTrigger` puts the secret itself in
+  the socket URL, because the gateway hashes what it is handed to find the stream. The
+  ledger still stores only the hash, so a stolen database cannot subscribe, but the
+  operator of a gateway you do not own learns the secret the first time you connect.
 - `fioStatement` read `Credit.bookedAt` as unix milliseconds and got `0` for every
   credit. Fio books a day and a UTC offset, `2026-07-15+0200`, which is neither a
   number nor something `Date.parse` takes. Found against a real account, on a response

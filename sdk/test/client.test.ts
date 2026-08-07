@@ -1553,6 +1553,14 @@ describe("watchPayment", () => {
     expect(String(calls[0].init?.body)).not.toContain("the-overlay-holds-this");
   });
 
+  it("refuses a trigger short enough to guess, because nothing rate limits a guess at it", async () => {
+    stubFetch(gatewayWatches());
+
+    await expect(
+      new ThunderBridge(GATEWAY).watchPayment(watchable({ trigger: "shop1" })),
+    ).rejects.toThrow(/at least 16 characters/);
+  });
+
   it("passes a sealed blob through untouched, since only the watcher can read it", async () => {
     const calls = stubFetch(gatewayWatches());
 

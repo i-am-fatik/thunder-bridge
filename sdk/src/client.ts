@@ -34,6 +34,17 @@ const TERMINAL: ReadonlySet<PaymentStatus> = new Set(["paid", "expired"]);
 const RECONNECT_DELAY_MS = 3_000;
 const RECONNECT_CAP_MS = 30_000;
 const UNANSWERED_ATTEMPTS = 5;
+const TRIGGER_MIN_CHARS = 16;
+
+function unguessable(trigger: string): string {
+  if (trigger.length < TRIGGER_MIN_CHARS) {
+    throw new Error(
+      `a trigger secret is the only thing guarding its stream, and nothing rate limits a guess at it, so it has to be at least ${TRIGGER_MIN_CHARS} characters nobody can predict`,
+    );
+  }
+
+  return trigger;
+}
 
 function backoffMs(firstDelay: number, attempt: number): number {
   const grown = Math.min(firstDelay * 2 ** (attempt - 1), RECONNECT_CAP_MS);
@@ -82,9 +93,12 @@ export interface CreateOptions {
 
   /**
    * Groups this payment with every other one carrying the same secret, so
-   * `followTrigger` can watch the place rather than the payment. Only its
-   * sha256 reaches the gateway, and the secret itself is what authorises the
-   * stream, so keep it apart from any URL a payer sees
+   * `followTrigger` can watch the place rather than the payment. Registering
+   * sends only its sha256, which is also all the gateway stores, so a stolen
+   * ledger cannot subscribe. Following sends the secret itself, because the
+   * gateway hashes what it is given to find the stream, so the operator of a
+   * gateway you do not own learns it the first time you connect. Keep it apart
+   * from any URL a payer sees
    */
   trigger?: string;
 }
@@ -149,7 +163,10 @@ export class ThunderBridge {
     const response = await fetch(`${this.baseUrl}/incoming-payments`, {
       method: "POST",
       headers,
-      body: createRequestBody(params, options?.trigger ? sha256Hex(options.trigger) : null),
+      body: createRequestBody(
+        params,
+        options?.trigger ? sha256Hex(unguessable(options.trigger)) : null,
+      ),
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -429,7 +446,10 @@ export class ThunderBridge {
     const response = await fetch(`${this.baseUrl}/watched-payments`, {
       method: "POST",
       headers: this.sending(),
-      body: watchRequestBody(params, params.trigger ? sha256Hex(params.trigger) : null),
+      body: watchRequestBody(
+        params,
+        params.trigger ? sha256Hex(unguessable(params.trigger)) : null,
+      ),
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -450,7 +470,7 @@ export class ThunderBridge {
    */
   followTrigger(secret: string, options: FollowOptions): () => void {
     const base = this.baseUrl.replace(/^http/, "ws");
-    const direct = `${base}/ws/triggers/${encodeURIComponent(secret)}`;
+    const direct = `${base}/ws/triggers/${encodeURIComponent(unguessable(secret))}`;
     const firstDelay = options.reconnectDelayMs ?? RECONNECT_DELAY_MS;
 
     let socket: WebSocket | null = null;
