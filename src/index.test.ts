@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
+import { connect } from "node:net";
 
 import { expect, test } from "vitest";
 
@@ -335,6 +336,28 @@ test("listing exists only on a private gateway, and a public one does not admit 
 	expect(body.settled_scanned).toBe(1_000);
 
 	closed.stop();
+});
+
+test("a host header that is not a host refuses the upgrade instead of killing the process", async () => {
+	const app = await running();
+	const base = `http://127.0.0.1:${app.service.port}`;
+
+	const killed = await new Promise<string>((resolve) => {
+		const probe = connect(app.service.port, "127.0.0.1", () => {
+			probe.write(
+				"GET /ws/triggers/anything HTTP/1.1\r\nHost: ]\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+					"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+			);
+		});
+		probe.on("data", (answer: Buffer) => resolve(answer.toString()));
+		probe.on("close", () => resolve(""));
+		probe.on("error", () => resolve(""));
+	});
+
+	expect(killed).not.toBe("");
+	expect((await fetch(`${base}/health`)).status).toBe(200);
+
+	app.stop();
 });
 
 test("the list is newest first and says how far back it scanned rather than pretending it is all", async () => {

@@ -143,17 +143,19 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		const path = pathOf(incoming);
 		const ticketed = TICKETED.exec(path);
 		if (ticketed) {
-			void readTicket(options.key, ticketed[1]!, unixNow()).then((permits) => {
-				if (socket.destroyed) return;
-				if (permits === null) {
-					refuseUpgrade(socket);
-					return;
-				}
-				upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
-					if (permits.kind === "trigger") subscribe(accepted, permits.trigger, store, followers);
-					else follow(accepted, permits.paymentId, store, followers);
-				});
-			});
+			void readTicket(options.key, ticketed[1]!, unixNow())
+				.then((permits) => {
+					if (socket.destroyed) return;
+					if (permits === null) {
+						refuseUpgrade(socket);
+						return;
+					}
+					upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
+						if (permits.kind === "trigger") subscribe(accepted, permits.trigger, store, followers);
+						else follow(accepted, permits.paymentId, store, followers);
+					});
+				})
+				.catch(() => refuseUpgrade(socket));
 			return;
 		}
 
@@ -587,7 +589,7 @@ async function quoted(request: Request): Promise<Response> {
 }
 
 function pathOf(incoming: IncomingMessage): string {
-	return new URL(incoming.url ?? "/", `http://${incoming.headers.host ?? "app"}`).pathname;
+	return new URL(incoming.url ?? "/", "http://app").pathname;
 }
 
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
@@ -605,7 +607,7 @@ async function asRequest(incoming: IncomingMessage): Promise<Request> {
 		chunks.push(chunk as Buffer);
 	}
 
-	return new Request(`http://${incoming.headers.host ?? "app"}${incoming.url ?? "/"}`, {
+	return new Request(`http://app${incoming.url ?? "/"}`, {
 		method: incoming.method,
 		headers,
 		body: Buffer.concat(chunks),
