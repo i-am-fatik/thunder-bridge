@@ -10,6 +10,7 @@ const PREIMAGE = "0".repeat(64);
 const PAYMENT_HASH = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925";
 const VERIFY_URL = "https://coinos.io/api/lnurl/verify/1";
 const HOOK_URL = "https://shop.example/hooks/lightning";
+const NEVER_OVERLAPPED_MS = 2000;
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: string };
 
@@ -34,10 +35,13 @@ function counting(answer: (url: string) => Response): { peak: () => number; rest
 	const real = globalThis.fetch;
 	let live = 0;
 	let peak = 0;
+	let bothInFlight = () => {};
+	const overlapped = new Promise<void>((resolve) => (bothInFlight = resolve));
 	globalThis.fetch = (async (target: string | URL | Request) => {
 		live += 1;
 		peak = Math.max(peak, live);
-		await sleep(20);
+		if (live >= 2) bothInFlight();
+		await Promise.race([overlapped, sleep(NEVER_OVERLAPPED_MS)]);
 		live -= 1;
 
 		return answer(String(target));
