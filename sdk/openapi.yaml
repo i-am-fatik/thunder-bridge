@@ -1,0 +1,307 @@
+openapi: 3.1.0
+
+info:
+  title: thunder-bridge, the endpoint your own service serves
+  version: 0.8.1
+  license:
+    name: MIT
+    identifier: MIT
+  summary: The LNURL-pay endpoint that `lnurlPayEndpoint` turns your service into.
+  description: |
+    The SDK is a client of the gateway, and its own API is TypeScript rather than HTTP. One
+    part of it is not: `lnurlPayEndpoint` returns a Fetch handler, and mounting that handler
+    makes your service speak LNURL-pay to every Lightning wallet in the world. This document
+    is that surface, so a wallet author can read what your service answers without reading
+    the SDK, and so you can see what you exposed by mounting it.
+
+    Both halves of LUD-06 live on one path. A bare request is the payRequest and quotes your
+    address list, and a request carrying `to` is the callback and mints. Which address won is
+    decided at payRequest and pinned into the callback URL, because LUD-06 binds the invoice
+    to the metadata already served, and an invoice from a different address would be refused
+    by the payer's own wallet.
+
+    Nothing is stored between the two calls. The callback URL carries the decision and an
+    HMAC over it, so the handler holds no state and runs on Deno Deploy, Workers, Hono, Next
+    and Node alike.
+
+    `bankVerifyEndpoint` is the other handler, and it puts a second rail behind the same
+    contract: a bank transfer, proved to the gateway by the LUD-21 shape a Lightning wallet
+    would have answered with. Both paths below are therefore yours to mount and yours to
+    serve, and neither of them is the gateway.
+
+    The gateway's own API is a separate document, `openapi.yaml` in the repository root, and
+    the webhook your server receives is described there under `webhooks`.
+
+servers:
+  - url: https://your-service.example
+    description: Wherever you mounted the handler.
+
+security: []
+
+tags:
+  - name: lnurl-pay
+    description: The two halves of LUD-06, on the one path a lightning address resolves to.
+  - name: bank-transfer
+    description: The settlement proof for money that arrived over a bank rail instead of Lightning.
+
+paths:
+  /.well-known/lnurlp/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: |
+          The local part of the lightning address. LUD-16 says `name@your-service.example`
+          resolves to this path, which is why the handler is usually mounted here. It works
+          on any path you like, and then only a raw LNURL reaches it.
+        schema:
+          type: string
+        examples:
+          tips:
+            value: tips
+    get:
+      tags: [lnurl-pay]
+      operationId: payRequestOrCallback
+      summary: Quote the price, or mint the invoice for a quote already given
+      description: |
+        Without `to` this answers the payRequest. It calls your `amountMsat()` once, quotes
+        your address list through the gateway, and returns the first address that answers and
+        accepts the amount, along with that wallet's own LUD-06 metadata string byte for byte.
+        `minSendable` and `maxSendable` are both the price, so the payer's wallet offers no
+        amount field and the payment is exactly what you asked for.
+
+        With `to` this is the callback. The signature is checked first, and a request that was
+        not signed by this service is refused before anything is minted, which is what stops a
+        stranger making your endpoint mint invoices on wallets of their choosing. The invoice
+        then comes from the recipient's own wallet, never from this service and never from the
+        gateway, and `verify` on the answer points at that recipient's LUD-21 endpoint.
+
+        Every refusal is HTTP 200 with `status: "ERROR"`, as LUD-06 requires. A wallet reads
+        the body, not the status line.
+      parameters:
+        - name: to
+          in: query
+          required: false
+          description: |
+            The address that won the payRequest, put here by this service when it built the
+            callback URL. Its presence is what makes a request the callback.
+          schema:
+            $ref: "#/components/schemas/ln_address"
+        - name: msat
+          in: query
+          required: false
+          description: The price quoted at payRequest, in millisatoshi. Signed, so it cannot be edited.
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+        - name: n
+          in: query
+          required: false
+          description: |
+            A random nonce minted per payRequest. It is in the signature and it is also the
+            idempotency key for the mint, so a wallet that retries the same callback URL gets
+            the same invoice back instead of a second one.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{32}$"
+        - name: sig
+          in: query
+          required: false
+          description: |
+            Hex HMAC-SHA256 over `<to>|<msat>|<n>`, keyed with the `secret` you configured.
+            Compared in constant time, and a mismatch is refused with `this callback was not
+            signed here`.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{64}$"
+        - name: amount
+          in: query
+          required: false
+          description: |
+            What the payer's wallet intends to send, in millisatoshi, per LUD-06. This is a
+            fixed-price endpoint, so anything other than the quoted price is refused rather
+            than quietly minted.
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+      responses:
+        "200":
+          description: |
+            A payRequest, an invoice, or a refusal. Which one is decided by `to` and by
+            whether the signature held, and LUD-06 gives all three the same status code.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/pay_request"
+                  - $ref: "#/components/schemas/invoice"
+                  - $ref: "#/components/schemas/refusal"
+
+  /verify/bank:
+    get:
+      tags: [bank-transfer]
+      operationId: verifyBankTransfer
+      summary: Say whether the transfer landed, and release the preimage when it did
+      description: |
+        Mounted wherever you passed `verifyUrl` to `bankTransfer`, which puts what to look for
+        in the query and signs it. The gateway polls this exactly as it polls a wallet's LUD-21
+        endpoint, and it cannot tell the difference, which is the whole point.
+
+        A query this service did not sign is refused. Without that check the endpoint would
+        answer "did anyone send you this amount with this note" to whoever asked, which is a
+        bank statement handed out one question at a time.
+
+        The preimage is an HMAC of the reference, the amount and the currency under a secret
+        only this service holds, so the gateway can check it hashes to what it was given and
+        still cannot produce it. Nothing is stored between calls.
+      parameters:
+        - name: ref
+          in: query
+          required: true
+          description: |
+            What the payer had to leave on the transfer. Matched as a substring against every
+            field the bank puts a note in, so noise around it is fine.
+          schema:
+            type: string
+        - name: minor
+          in: query
+          required: true
+          description: The price in the smallest unit of the currency, so 48055 is 480.55 CZK.
+          schema:
+            type: integer
+            minimum: 1
+        - name: cc
+          in: query
+          required: true
+          description: The three letter currency code the credit has to be in.
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+        - name: sig
+          in: query
+          required: true
+          description: Hex HMAC-SHA256 over `<ref>|<minor>|<cc>`, minted by `bankTransfer`.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{64}$"
+      responses:
+        "200":
+          description: |
+            Whether a matching credit is on the statement. The preimage is present only once
+            one is, and it never appears without `settled` being true.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/settlement"
+        "400":
+          description: The query is missing something, so there is nothing to look for.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/unsettled"
+        "403":
+          description: The signature does not hold, so this service never minted the question.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/unsettled"
+
+components:
+  schemas:
+    settlement:
+      type: object
+      description: The LUD-21 answer, whichever rail the money took.
+      properties:
+        settled:
+          type: boolean
+        preimage:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Hashes to the payment hash the gateway was given at watch time. Present only when
+            `settled` is true.
+      required: [settled]
+
+    unsettled:
+      type: object
+      description: A refusal, shaped so a caller that only reads `settled` still reads it right.
+      properties:
+        settled:
+          type: boolean
+          const: false
+      required: [settled]
+
+    ln_address:
+      type: string
+      format: email
+      description: A LUD-16 lightning address, `user@domain`.
+      examples: ["someone@blink.sv"]
+
+    pay_request:
+      type: object
+      description: The LUD-06 payRequest, answered when the request carries no `to`.
+      properties:
+        tag:
+          type: string
+          const: payRequest
+        callback:
+          type: string
+          format: uri
+          description: |
+            This same path with the winning address, the price, a nonce and the signature on
+            it. Set `baseUrl` when a proxy hides your public URL, because the wallet has to be
+            able to reach whatever is in here.
+        metadata:
+          type: string
+          description: |
+            The winning wallet's own LUD-06 metadata string, passed through unchanged. It must
+            stay byte for byte identical, because the payer's wallet hashes it and compares the
+            result to the invoice's description hash, and only the recipient's wallet mints
+            that invoice.
+          examples: ['[["text/plain","Paying someone@blink.sv"]]']
+        minSendable:
+          type: integer
+          description: The price in millisatoshi. Equal to `maxSendable`, so the amount is not the payer's to choose.
+        maxSendable:
+          type: integer
+          description: The same price. A fixed-price endpoint quotes one number twice.
+      required: [tag, callback, metadata, minSendable, maxSendable]
+
+    invoice:
+      type: object
+      description: The LUD-06 callback answer, carrying an invoice the recipient's wallet issued.
+      properties:
+        status:
+          type: string
+          const: OK
+        pr:
+          type: string
+          description: The BOLT11 invoice. This is what the payer pays, and it pays the recipient directly.
+        routes:
+          type: array
+          description: Always empty. The field is required by LUD-06 and means nothing here.
+          items: {}
+        verify:
+          type: string
+          format: uri
+          description: |
+            The recipient's own LUD-21 endpoint, on their server rather than yours. Anyone
+            holding the invoice can ask it whether the payment settled, so settlement is
+            proved by the wallet that was paid and not asserted by anything in this chain.
+      required: [status, pr, routes, verify]
+
+    refusal:
+      type: object
+      description: |
+        A LUD-06 error. HTTP is still 200, because that is what the standard says and what
+        every wallet parses.
+      properties:
+        status:
+          type: string
+          const: ERROR
+        reason:
+          type: string
+          description: For a human reading a wallet's error toast, never for a program to branch on.
+          examples: ["this callback was not signed here"]
+      required: [status, reason]
