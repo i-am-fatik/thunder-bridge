@@ -121,6 +121,24 @@ another function of that shape and persistence wraps it from outside rather than
 living inside it. Nothing above it changes, and the package stays ignorant of
 whatever runtime you keep state in.
 
+**One shape for every payment method** - [`src/rail.ts`](src/rail.ts)
+
+| Export | What it does |
+|---|---|
+| `bankRail(config)` | a `Rail` selling for a bank transfer, reading back through any `Statement` |
+| `lightningRail(config)` | a `Rail` where the gateway mints the invoice, so it learns the address and the amount |
+| `blindLightningRail(config)` | a `Rail` that resolves the address itself and tells the gateway only a hash |
+
+`Rail` is `(order: Order) => Promise<Leg>`. Everything that differs between rails
+is bound once when the rail is built, so the only thing passed per sale is which
+sale it is: a reference, an amount in minor units and a currency. A `Leg` reads
+the same whichever rail made it, which is what lets `firstToSettle` take a mixed
+list without being told what is in it.
+
+The gateway is already indifferent to all of this. It holds a payment hash, polls
+a verify URL and reports what came back, so a rail is an SDK-side arrangement of
+calls the gateway already answers, not a plugin it has to load.
+
 **Pricing a fiat order** - [`src/price.ts`](src/price.ts), [`src/currency.ts`](src/currency.ts)
 
 | Export | What it does |
@@ -133,10 +151,12 @@ whatever runtime you keep state in.
 **QR codes** - [`src/qr.ts`](src/qr.ts)
 
 Every renderer returns a string, so they work on a server, in a worker and in a
-browser with no canvas involved. `invoiceToSvg` takes an invoice or a lightning
-address, `lnurlToSvg` takes your own endpoint url, `spdToSvg` takes the `spd` from
-`bankTransfer`. Each has a `…ToDataUrl` twin for an `<img>` `src`. A BOLT12 offer
-is not handled, because this gateway never returns one.
+browser with no canvas involved. `qrToSvg` takes any rail's `Leg.qr` and needs to
+know nothing else, because a rail states its own payload. Below it sit the
+format-named ones for calling directly: `invoiceToSvg` takes an invoice or a
+lightning address, `lnurlToSvg` takes your own endpoint url, `spdToSvg` takes a
+Short Payment Descriptor. Each has a `…ToDataUrl` twin for an `<img>` `src`. A
+BOLT12 offer is not handled, because this gateway never returns one.
 
 ```ts
 import { invoiceToSvg, lnurlToSvg } from "thunder-bridge";

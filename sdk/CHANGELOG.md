@@ -15,8 +15,22 @@ releases a version number once it has been published.
 
 ## 0.8.2
 
-The retired problem-type namespace is gone. Breaking for a client that talks to an
-instance still emitting it.
+Every payment method now answers one type, and the retired problem-type namespace is
+gone. Breaking for a client that talks to an instance still emitting it.
+
+### Added
+
+- `Rail`, one type every payment method satisfies: `(order: Order) => Promise<Leg>`.
+  Everything that differs between rails is bound when the rail is built, so the only
+  thing passed per sale is which sale it is. `bankRail`, `lightningRail` and
+  `blindLightningRail` are the three that ship, and a `Leg` reads the same whichever
+  one made it, so `firstToSettle` takes a mixed list without knowing what is in it.
+- `qrToSvg` and `qrToDataUrl` render any rail's `Leg.qr`. A rail states its own QR
+  payload, a BOLT11 invoice under the `LIGHTNING` scheme or a Short Payment Descriptor
+  as it stands, so nothing has to ask which rail it is looking at. The three
+  format-named pairs stay for anyone calling them directly.
+- `lightningRail` sends no idempotency key unless asked. A key stable across re-offers
+  is one the gateway can join against the bank leg's reference, so it is opt in.
 
 ### Removed
 

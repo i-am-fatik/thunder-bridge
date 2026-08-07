@@ -61,6 +61,20 @@ export function spdToDataUrl(spd: string, options?: QrOptions): string {
   return asDataUrl(spdToSvg(spd, options));
 }
 
+/**
+ * Render any rail's `Leg.qr` as an SVG QR code. Each rail states its own payload,
+ * a BOLT11 invoice under the `LIGHTNING` scheme or a Short Payment Descriptor as
+ * it stands, so this draws a leg without being told which rail made it
+ */
+export function qrToSvg(payload: string, options?: QrOptions): string {
+  return svgOf(payload, options);
+}
+
+/** SVG data URL of a leg's QR, for an `<img>` `src` */
+export function qrToDataUrl(payload: string, options?: QrOptions): string {
+  return asDataUrl(qrToSvg(payload, options));
+}
+
 function svgOf(scanned: string, options?: QrOptions): string {
   const size = options?.size ?? 256;
   const color = options?.color ?? "#000";

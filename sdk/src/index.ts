@@ -18,6 +18,15 @@ export type {
 } from "./bank.js";
 export { fioStatement } from "./fio.js";
 export type { FioConfig } from "./fio.js";
+export { bankRail, blindLightningRail, lightningRail } from "./rail.js";
+export type {
+  BankRailConfig,
+  BlindLightningRailConfig,
+  Leg,
+  LightningRailConfig,
+  Order,
+  Rail,
+} from "./rail.js";
 export { bitstamp, coinbase, coinmate, kraken, medianOf, msatFor } from "./price.js";
 export type { MedianOptions, Ticker } from "./price.js";
 export { minorScaleOf, minorUnitsOf } from "./currency.js";
@@ -29,6 +38,8 @@ export {
   invoiceToSvg,
   lnurlToDataUrl,
   lnurlToSvg,
+  qrToDataUrl,
+  qrToSvg,
   spdToDataUrl,
   spdToSvg,
 } from "./qr.js";
