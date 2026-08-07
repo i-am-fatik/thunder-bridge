@@ -1,0 +1,1075 @@
+openapi: 3.1.0
+
+info:
+  title: Thunder Bridge
+  version: 0.1.0
+  license:
+    name: MIT
+    identifier: MIT
+  summary: Lightning payments with no node, where the payer pays the recipient's own invoice.
+  description: |
+    A payer posts a priority list of Lightning addresses and an amount. The gateway asks
+    each address's own LNURL-pay endpoint for a real invoice, keeps the first one that is
+    provable, and hands it back. The payer pays that invoice directly to the recipient's
+    wallet. The gateway mints nothing, holds nothing, and takes nothing, so there is no
+    custody window and no fee to police.
+
+    Delivery is proved by the recipient, not asserted by the gateway. Every invoice this
+    API returns carries a LUD-21 `verify_url` on the recipient's own server, and a payment
+    reaches `paid` only when that server hands back a preimage hashing to the invoice's
+    payment hash.
+
+    The resource model follows Open Payments 1.3.3, so `incoming-payments` and `quotes`
+    mean here what they mean there. "Incoming" is from the recipient's side, never the
+    gateway's. Two deliberate departures: property names are snake_case rather than
+    camelCase, matching the rest of this house's APIs, and there is no authorization
+    server, because an API that holds no funds and opens no accounts has nothing to grant
+    access to.
+
+servers:
+  - url: https://thunder-bridge-production.up.railway.app
+    description: Production
+  - url: http://localhost:3000
+    description: A local instance
+
+security: []
+
+tags:
+  - name: incoming-payments
+    description: Invoices issued by a recipient's own wallet, and the proof they were paid.
+  - name: quotes
+    description: What an address would accept, asked without minting an invoice.
+  - name: triggers
+    description: One static place many people pay, and the stream of what lands there.
+  - name: health
+    description: Whether this instance is alive, and separately whether to send it work.
+  - name: docs
+    description: This specification, and a page that renders it.
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Liveness probe
+      description: |
+        Answers as soon as the HTTP listener is up and the store has opened, and keeps
+        answering while the watch loop is being scheduled. It turns 503 for the one condition
+        a restart cures: the loop has stopped being scheduled at all, which means this
+        process is stuck rather than busy. A slow tick is not that, so pacing a crowded
+        wallet host never shows up here.
+      responses:
+        "200":
+          description: The instance is serving.
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: OK
+        "503":
+          description: |
+            The watch loop is no longer being scheduled, so this instance needs replacing
+            rather than draining.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/problem"
+
+  /ready:
+    get:
+      tags: [health]
+      operationId: getReadiness
+      summary: Readiness probe, and the vitals on a gateway that is yours
+      description: |
+        Whether this instance should be sent work, which is a different question from whether
+        it is alive. It turns 503 once the instance is draining, so a balancer takes it out of
+        rotation before the listener closes and a redeploy costs nobody a refused request.
+
+        A full worklist is reported, never a refusal: an instance at `MAX_PENDING` still
+        settles and still serves, and `POST /incoming-payments` is where a caller learns it
+        cannot take another. Open to everyone, like `/health`, but the vitals are added only
+        for a caller holding the bearer, because a count is still a fact about somebody's
+        trade.
+      responses:
+        "200":
+          description: |
+            Ready. Without the bearer the body is only `{"status":"ready"}`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    const: ready
+                  origin:
+                    type: string
+                    description: This instance's own identity in the cluster.
+                  peers:
+                    type: integer
+                    description: Instances it is currently gossiping with.
+                  pending:
+                    type: integer
+                    description: Payments on the worklist.
+                  max_pending:
+                    type: integer
+                    description: Where `MAX_PENDING` stops taking new ones.
+                  watching:
+                    type: string
+                    enum: [scheduled, stalled]
+                  sync:
+                    type: object
+                    description: |
+                      Whether this instance holds what its peers hold. `converged` means a peer
+                      answered our watermarks with a batch that came back short, so it held
+                      nothing we lack. `catching-up` means peers are connected and that has not
+                      happened yet, `alone` means nobody answered, which is the normal state of a
+                      single-instance deployment. Readiness never refuses on it: one surviving
+                      instance has to keep taking payments.
+                    properties:
+                      state:
+                        type: string
+                        enum: [converged, catching-up, alone]
+                      converged_at:
+                        type: [integer, "null"]
+                        description: Unix seconds of the last short reply.
+                      origins:
+                        type: integer
+                        description: Instances whose facts this one has recorded.
+                      marks:
+                        type: object
+                        description: |
+                          Sum of the sequence numbers held per fact source. Curl two instances and
+                          compare: equal marks and equal `rows` with equal `origins` is a strong
+                          fingerprint that they hold the same facts. A fingerprint, not a hash,
+                          because a mark is a maximum and says nothing about holes below it.
+                        additionalProperties:
+                          type: integer
+                      rows:
+                        type: object
+                        description: |
+                          Rows actually held per fact source. Matching marks with mismatched rows is
+                          the shape of a hole, which is the one thing a mark alone cannot show.
+                        additionalProperties:
+                          type: integer
+                required: [status]
+        "503":
+          description: This instance is draining and is not taking new work.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/problem"
+
+  /openapi.yaml:
+    get:
+      tags: [docs]
+      operationId: getSpec
+      summary: This document, served by the instance it describes
+      description: |
+        Open to everyone, on a private gateway too. The specification says what the API is,
+        not what any caller's payments are, so gating it would hide nothing and would only
+        stop a client generating itself against the instance it talks to.
+      responses:
+        "200":
+          description: The specification.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      tags: [docs]
+      operationId: getDocs
+      summary: The specification, rendered for reading
+      description: |
+        An HTML page that loads `/openapi.yaml` and renders it. The renderer is pinned to
+        one immutable version and checked against a subresource-integrity hash, and the page
+        carries a Content-Security-Policy that allows a script only from
+        `https://cdn.jsdelivr.net` and a connection only back to this origin, so neither
+        telemetry nor a proxied test request reaches a third party. When the CDN cannot be
+        reached the page still names `/openapi.yaml`, which this instance serves itself.
+      responses:
+        "200":
+          description: The rendered reference.
+          headers:
+            content-security-policy:
+              description: Holds the page to the pinned renderer and to this origin.
+              schema:
+                type: string
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /incoming-payments:
+    get:
+      tags: [incoming-payments]
+      operationId: listIncomingPayments
+      summary: List what this gateway is watching, on a private gateway only
+      description: |
+        Served only by a gateway started with `GATEWAY_TOKEN`. A public one answers `404`,
+        because a list on a shared gateway would hand every caller everyone else's payments,
+        and it does not disclose that the endpoint exists elsewhere.
+
+        Newest first, by creation. `settled_scanned` says how many settled records were read
+        to build the page: settled payments older than that window are not in the answer, and
+        the response says so rather than looking complete.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: How many to return, 1 to 500, defaults to 50. Outside that is a 400.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+      responses:
+        "200":
+          description: What the gateway is watching, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/incoming_payment"
+                  settled_scanned:
+                    type: integer
+                    description: How many settled records were scanned to build this page.
+                required: [payments, settled_scanned]
+        "400":
+          $ref: "#/components/responses/bad_request"
+        "401":
+          $ref: "#/components/responses/unauthorized"
+        "404":
+          description: This gateway is public, so it serves no list.
+
+    post:
+      tags: [incoming-payments]
+      operationId: createIncomingPayment
+      summary: Get a provable invoice from the first address that will issue one
+      description: |
+        Walks `ln_addresses` in order and stops at the first address that resolves, accepts
+        the amount, returns an invoice for exactly that amount, binds that invoice to the
+        metadata it serves (LUD-06 description hash), and publishes a usable LUD-21
+        `verify_url`. An address failing any of those is skipped and recorded, and the next
+        one is tried.
+
+        If no address clears all five checks the response is `no-wallet-available`, whose
+        `wallets` array says which address failed and why. Its status code is the most
+        severe of the individual failures: `502` if any address was unreachable, `422` if
+        any answered but could not prove delivery, `400` otherwise.
+
+        The gateway then watches the recipient's `verify_url` until it yields a preimage or
+        the invoice expires.
+      parameters:
+        - $ref: "#/components/parameters/idempotency_key"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/create_incoming_payment_request"
+      responses:
+        "201":
+          description: An invoice was issued by the recipient and is now being watched.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/incoming_payment"
+        "400":
+          $ref: "#/components/responses/bad_request"
+        "409":
+          $ref: "#/components/responses/key_conflict"
+        "410":
+          $ref: "#/components/responses/replay_pruned"
+        "413":
+          $ref: "#/components/responses/body_too_large"
+        "422":
+          $ref: "#/components/responses/unprovable"
+        "502":
+          $ref: "#/components/responses/upstream_unreachable"
+        "503":
+          $ref: "#/components/responses/at_capacity"
+
+  /incoming-payments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/payment_id"
+    get:
+      tags: [incoming-payments]
+      operationId: getIncomingPayment
+      summary: Read one payment and its proof
+      description: |
+        The id is the capability: it is an HMAC of the payment hash, so knowing it is what
+        entitles you to read the payment. A public gateway needs nothing else, and a private
+        one wants the bearer on top.
+
+        A collection endpoint exists only on a private gateway, for the reason this used to
+        say there was none at all: an unscoped list on a shared gateway would hand every
+        caller every other caller's invoices, and this API has no accounts to scope one to.
+      responses:
+        "200":
+          description: The payment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/incoming_payment"
+        "404":
+          $ref: "#/components/responses/not_found"
+
+  /ws/incoming-payments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/payment_id"
+    get:
+      tags: [incoming-payments]
+      operationId: followIncomingPayment
+      summary: Follow one payment over a WebSocket
+      description: |
+        Upgrades to a WebSocket that pushes the whole `incoming_payment` on every change,
+        starting with its current state on connect. The socket closes on its own once the
+        payment reaches a terminal status, and closes immediately for an unknown id.
+
+        Messages are full states, not deltas, so a client that misses one loses nothing.
+        The gateway pings every 30 seconds to hold the connection open.
+      responses:
+        "101":
+          description: Switching protocols. Every frame is one `incoming_payment` as JSON.
+        "401":
+          $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
+        "404":
+          $ref: "#/components/responses/not_found"
+
+  /watched-payments:
+    post:
+      tags: [incoming-payments]
+      operationId: watchPayment
+      summary: Watch an invoice this gateway did not mint, and was told almost nothing about
+      description: |
+        Hand over an invoice you obtained yourself and the gateway will poll its LUD-21
+        `verify_url` until a preimage appears, exactly as it does for one it minted.
+
+        It is told a payment hash, a URL to poll and an expiry, and nothing else. So it cannot
+        tell who the recipient is beyond the domain in that URL, and cannot tell the amount at
+        all. Anything the watcher needs goes in `sealed`, which the gateway stores and hands
+        back untouched without being able to read it.
+
+        Nothing here is verified on your behalf, because there is nothing to verify against:
+        you resolved the address, so the origin proof is yours to have run already.
+
+        It does not have to be an invoice. All this endpoint requires is a hash and a URL that
+        will one day answer with something hashing to it, so anything able to release a secret
+        on settlement can be watched here. The SDK's `bankTransfer` uses that to put a bank
+        transfer on the same footing.
+
+        This gateway watches for at most three days, and makes that promise to every
+        payment equally. An `expires_at` further off is refused with `400` rather than
+        accepted and dropped later, so ask for a window inside three days and re-register on
+        a "still waiting" click if the payer needs longer.
+
+        A hash already watched answers `409` and discloses nothing about what is stored,
+        because a payment hash sits in every invoice a payer holds while the payment id is the
+        read capability. Repeating your own registration byte for byte still answers `201`, so
+        an honest retry after a timeout works.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/watch_payment_request"
+      responses:
+        "201":
+          description: The invoice is now being watched.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/incoming_payment"
+        "400":
+          $ref: "#/components/responses/bad_request"
+        "409":
+          $ref: "#/components/responses/watch_taken"
+        "413":
+          $ref: "#/components/responses/body_too_large"
+        "503":
+          $ref: "#/components/responses/at_capacity"
+
+  /ws-tickets:
+    post:
+      tags: [triggers]
+      operationId: createWsTicket
+      summary: Mint a short-lived permission to open one socket
+      description: |
+        A socket URL is logged by this gateway, by proxies in front of it and by the browser,
+        so a trigger secret in that URL ends up where it should not be. A ticket goes in the
+        URL instead and the secret moves into this request body, which is not logged. The
+        ticket does not make the secret stronger, it keeps it out of logs.
+
+        Name exactly one of `trigger_secret` or `payment_id`. The ticket is bound to that one
+        subject, so a leaked ticket grants one subscription to one thing.
+
+        Two independent checks. On a gateway with `GATEWAY_TOKEN` the bearer must be right,
+        like every other route. In both modes the body must name something you already hold:
+        the trigger secret is itself the authorisation for that stream, and a payment id is
+        the capability for that payment. A public gateway therefore mints with no bearer.
+
+        Tickets are signed, not stored, so any instance sharing the cluster key reads a
+        ticket another one minted. Single use is not enforced: within the minute it lives, a
+        replayed ticket buys its holder the subscription they already had the secret for.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/create_ws_ticket_request"
+      responses:
+        "200":
+          description: A ticket, good for one socket for one minute.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket:
+                    type: string
+                    description: Put this in the `/ws/tickets/{ticket}` path.
+                  expires_at:
+                    type: string
+                    format: date-time
+                required: [ticket, expires_at]
+        "400":
+          $ref: "#/components/responses/bad_request"
+        "401":
+          $ref: "#/components/responses/unauthorized"
+        "404":
+          description: No payment with that id, so the endpoint is not an id oracle.
+        "413":
+          $ref: "#/components/responses/body_too_large"
+
+  /ws/tickets/{ticket}:
+    parameters:
+      - name: ticket
+        in: path
+        required: true
+        description: A ticket from `/ws-tickets`. It names what may be watched, so nothing else is needed here.
+        schema:
+          type: string
+    get:
+      tags: [triggers]
+      operationId: followWithTicket
+      summary: Open the socket a ticket permits, with no secret in the URL
+      description: |
+        Behaves exactly as the path the ticket stands in for: a trigger ticket streams that
+        trigger, replay first, and a payment ticket follows that one payment.
+
+        Use this rather than the direct paths whenever a secret in a URL is a worry. The
+        direct paths stay for a microcontroller, where one hardcoded URL and a dumb reconnect
+        loop beats a POST and a JSON parse before every connect.
+
+        A ticket carries its own authority, so this path takes no bearer even on a private
+        gateway. It stays usable until it expires rather than being consumed by opening, and
+        a minute is short enough that minting one per connection is the only sane habit.
+      responses:
+        "101":
+          description: Switching protocols. Every frame is one `incoming_payment` as JSON.
+        "401":
+          $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
+
+  /ws/triggers/{secret}:
+    parameters:
+      - $ref: "#/components/parameters/trigger_secret"
+    get:
+      tags: [triggers]
+      operationId: followTrigger
+      summary: Follow every payment made to one trigger over a WebSocket
+      description: |
+        A trigger is a place rather than a payment: one static endpoint that many people pay,
+        whose payments a long-lived consumer wants as they land. An overlay, a microcontroller
+        or a game server subscribes once and reacts to each one.
+
+        On connect the socket replays the trigger's most recent settlements oldest first, then
+        streams every payment carrying the same `trigger` as it changes. Unlike the per-payment
+        socket this one never closes on its own, because a trigger has no terminal state.
+
+        The path segment is the secret whose sha256 is the `trigger` given at create time. The
+        gateway only ever stores the hash, so a leaked ledger does not let anyone subscribe.
+        Keep this secret separate from the URL on the QR: anyone who can pay a trigger must not
+        thereby be able to watch it.
+      responses:
+        "101":
+          description: Switching protocols. Every frame is one `incoming_payment` as JSON.
+        "401":
+          $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
+
+  /quotes:
+    post:
+      tags: [quotes]
+      operationId: createQuote
+      summary: Ask which address would serve an amount, without minting anything
+      description: |
+        Runs the reachability half of the resolve: fetches each address's LNURL-pay
+        endpoint in order and returns the first one that answers and accepts the amount.
+        No callback is called, so no invoice is created and nothing is charged to the
+        recipient's wallet.
+
+        A quote is a probe, not a promise. Whether that wallet will return a provable
+        invoice cannot be known without asking it for one, and asking mints it. The LUD-21
+        and description-hash checks therefore run at create time, and a quoted address can
+        still be refused there.
+
+        `fee` is always zero. The payer pays the recipient's invoice directly, so the
+        gateway is never in the money's path and has nothing to charge for.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/create_quote_request"
+      responses:
+        "200":
+          description: An address that answered and accepts the amount.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/quote"
+        "400":
+          $ref: "#/components/responses/bad_request"
+        "413":
+          $ref: "#/components/responses/body_too_large"
+        "422":
+          $ref: "#/components/responses/unprovable"
+        "502":
+          $ref: "#/components/responses/upstream_unreachable"
+
+webhooks:
+  payment_paid:
+    post:
+      tags: [incoming-payments]
+      operationId: paymentPaid
+      summary: What the gateway POSTs to your webhook URL once a payment is paid
+      description: |
+        Sent when the recipient's own server releases a preimage, and only then. An invoice
+        that expires unpaid is never delivered, so a webhook is proof of settlement rather
+        than a status feed, and code waiting for an outcome still needs the expiry.
+
+        The body is the same `incoming_payment` you would read back by id, so the preimage
+        arrives with it and nothing has to be fetched to act on this.
+
+        Delivery is at-least-once and any 2xx retires it. Anything else is retried six times
+        on a widening delay, `WEBHOOK_BACKOFF_SECS` seconds further apart each attempt, and
+        then dropped. A payment settled on one instance is delivered by whichever instance in
+        the cluster gets there first, so a duplicate is normal and the receiver must be
+        idempotent.
+
+        Verify before you act. The SDK's `parseWebhookRequest` does both halves in one call,
+        and refuses a body whose signature or timestamp does not hold up.
+      parameters:
+        - name: x-timestamp
+          in: header
+          required: true
+          description: |
+            Unix seconds at the moment the body was signed. It is inside the signed payload,
+            so refusing anything older than your tolerance, five minutes in the SDK, is what
+            stops a captured delivery being replayed later.
+          schema:
+            type: string
+        - name: x-signature
+          in: header
+          required: false
+          description: |
+            `sha256=<hmac>` over `<x-timestamp>.<raw body>`, keyed with the `webhook.secret`
+            given at create time. Absent when no secret was given, and then nothing about
+            the body is provable, which is why a secret is the only sane way to run this.
+          schema:
+            type: string
+            pattern: "^sha256=[0-9a-f]{64}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/incoming_payment"
+      responses:
+        "200":
+          description: Taken. Any 2xx stops the retries.
+
+components:
+  parameters:
+    payment_id:
+      name: id
+      in: path
+      required: true
+      description: The payment's identifier, as returned by create.
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+
+    trigger_secret:
+      name: secret
+      in: path
+      required: true
+      description: |
+        The secret behind a trigger. Its sha256, hex encoded, is the `trigger` the payments
+        were created with. Presenting it is the whole authorisation to watch that stream.
+      schema:
+        type: string
+
+    idempotency_key:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        A client-generated key that makes this POST safe to retry. The key is claimed
+        before any address is contacted, not after the invoice comes back, because the
+        retry that matters is the one a client fires when its own timeout expires while
+        the first request is still resolving.
+
+        A repeat of a finished request answers 201 with the original payment, as it stands
+        now rather than as it was when created. A repeat that arrives while the first is
+        still running answers 409 `request-in-flight`, and the client should wait and read
+        the payment back rather than retry immediately. A request that mints nothing hands
+        the key back, so the next attempt starts clean.
+
+        The key is bound to the request that claimed it. Reusing it for different
+        addresses, a different amount, or a different webhook answers 409
+        `idempotency-key-reused` instead of the earlier payment.
+
+        Keys are held for 24 hours and then dropped, which is shorter than a payment
+        lives. A retry after that mints a second invoice, so a key is a retry window and
+        not a permanent handle. If the payment a key names has already been pruned, the
+        replay answers 410 rather than inventing a second one.
+      schema:
+        type: string
+
+  schemas:
+    amount:
+      type: object
+      description: |
+        An amount of one asset, as an integer count of that asset's smallest unit. The
+        count is a string because JSON numbers are IEEE 754 doubles and money is not.
+      properties:
+        value:
+          type: string
+          pattern: "^[0-9]+$"
+          description: The count of smallest units, as a decimal string.
+          examples: ["21000"]
+        asset_code:
+          type: string
+          enum: [BTC]
+          description: |
+            The asset. Bitcoin has no ISO 4217 code, so this API spells it BTC.
+        asset_scale:
+          type: integer
+          enum: [11]
+          description: |
+            Decimal places between one unit of the asset and the smallest unit counted
+            here. Bitcoin's smallest unit here is the millisatoshi and one bitcoin is
+            10^11 of them, so 21000 at scale 11 is 21 satoshi.
+      required: [value, asset_code, asset_scale]
+
+    ln_address:
+      type: string
+      format: email
+      maxLength: 320
+      description: A LUD-16 lightning address, `user@domain`.
+      examples: ["someone@coinos.io"]
+
+    ln_addresses:
+      type: array
+      description: |
+        Addresses in priority order. The first one that clears every check wins, the rest
+        are the fallback. Order is the whole point, so it is preserved exactly.
+      items:
+        $ref: "#/components/schemas/ln_address"
+      minItems: 1
+      maxItems: 16
+
+    status:
+      type: string
+      description: |
+        `pending` while the invoice is live and being watched, `paid` once the recipient's
+        own server released a preimage hashing to `payment_hash`, `expired` once the
+        invoice's expiry passed unpaid. Both terminal states are final.
+      enum: [pending, paid, expired]
+
+    webhook:
+      type: object
+      description: |
+        Where to POST the payment once it is paid. Nothing is sent for an invoice that
+        expires, and delivery is at-least-once, so the receiver must tolerate duplicates.
+        The shape is under `webhooks` in this document.
+      properties:
+        url:
+          type: string
+          format: uri
+          description: A public https URL. Loopback and private ranges are refused.
+        secret:
+          type: string
+          writeOnly: true
+          maxLength: 256
+          description: |
+            Signs the body as `x-signature: sha256=<hmac>`. Never read back, on any
+            endpoint.
+      required: [url]
+
+    trigger:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+      writeOnly: true
+      description: |
+        Groups this payment with every other one made to the same trigger, so a consumer can
+        follow the place instead of the payment. It is the sha256 of a secret you hold, hex
+        encoded, and watching the stream means presenting that secret. Never read back, so a
+        payment fetched by id does not disclose which trigger it belongs to.
+      examples: ["3ba4d2c3e9b5c9f5c58a2e1c0c0d0a2f7e2a5b8c9d0e1f2a3b4c5d6e7f809192"]
+
+    create_incoming_payment_request:
+      type: object
+      properties:
+        ln_addresses:
+          $ref: "#/components/schemas/ln_addresses"
+        incoming_amount:
+          $ref: "#/components/schemas/amount"
+        webhook:
+          $ref: "#/components/schemas/webhook"
+        trigger:
+          $ref: "#/components/schemas/trigger"
+      required: [ln_addresses, incoming_amount]
+
+    incoming_payment:
+      type: object
+      description: |
+        A payment incoming to the recipient named by `ln_address`. Their wallet issued the
+        invoice, they will hold the funds, and they publish the proof. The gateway's whole
+        role is to have picked the address and to be watching.
+
+        There is no `received_amount`. One invoice settles against one preimage, so the
+        received amount is always either zero or `incoming_amount`, and `status` already
+        says which.
+      properties:
+        id:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            A keyed hash of `payment_hash`, so posting the same invoice again returns the
+            same payment from any instance. It cannot be derived from the invoice alone, and
+            holding it is the read capability for this payment.
+        ln_address:
+          $ref: "#/components/schemas/ln_address"
+        incoming_amount:
+          $ref: "#/components/schemas/amount"
+        status:
+          $ref: "#/components/schemas/status"
+        bolt11:
+          type: string
+          description: The invoice the recipient's wallet issued. This is what the payer pays.
+        payment_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: Hex payment hash, taken from the invoice itself.
+        verify_url:
+          type: string
+          format: uri
+          description: |
+            The recipient's own LUD-21 endpoint. Everything this API claims about
+            settlement comes from here, so a client that does not trust the gateway can
+            ask it directly.
+        preimage:
+          type: [string, "null"]
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Hex preimage, present only once `status` is `paid`. It hashes to
+            `payment_hash`, which is what makes delivery provable rather than asserted.
+        expires_at:
+          type: string
+          format: date-time
+          description: The invoice's own expiry, read out of the invoice.
+        created_at:
+          type: string
+          format: date-time
+        sealed:
+          $ref: "#/components/schemas/sealed"
+      required:
+        - id
+        - status
+        - payment_hash
+        - verify_url
+        - preimage
+        - expires_at
+        - created_at
+
+    sealed:
+      type: string
+      maxLength: 4096
+      description: |
+        An opaque blob the gateway stores and hands back untouched. It cannot read it and
+        never tries to, so this is where anything the watcher needs but the gateway should
+        not know goes: the amount, who paid, a message. Present only when one was given.
+      examples: ["v1.7QpK3s...="]
+
+    watch_payment_request:
+      type: object
+      description: |
+        Everything the gateway needs to watch an invoice, and deliberately nothing more. No
+        address and no amount, because it does not need them to poll a URL and hash a
+        preimage, and not knowing them is what stops it refusing one recipient rather than
+        all of them.
+      properties:
+        payment_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Hex payment hash from the invoice you obtained. A preimage the verify endpoint
+            releases is only accepted when it hashes to this.
+        verify_url:
+          type: string
+          format: uri
+          description: The recipient's LUD-21 endpoint, a public https URL.
+        expires_at:
+          type: string
+          format: date-time
+          description: |
+            The invoice's own expiry. Polling stops here, so a value already in the past is
+            refused, and so is one more than three days off, which is as long as this gateway
+            watches anything.
+        trigger:
+          $ref: "#/components/schemas/trigger"
+        sealed:
+          $ref: "#/components/schemas/sealed"
+      required: [payment_hash, verify_url, expires_at]
+
+    create_ws_ticket_request:
+      type: object
+      description: |
+        Name exactly one. Naming both, or neither, is a 400: a ticket is bound to one
+        subject on purpose, so there is nothing sensible to do with two.
+      properties:
+        trigger_secret:
+          type: string
+          description: |
+            The secret whose sha256 is the `trigger` its payments were created with. Holding
+            it is what authorises that stream, here and on the direct socket path alike.
+        payment_id:
+          type: string
+          description: A payment id this gateway issued. An unknown one is a 404, not a ticket.
+      minProperties: 1
+      maxProperties: 1
+
+    create_quote_request:
+      type: object
+      properties:
+        ln_addresses:
+          $ref: "#/components/schemas/ln_addresses"
+        amount:
+          $ref: "#/components/schemas/amount"
+      required: [ln_addresses, amount]
+
+    quote:
+      type: object
+      properties:
+        ln_address:
+          $ref: "#/components/schemas/ln_address"
+        amount:
+          $ref: "#/components/schemas/amount"
+        fee:
+          $ref: "#/components/schemas/amount"
+        min_amount:
+          $ref: "#/components/schemas/amount"
+        max_amount:
+          $ref: "#/components/schemas/amount"
+        metadata:
+          type: string
+          description: |
+            The LUD-06 metadata string this wallet serves, verbatim. An LNURL-pay endpoint
+            standing in front of this address must echo it byte for byte, because the payer's
+            wallet checks the invoice's description hash against the sha256 of whatever
+            metadata it was served, and only the recipient's wallet mints the invoice.
+          examples: ['[["text/plain","Paying someone@coinos.io"]]']
+        refusals:
+          type: array
+          description: The addresses ahead of this one in the list, and why each was passed over.
+          items:
+            $ref: "#/components/schemas/wallet_failure"
+      required: [ln_address, amount, fee, min_amount, max_amount, metadata, refusals]
+
+    wallet_failure:
+      type: object
+      description: One address that was tried and passed over.
+      properties:
+        address:
+          $ref: "#/components/schemas/ln_address"
+        reason:
+          type: string
+          enum:
+            - address-unusable
+            - unreachable
+            - amount-not-accepted
+            - cannot-prove-delivery
+            - invoice-refused
+          description: |
+            What it means, and what to do about it.
+
+            - `address-unusable` - not a lightning address, or its domain is not a public
+              https host. Fix the address.
+            - `unreachable` - its server returned no usable payRequest or invoice, which
+              also covers an unknown user. Retry, or check the wallet.
+            - `amount-not-accepted` - the amount is outside that wallet's min and max.
+              Change the amount.
+            - `cannot-prove-delivery` - no usable LUD-21 `verify` endpoint, or a provider
+              known never to release a preimage. Use another provider.
+            - `invoice-refused` - it issued an invoice this gateway will not accept: wrong
+              amount, unbound metadata, or undecodable. Report it, use another wallet.
+      required: [address, reason]
+
+    problem:
+      type: object
+      description: RFC 9457 problem details. Served as `application/problem+json`.
+      properties:
+        type:
+          type: string
+          format: uri
+          description: The problem type, and the only field a program should branch on.
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+          description: For a developer reading a log, never for a program to parse.
+      required: [type, title, status]
+
+    no_wallet_available_problem:
+      allOf:
+        - $ref: "#/components/schemas/problem"
+        - type: object
+          properties:
+            type:
+              const: "urn:problem-type:thunder-bridge:no-wallet-available"
+            wallets:
+              type: array
+              description: Every address that was tried, in the order tried, and why each failed.
+              items:
+                $ref: "#/components/schemas/wallet_failure"
+          required: [wallets]
+
+  responses:
+    bad_request:
+      description: |
+        The request could not be read, or every address was refused for a reason that is
+        the caller's to fix.
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/problem"
+              - $ref: "#/components/schemas/no_wallet_available_problem"
+
+    body_too_large:
+      description: |
+        The request body is larger than this gateway will read. The ceiling is 65536 bytes,
+        far above the largest request this API defines, which is a watch carrying a full
+        4096-character `sealed` blob. Send less, and do not retry the same body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
+
+    unprovable:
+      description: |
+        An address answered but delivery through it could not be proved, so no payment was
+        created. Retrying the same address will not help.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/no_wallet_available_problem"
+
+    upstream_unreachable:
+      description: |
+        No address answered. The fault is upstream, so the same request may well work
+        later.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/no_wallet_available_problem"
+
+    key_conflict:
+      description: |
+        The `Idempotency-Key` is held by another request. `request-in-flight` means the
+        first one is still running, so wait and read the payment back. `idempotency-key-reused`
+        means the key was claimed by a different request, which is a bug in the client.
+      content:
+        application/problem+json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/problem"
+              - type: object
+                properties:
+                  type:
+                    enum:
+                      - "urn:problem-type:thunder-bridge:request-in-flight"
+                      - "urn:problem-type:thunder-bridge:idempotency-key-reused"
+
+    watch_taken:
+      description: |
+        This payment hash is already watched here by a registration that is not identical to
+        this one. The body says only that: it never discloses the stored record, because
+        doing so is exactly the disclosure this status exists to prevent.
+      content:
+        application/problem+json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/problem"
+              - type: object
+                properties:
+                  type:
+                    const: "urn:problem-type:thunder-bridge:payment-already-watched"
+
+    replay_pruned:
+      description: |
+        The `Idempotency-Key` names a payment that has since expired and been pruned. The
+        key is still held, so the request is not silently minted a second time.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
+
+    unauthorized:
+      description: |
+        This gateway was started with `GATEWAY_TOKEN`, so every call but `/health`,
+        `/ready`, `/openapi.yaml` and `/docs` needs
+        `Authorization: Bearer <token>`, the WebSocket handshake included. A refused
+        handshake is answered with this status and no upgrade.
+
+        A browser cannot put a header on a socket, so on a private gateway `/ws/tickets/`
+        is its only way in: minting the ticket takes the bearer, and the ticket then stands
+        for it. Everything that can set a header, a server, a CLI or a microcontroller, may
+        use the direct paths with `Authorization` instead.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
+
+    not_found:
+      description: No payment with that id.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
+
+    at_capacity:
+      description: |
+        The cluster is already watching as many payments as `MAX_PENDING` allows. Every
+        instance holds every payment, so this is a ceiling on the cluster's worklist rather
+        than on one machine, and it clears as payments settle or expire.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
