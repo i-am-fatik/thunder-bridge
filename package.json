@@ -1,0 +1,31 @@
+{
+	"name": "thunder-bridge",
+	"version": "0.1.0",
+	"description": "Lightning payments with no node: the payer pays the recipient's own invoice and LUD-21 proves delivery",
+	"license": "MIT",
+	"private": true,
+	"type": "module",
+	"main": "src/index.ts",
+	"engines": {
+		"node": ">=24.19"
+	},
+	"scripts": {
+		"start": "node src/index.ts",
+		"dev": "node --watch src/index.ts",
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@types/node": "^24.13.3",
+		"@types/ws": "^8.18.1",
+		"typescript": "^5",
+		"vitest": "^4.1.10"
+	},
+	"dependencies": {
+		"@hyperswarm/secret-stream": "6.9.1",
+		"compact-encoding": "3.3.0",
+		"hyperswarm": "4.17.0",
+		"protomux": "3.11.0",
+		"ws": "^8.21.2"
+	}
+}
