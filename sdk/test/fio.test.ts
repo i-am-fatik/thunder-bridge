@@ -5,7 +5,8 @@ import { type FetchCall, jsonResponse } from "./harness";
 const TOKEN = "t".repeat(64);
 const BASE = "https://fioapi.fio.cz/v1/rest";
 const SINCE = 1_780_000_000;
-const BOOKED_MILLIS = 1_785_931_200_000;
+const BOOKED_DAY = "2026-04-04+0200";
+const BOOKED_AT = Date.parse("2026-04-04T00:00:00+02:00") / 1000;
 
 function cell(value: string | number | null): { value: string | number | null } {
   return { value };
@@ -14,7 +15,7 @@ function cell(value: string | number | null): { value: string | number | null } 
 function transaction(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     column22: cell(1_148_734_530),
-    column0: cell(BOOKED_MILLIS),
+    column0: cell(BOOKED_DAY),
     column1: cell(480.55),
     column14: cell("CZK"),
     column16: cell("ORDER-2026-77"),
@@ -76,9 +77,33 @@ describe("fioStatement", () => {
         amountMinor: 48_055,
         currency: "CZK",
         reference: "ORDER-2026-77",
-        bookedAt: BOOKED_MILLIS / 1000,
+        bookedAt: BOOKED_AT,
       },
     ]);
+  });
+
+  it("reads the booking day Fio actually answers, a date and a UTC offset", async () => {
+    fioServing(statementOf(transaction({ column0: cell("2026-07-15+0200") })));
+
+    const credits = await reading()(SINCE);
+
+    expect(credits[0]!.bookedAt).toBe(Date.parse("2026-07-15T00:00:00+02:00") / 1000);
+  });
+
+  it("reads a winter booking, where the offset Fio sends is an hour smaller", async () => {
+    fioServing(statementOf(transaction({ column0: cell("2026-01-15+0100") })));
+
+    const credits = await reading()(SINCE);
+
+    expect(credits[0]!.bookedAt).toBe(Date.parse("2026-01-15T00:00:00+01:00") / 1000);
+  });
+
+  it("falls back to zero on a date it cannot read, rather than inventing one", async () => {
+    fioServing(statementOf(transaction({ column0: cell("not a date at all") })));
+
+    const credits = await reading()(SINCE);
+
+    expect(credits[0]!.bookedAt).toBe(0);
   });
 
   it("keeps money that came in and drops money that went out", async () => {

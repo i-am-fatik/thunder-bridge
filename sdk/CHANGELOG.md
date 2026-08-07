@@ -40,6 +40,15 @@ gone. Breaking for a client that talks to an instance still emitting it.
   both to carry callers across the rename, and that transition is over: nothing this
   house runs emits the old spelling any more.
 
+### Fixed
+
+- `fioStatement` read `Credit.bookedAt` as unix milliseconds and got `0` for every
+  credit. Fio books a day and a UTC offset, `2026-07-15+0200`, which is neither a
+  number nor something `Date.parse` takes. Found against a real account, on a response
+  the tests had never been shaped like. Settlement was never affected, because
+  `bankVerifyEndpoint` matches on amount, currency and reference and never reads the
+  booking day, so this corrupted a field a caller could read rather than a proof.
+
 
 ## 0.8.1
 
