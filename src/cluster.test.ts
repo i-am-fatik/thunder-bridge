@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
 import type { Store } from "./store.ts";
-import { freePort, openStore, until, type TestOptions } from "./testing.ts";
+import { paymentId } from "./ledger.ts";
+import { CLUSTER_KEY, freePort, openStore, until, type TestOptions } from "./testing.ts";
 
 const TAKEOVER_TIMEOUT_MS = 25_000;
 
@@ -126,6 +127,98 @@ test("every instance takes on every pending payment, whoever created it", async 
 
 		expect(seen(cluster.first)).toBe(20);
 		expect(seen(cluster.second)).toBe(20);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a payment pushed the way the last release pushed it becomes a fact and travels", async () => {
+	const cluster = await connected();
+	try {
+		const pushed = { ...payment(0), id: paymentId(CLUSTER_KEY, payment(0).paymentHash) };
+		cluster.first.gossip.onAdd(pushed);
+
+		await until(() => cluster.second.get(pushed.id) !== null, "the pushed payment to reach a peer");
+		expect(cluster.second.info().marks.accepted).toBeGreaterThan(0);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a pushed payment whose id does not name its own invoice never becomes a fact", async () => {
+	const cluster = await connected();
+	try {
+		cluster.first.gossip.onAdd({ ...payment(1), id: "0".repeat(64) });
+
+		expect(cluster.first.info().rows.accepted).toBe(0);
+		expect(cluster.first.get("0".repeat(64))).toBeNull();
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("both instances say they are in sync and agree on what they hold", async () => {
+	const cluster = await connected();
+	try {
+		cluster.first.insert(payment(0));
+
+		await until(
+			() => cluster.first.info().marks.accepted === cluster.second.info().marks.accepted,
+			"the accepted marks to match",
+		);
+		await until(
+			() =>
+				cluster.first.info().convergedAt !== null && cluster.second.info().convergedAt !== null,
+			"both instances to hear a reply that came back short",
+		);
+
+		expect(cluster.second.info().origins).toBe(cluster.first.info().origins);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("two instances at their cap still both hold every payment", async () => {
+	const cluster = await connected({ maxPending: 2 });
+	try {
+		const made = [0, 1, 2].map((n) => cluster.first.insert(spread(n)).id);
+		expect(cluster.first.full()).toBe(true);
+
+		await until(
+			() => made.every((one) => cluster.second.get(one) !== null),
+			"the whole worklist to reach a peer that is already full",
+		);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a mirrored payment stands by, so the instance that took it on polls it first", async () => {
+	const cluster = await connected();
+	try {
+		const mine = cluster.first.insert(payment(0));
+		await until(() => cluster.second.get(mine.id) !== null, "the payment to gossip across");
+
+		expect(cluster.second.duePolls(10, 30)).toEqual([]);
+		expect(cluster.first.duePolls(10, 30).map((one) => one.id)).toEqual([mine.id]);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a payment of my own is polled at once, however much a peer handed over", async () => {
+	const cluster = await connected();
+	try {
+		const theirs: string[] = [];
+		for (let n = 0; n < 20; n += 1) theirs.push(cluster.first.insert(spread(n)).id);
+		await until(
+			() => theirs.every((one) => cluster.second.get(one) !== null),
+			"the worklist to gossip across",
+		);
+
+		const mine = cluster.second.insert(payment(0));
+
+		expect(cluster.second.duePolls(5, 30).map((one) => one.id)).toEqual([mine.id]);
 	} finally {
 		cluster.stop();
 	}

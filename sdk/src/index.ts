@@ -8,6 +8,19 @@ export type {
 export { seal, unseal } from "../../core/sealed.js";
 export { lnurlPayEndpoint } from "./trigger.js";
 export type { Minted, TriggerConfig } from "./trigger.js";
+export { bankTransfer, bankVerifyEndpoint } from "./bank.js";
+export type {
+  BankTransfer,
+  BankTransferParams,
+  BankVerifyConfig,
+  Credit,
+  Statement,
+} from "./bank.js";
+export { fioStatement } from "./fio.js";
+export type { FioConfig } from "./fio.js";
+export { bitstamp, coinbase, coinmate, kraken, medianOf, msatFor } from "./price.js";
+export type { MedianOptions, Ticker } from "./price.js";
+export { minorScaleOf, minorUnitsOf } from "./currency.js";
 export { isProvablyPaid, proveOrigin, proveSettlement } from "./verify.js";
 export { decodeInvoice, preimageMatchesHash } from "../../core/bolt11.js";
 export type { Invoice } from "../../core/bolt11.js";
@@ -16,6 +29,8 @@ export {
   invoiceToSvg,
   lnurlToDataUrl,
   lnurlToSvg,
+  spdToDataUrl,
+  spdToSvg,
 } from "./qr.js";
 export type { QrOptions } from "./qr.js";
 export { toLnurl } from "../../core/lnurl.js";

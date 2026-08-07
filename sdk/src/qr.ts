@@ -47,7 +47,19 @@ export function lnurlToDataUrl(endpoint: string, options?: QrOptions): string {
   return asDataUrl(lnurlToSvg(endpoint, options));
 }
 
+/**
+ * Render the `spd` from `bankTransfer` as the QR a Czech banking app scans. The
+ * payload is a Short Payment Descriptor, so it carries the account, the amount
+ * and the reference the payer must leave on the transfer
+ */
+export function spdToSvg(spd: string, options?: QrOptions): string {
+  return svgOf(spd, options);
+}
 
+/** SVG data URL of the bank transfer's QR, for an `<img>` `src` */
+export function spdToDataUrl(spd: string, options?: QrOptions): string {
+  return asDataUrl(spdToSvg(spd, options));
+}
 
 function svgOf(scanned: string, options?: QrOptions): string {
   const size = options?.size ?? 256;

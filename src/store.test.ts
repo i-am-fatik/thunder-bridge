@@ -114,9 +114,10 @@ test("only as many payments are taken as the batch asks for", () => {
 	try {
 		for (let n = 0; n < 5; n += 1) store.insert(payment(n));
 
-		expect(store.duePolls(2, 30)).toHaveLength(2);
-		expect(store.duePolls(2, 30)).toHaveLength(2);
-		expect(store.duePolls(2, 30)).toHaveLength(1);
+		const handed = [...store.duePolls(2, 30), ...store.duePolls(2, 30), ...store.duePolls(2, 30)];
+
+		expect(handed).toHaveLength(5);
+		expect(new Set(handed.map((one) => one.id)).size).toBe(5);
 	} finally {
 		stop();
 	}
@@ -249,6 +250,271 @@ test("the store reports itself full once the worklist reaches its cap", () => {
 		stop();
 	}
 });
+
+test("a pruned origin does not start its sequence over and lose what it takes on next", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const first = one.store.insert(payment(0));
+		one.store.paid(first.id, preimage(0));
+		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
+
+		one.store.sweep(0);
+		expect(one.store.info().rows.accepted).toBe(0);
+
+		const second = one.store.insert(payment(1));
+		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
+
+		expect(two.store.get(second.id)?.paymentHash).toBe(second.paymentHash);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a webhook only the other instance knew about is owed once the sweep notices", () => {
+	const one = openStore();
+	const two = openStore();
+	const theirs = "https://elsewhere.example/hook";
+	try {
+		const mine = one.store.insert(payment(0));
+		two.store.insert({ ...payment(0), webhooks: [{ url: theirs, secret: null }] });
+		one.store.paid(mine.id, preimage(0));
+
+		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
+		expect(two.store.get(mine.id)?.status).toBe("paid");
+		expect(two.store.dueDeliveries(10, 30)).toEqual([]);
+
+		two.store.sweep(3600);
+
+		expect(two.store.dueDeliveries(10, 30).map((owed) => owed.url)).toEqual([theirs]);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("an accepted fact does not outlive the settlement that closed it", () => {
+	const { store, stop } = openStore();
+	try {
+		const waiting = store.insert(payment(0));
+		store.paid(waiting.id, preimage(0));
+		expect(store.info().rows.accepted).toBe(1);
+
+		store.sweep(0);
+
+		expect(store.info().rows.accepted).toBe(0);
+		expect(store.info().rows.paid).toBe(0);
+	} finally {
+		stop();
+	}
+});
+
+test("the fact channel alone carries a payment to another instance", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const waiting = one.store.insert(payment(0));
+
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+		two.store.gossip.onFacts(facts);
+
+		expect(two.store.get(waiting.id)?.paymentHash).toBe(waiting.paymentHash);
+		expect(two.store.info().pending).toBe(1);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a payment past the cap is still recorded and still offered to a peer", () => {
+	const one = openStore({ maxPending: 1 });
+	const two = openStore({ maxPending: 1 });
+	try {
+		one.store.insert(payment(0));
+		const past = one.store.insert(payment(1));
+		expect(one.store.full()).toBe(true);
+
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+		two.store.gossip.onFacts(facts);
+
+		expect(two.store.get(past.id)?.paymentHash).toBe(past.paymentHash);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("an accepted fact nobody signed with the cluster key is refused", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		one.store.insert(payment(0));
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+		const forged = (facts.accepted ?? []).map((fact) => ({ ...fact, id: "0".repeat(64) }));
+
+		expect(() => two.store.gossip.onFacts({ accepted: forged })).toThrow(/cluster key/);
+		expect(two.store.info().pending).toBe(0);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a pruned accepted fact is not resurrected by a peer that still holds it", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		one.store.insert({ ...payment(0), expiresAt: 1_700_000_100 });
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+
+		two.store.gossip.onFacts(facts);
+		expect(two.store.info().pending).toBe(1);
+
+		two.store.sweep(0);
+		expect(two.store.info().pending).toBe(0);
+
+		two.store.gossip.onFacts(facts);
+		expect(two.store.info().pending).toBe(0);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a peer that names no accepted facts is still heard on the ones it does name", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const waiting = one.store.insert(payment(0));
+		one.store.paid(waiting.id, preimage(0));
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+
+		two.store.gossip.onFacts({ paid: facts.paid, outbox: facts.outbox, delivered: facts.delivered });
+
+		expect(two.store.get(waiting.id)?.status).toBe("paid");
+		expect(two.store.info().rows.accepted).toBe(0);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a payment is written where a build without accepted facts would look for it", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-rollback-"));
+	const ledger = join(directory, "ledger.db");
+	const { store, stop } = openStore({ ledger });
+	const waiting = store.insert(payment(0));
+	stop();
+
+	const older = new DatabaseSync(ledger);
+	try {
+		expect(schemaVersionOf(ledger)).toBe(1);
+		const rows = older.prepare("SELECT payment FROM pending WHERE id = ?").all(waiting.id) as {
+			payment: string;
+		}[];
+		expect(rows).toHaveLength(1);
+		expect(JSON.parse(rows[0]!.payment)).toMatchObject({ paymentHash: waiting.paymentHash });
+	} finally {
+		older.close();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a ledger written before accepted facts existed keeps its worklist", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-adopt-"));
+	const ledger = join(directory, "ledger.db");
+	const before = openStore({ ledger });
+	const waiting = before.store.insert(payment(0));
+	before.stop();
+
+	const written = new DatabaseSync(ledger);
+	written.exec("DELETE FROM accepted");
+	written.exec("DELETE FROM schedule");
+	written.exec("DELETE FROM progress WHERE source = 'accepted'");
+	written.close();
+
+	const { store, stop } = openStore({ ledger });
+	try {
+		expect(store.get(waiting.id)?.paymentHash).toBe(waiting.paymentHash);
+		expect(store.info().pending).toBe(1);
+	} finally {
+		stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a ledger from before the schema was versioned keeps its payments and gets stamped", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-unstamped-"));
+	const ledger = join(directory, "ledger.db");
+	const before = openStore({ ledger });
+	const waiting = before.store.insert(payment(0));
+	before.stop();
+
+	const unstamped = new DatabaseSync(ledger);
+	unstamped.exec("PRAGMA user_version = 0");
+	unstamped.close();
+
+	const { store, stop } = openStore({ ledger });
+	try {
+		expect(store.get(waiting.id)).not.toBeNull();
+		expect(schemaVersionOf(ledger)).toBe(1);
+	} finally {
+		stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a ledger a newer build wrote is refused instead of opened", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-newer-"));
+	const ledger = join(directory, "ledger.db");
+	const newer = new DatabaseSync(ledger);
+	newer.exec("PRAGMA user_version = 99");
+	newer.close();
+
+	try {
+		expect(() => openStore({ ledger })).toThrow(/schema 99/);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a stamped ledger still rebuilds an index that went missing", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-index-"));
+	const ledger = join(directory, "ledger.db");
+	openStore({ ledger }).stop();
+
+	const damaged = new DatabaseSync(ledger);
+	damaged.exec("DROP INDEX pending_by_due");
+	damaged.close();
+	expect(indexesOf(ledger)).not.toContain("pending_by_due");
+
+	const { stop } = openStore({ ledger });
+	try {
+		expect(indexesOf(ledger)).toContain("pending_by_due");
+	} finally {
+		stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+function indexesOf(path: string): string[] {
+	const db = new DatabaseSync(path);
+	const found = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as {
+		name: string;
+	}[];
+	db.close();
+
+	return found.map((one) => one.name);
+}
+
+function schemaVersionOf(path: string): number {
+	const db = new DatabaseSync(path);
+	const stamped = db.prepare("PRAGMA user_version").get() as { user_version: number };
+	db.close();
+
+	return stamped.user_version;
+}
 
 test("a ledger left over from before the request cache changed shape still boots", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-stale-"));

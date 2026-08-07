@@ -19,11 +19,15 @@ export function sameOrigin(one: string, other: string): boolean {
 	}
 }
 
+export function publicAddress(literal: string): boolean {
+	return literal.includes(":") ? ipv6IsGlobal(literal) : ipv4IsGlobal(literal);
+}
+
 function hostIsPublic(host: string): boolean {
-	if (host.startsWith("[")) return ipv6IsGlobal(host.slice(1, -1));
+	if (host.startsWith("[")) return publicAddress(host.slice(1, -1));
 
 	const name = host.replace(/\.$/, "");
-	if (/^\d+\.\d+\.\d+\.\d+$/.test(name)) return ipv4IsGlobal(name);
+	if (/^\d+\.\d+\.\d+\.\d+$/.test(name)) return publicAddress(name);
 
 	const labels = name.split(".");
 	if (labels.length < 2 || labels.some((label) => label === "")) return false;

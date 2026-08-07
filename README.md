@@ -71,7 +71,8 @@ GET  /incoming-payments/{id}     read one payment
 POST /quotes                     ask which address would take an amount, mint nothing
 POST /watched-payments           watch an invoice you obtained yourself
 POST /ws-tickets                 exchange a secret for a short-lived socket ticket
-GET  /health
+GET  /health                     is this instance alive, the one thing a restart cures
+GET  /ready                      should it be sent work, plus the vitals on a gated instance
 GET  /openapi.yaml
 GET  /docs                       the specification, rendered
 
@@ -91,9 +92,8 @@ restart. Delivery is at-least-once, so deduplicate on `id`. The shape and the
 signature scheme are under `webhooks` in the spec.
 
 Failures are RFC 9457 problem documents served as `application/problem+json`.
-Branch on `type`, never on prose. Two types are minted, `invalid-request` and
-`no-wallet-available`, and the spec enumerates what each refusal reason means and
-what to do about it.
+Branch on `type`, never on prose. Five types are minted, and the spec enumerates
+what each refusal reason means and what to do about it.
 
 The resource model follows Open Payments 1.3.3, pinned under
 [docs/standards/](docs/standards). Property names are snake_case rather than that
@@ -106,11 +106,13 @@ standard's camelCase, and there is no authorization server.
 | `CLUSTER_KEY` | required | 32 bytes of hex, the swarm topic and the right to write a fact |
 | `PORT` | `3000` | listen port, Railway sets this for you |
 | `LEDGER` | `./data/ledger.db` | the SQLite file, everything lives here |
-| `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/openapi.yaml` and `/docs` |
+| `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/ready`, `/openapi.yaml` and `/docs` |
 | `POLL_INTERVAL_SECS` | `5` | how often a payment under five minutes old polls `verify` |
+| `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
+| `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
 | `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per wallet host, and the batch each tick takes |
-| `MAX_PENDING` | `5000` | pending rows before `POST /incoming-payments` answers 503 |
-| `TAKEOVER_AFTER_SECS` | `600` | how long another instance waits before delivering a webhook it does not own |
+| `MAX_PENDING` | `5000` | payments the cluster watches before a create or a watch answers 503, never a limit on what an instance knows |
+| `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, six attempts then it parks |
 | `SWARM` | on | `0` turns off Hyperswarm DHT discovery |
 | `REPLICATE_LISTEN` | none | also accept direct TCP replication on this port |
@@ -118,6 +120,10 @@ standard's camelCase, and there is no authorization server.
 
 Every numeric variable is validated at boot. A nonsense value stops the process
 rather than being coerced.
+
+On `SIGTERM` or `SIGINT` the instance turns `/ready` down, stops taking sockets,
+waits out the tick in flight and closes the ledger, so nothing is dropped mid-poll
+and no webhook debt is lost. A second signal exits at once.
 
 Joining a cluster is one step: start another instance with the same
 `CLUSTER_KEY`. There is no leader, no quorum and no writer to authorise.
@@ -159,6 +165,10 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
 - **The proof is the recipient's word, cryptographically.** The preimage proves
   their server released it. It protects the payer against this service, not
   against a recipient inflating their own totals.
+- **Nothing is watched for longer than three days.** Every payment gets that same
+  promise, and `POST /watched-payments` refuses an `expires_at` past it rather
+  than taking on a watch it will drop. A wallet's 30-day invoice stays payable
+  after day three, it just is not being watched here.
 - **Every outbound URL must be public https.** A webhook to a private address is
   refused along with everything else on the local network.
 
@@ -168,6 +178,8 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   sees it.
 - [examples/deno-deploy](examples/deno-deploy) - a paywall and a lightning
   address in one Fetch handler.
+- [examples/bank-transfer](examples/bank-transfer) - the same shop on a Czech QR
+  platba, settled by the same rule.
 - [examples/trigger-watcher](examples/trigger-watcher) - one socket that hears
   every settlement.
 

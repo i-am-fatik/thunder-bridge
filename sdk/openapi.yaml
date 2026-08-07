@@ -24,6 +24,11 @@ info:
     HMAC over it, so the handler holds no state and runs on Deno Deploy, Workers, Hono, Next
     and Node alike.
 
+    `bankVerifyEndpoint` is the other handler, and it puts a second rail behind the same
+    contract: a bank transfer, proved to the gateway by the LUD-21 shape a Lightning wallet
+    would have answered with. Both paths below are therefore yours to mount and yours to
+    serve, and neither of them is the gateway.
+
     The gateway's own API is a separate document, `openapi.yaml` in the repository root, and
     the webhook your server receives is described there under `webhooks`.
 
@@ -36,6 +41,8 @@ security: []
 tags:
   - name: lnurl-pay
     description: The two halves of LUD-06, on the one path a lightning address resolves to.
+  - name: bank-transfer
+    description: The settlement proof for money that arrived over a bank rail instead of Lightning.
 
 paths:
   /.well-known/lnurlp/{name}:
@@ -130,6 +137,75 @@ paths:
                   - $ref: "#/components/schemas/invoice"
                   - $ref: "#/components/schemas/refusal"
 
+  /verify/bank:
+    get:
+      tags: [bank-transfer]
+      operationId: verifyBankTransfer
+      summary: Say whether the transfer landed, and release the preimage when it did
+      description: |
+        Mounted wherever you passed `verifyUrl` to `bankTransfer`, which puts what to look for
+        in the query and signs it. The gateway polls this exactly as it polls a wallet's LUD-21
+        endpoint, and it cannot tell the difference, which is the whole point.
+
+        A query this service did not sign is refused. Without that check the endpoint would
+        answer "did anyone send you this amount with this note" to whoever asked, which is a
+        bank statement handed out one question at a time.
+
+        The preimage is an HMAC of the reference, the amount and the currency under a secret
+        only this service holds, so the gateway can check it hashes to what it was given and
+        still cannot produce it. Nothing is stored between calls.
+      parameters:
+        - name: ref
+          in: query
+          required: true
+          description: |
+            What the payer had to leave on the transfer. Matched as a substring against every
+            field the bank puts a note in, so noise around it is fine.
+          schema:
+            type: string
+        - name: minor
+          in: query
+          required: true
+          description: The price in the smallest unit of the currency, so 48055 is 480.55 CZK.
+          schema:
+            type: integer
+            minimum: 1
+        - name: cc
+          in: query
+          required: true
+          description: The three letter currency code the credit has to be in.
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+        - name: sig
+          in: query
+          required: true
+          description: Hex HMAC-SHA256 over `<ref>|<minor>|<cc>`, minted by `bankTransfer`.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{64}$"
+      responses:
+        "200":
+          description: |
+            Whether a matching credit is on the statement. The preimage is present only once
+            one is, and it never appears without `settled` being true.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/settlement"
+        "400":
+          description: The query is missing something, so there is nothing to look for.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/unsettled"
+        "403":
+          description: The signature does not hold, so this service never minted the question.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/unsettled"
 
 components:
   schemas:

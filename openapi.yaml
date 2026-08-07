@@ -42,7 +42,7 @@ tags:
   - name: triggers
     description: One static place many people pay, and the stream of what lands there.
   - name: health
-    description: Liveness.
+    description: Whether this instance is alive, and separately whether to send it work.
   - name: docs
     description: This specification, and a page that renders it.
 
@@ -52,7 +52,12 @@ paths:
       tags: [health]
       operationId: getHealth
       summary: Liveness probe
-      description: Answers as soon as the HTTP listener is up and the store has opened.
+      description: |
+        Answers as soon as the HTTP listener is up and the store has opened, and keeps
+        answering while the watch loop is being scheduled. It turns 503 for the one condition
+        a restart cures: the loop has stopped being scheduled at all, which means this
+        process is stuck rather than busy. A slow tick is not that, so pacing a crowded
+        wallet host never shows up here.
       responses:
         "200":
           description: The instance is serving.
@@ -61,6 +66,99 @@ paths:
               schema:
                 type: string
                 const: OK
+        "503":
+          description: |
+            The watch loop is no longer being scheduled, so this instance needs replacing
+            rather than draining.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/problem"
+
+  /ready:
+    get:
+      tags: [health]
+      operationId: getReadiness
+      summary: Readiness probe, and the vitals on a gateway that is yours
+      description: |
+        Whether this instance should be sent work, which is a different question from whether
+        it is alive. It turns 503 once the instance is draining, so a balancer takes it out of
+        rotation before the listener closes and a redeploy costs nobody a refused request.
+
+        A full worklist is reported, never a refusal: an instance at `MAX_PENDING` still
+        settles and still serves, and `POST /incoming-payments` is where a caller learns it
+        cannot take another. Open to everyone, like `/health`, but the vitals are added only
+        for a caller holding the bearer, because a count is still a fact about somebody's
+        trade.
+      responses:
+        "200":
+          description: |
+            Ready. Without the bearer the body is only `{"status":"ready"}`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    const: ready
+                  origin:
+                    type: string
+                    description: This instance's own identity in the cluster.
+                  peers:
+                    type: integer
+                    description: Instances it is currently gossiping with.
+                  pending:
+                    type: integer
+                    description: Payments on the worklist.
+                  max_pending:
+                    type: integer
+                    description: Where `MAX_PENDING` stops taking new ones.
+                  watching:
+                    type: string
+                    enum: [scheduled, stalled]
+                  sync:
+                    type: object
+                    description: |
+                      Whether this instance holds what its peers hold. `converged` means a peer
+                      answered our watermarks with a batch that came back short, so it held
+                      nothing we lack. `catching-up` means peers are connected and that has not
+                      happened yet, `alone` means nobody answered, which is the normal state of a
+                      single-instance deployment. Readiness never refuses on it: one surviving
+                      instance has to keep taking payments.
+                    properties:
+                      state:
+                        type: string
+                        enum: [converged, catching-up, alone]
+                      converged_at:
+                        type: [integer, "null"]
+                        description: Unix seconds of the last short reply.
+                      origins:
+                        type: integer
+                        description: Instances whose facts this one has recorded.
+                      marks:
+                        type: object
+                        description: |
+                          Sum of the sequence numbers held per fact source. Curl two instances and
+                          compare: equal marks and equal `rows` with equal `origins` is a strong
+                          fingerprint that they hold the same facts. A fingerprint, not a hash,
+                          because a mark is a maximum and says nothing about holes below it.
+                        additionalProperties:
+                          type: integer
+                      rows:
+                        type: object
+                        description: |
+                          Rows actually held per fact source. Matching marks with mismatched rows is
+                          the shape of a hole, which is the one thing a mark alone cannot show.
+                        additionalProperties:
+                          type: integer
+                required: [status]
+        "503":
+          description: This instance is draining and is not taking new work.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/problem"
 
   /openapi.yaml:
     get:
@@ -85,12 +183,20 @@ paths:
       operationId: getDocs
       summary: The specification, rendered for reading
       description: |
-        An HTML page that loads `/openapi.yaml` and renders it. The renderer comes from a
-        CDN, so this page needs the public internet while the specification underneath it
-        does not.
+        An HTML page that loads `/openapi.yaml` and renders it. The renderer is pinned to
+        one immutable version and checked against a subresource-integrity hash, and the page
+        carries a Content-Security-Policy that allows a script only from
+        `https://cdn.jsdelivr.net` and a connection only back to this origin, so neither
+        telemetry nor a proxied test request reaches a third party. When the CDN cannot be
+        reached the page still names `/openapi.yaml`, which this instance serves itself.
       responses:
         "200":
           description: The rendered reference.
+          headers:
+            content-security-policy:
+              description: Holds the page to the pinned renderer and to this origin.
+              schema:
+                type: string
           content:
             text/html:
               schema:
@@ -181,6 +287,8 @@ paths:
           $ref: "#/components/responses/key_conflict"
         "410":
           $ref: "#/components/responses/replay_pruned"
+        "413":
+          $ref: "#/components/responses/body_too_large"
         "422":
           $ref: "#/components/responses/unprovable"
         "502":
@@ -232,6 +340,8 @@ paths:
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
         "404":
           $ref: "#/components/responses/not_found"
 
@@ -254,7 +364,13 @@ paths:
 
         It does not have to be an invoice. All this endpoint requires is a hash and a URL that
         will one day answer with something hashing to it, so anything able to release a secret
-        on settlement can be watched here.
+        on settlement can be watched here. The SDK's `bankTransfer` uses that to put a bank
+        transfer on the same footing.
+
+        This gateway watches for at most three days, and makes that promise to every
+        payment equally. An `expires_at` further off is refused with `400` rather than
+        accepted and dropped later, so ask for a window inside three days and re-register on
+        a "still waiting" click if the payer needs longer.
 
         A hash already watched answers `409` and discloses nothing about what is stored,
         because a payment hash sits in every invoice a payer holds while the payment id is the
@@ -277,6 +393,8 @@ paths:
           $ref: "#/components/responses/bad_request"
         "409":
           $ref: "#/components/responses/watch_taken"
+        "413":
+          $ref: "#/components/responses/body_too_large"
         "503":
           $ref: "#/components/responses/at_capacity"
 
@@ -329,6 +447,8 @@ paths:
           $ref: "#/components/responses/unauthorized"
         "404":
           description: No payment with that id, so the endpoint is not an id oracle.
+        "413":
+          $ref: "#/components/responses/body_too_large"
 
   /ws/tickets/{ticket}:
     parameters:
@@ -358,6 +478,8 @@ paths:
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
 
   /ws/triggers/{secret}:
     parameters:
@@ -384,6 +506,8 @@ paths:
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
+        "503":
+          description: This instance is draining, so open the socket against another one.
 
   /quotes:
     post:
@@ -418,6 +542,8 @@ paths:
                 $ref: "#/components/schemas/quote"
         "400":
           $ref: "#/components/responses/bad_request"
+        "413":
+          $ref: "#/components/responses/body_too_large"
         "422":
           $ref: "#/components/responses/unprovable"
         "502":
@@ -484,7 +610,7 @@ components:
       description: The payment's identifier, as returned by create.
       schema:
         type: string
-        format: uuid
+        pattern: "^[0-9a-f]{64}$"
 
     trigger_secret:
       name: secret
@@ -552,6 +678,7 @@ components:
     ln_address:
       type: string
       format: email
+      maxLength: 320
       description: A LUD-16 lightning address, `user@domain`.
       examples: ["someone@coinos.io"]
 
@@ -587,6 +714,7 @@ components:
         secret:
           type: string
           writeOnly: true
+          maxLength: 256
           description: |
             Signs the body as `x-signature: sha256=<hmac>`. Never read back, on any
             endpoint.
@@ -710,7 +838,8 @@ components:
           format: date-time
           description: |
             The invoice's own expiry. Polling stops here, so a value already in the past is
-            refused rather than watched forever.
+            refused, and so is one more than three days off, which is as long as this gateway
+            watches anything.
         trigger:
           $ref: "#/components/schemas/trigger"
         sealed:
@@ -843,6 +972,16 @@ components:
               - $ref: "#/components/schemas/problem"
               - $ref: "#/components/schemas/no_wallet_available_problem"
 
+    body_too_large:
+      description: |
+        The request body is larger than this gateway will read. The ceiling is 65536 bytes,
+        far above the largest request this API defines, which is a watch carrying a full
+        4096-character `sealed` blob. Send less, and do not retry the same body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
+
     unprovable:
       description: |
         An address answered but delivery through it could not be proved, so no payment was
@@ -904,7 +1043,8 @@ components:
 
     unauthorized:
       description: |
-        This gateway was started with `GATEWAY_TOKEN`, so every call but `/health` needs
+        This gateway was started with `GATEWAY_TOKEN`, so every call but `/health`,
+        `/ready`, `/openapi.yaml` and `/docs` needs
         `Authorization: Bearer <token>`, the WebSocket handshake included. A refused
         handshake is answered with this status and no upgrade.
 
@@ -926,8 +1066,9 @@ components:
 
     at_capacity:
       description: |
-        This instance is already watching as many payments as its polling budget allows.
-        The condition is transient.
+        The cluster is already watching as many payments as `MAX_PENDING` allows. Every
+        instance holds every payment, so this is a ceiling on the cluster's worklist rather
+        than on one machine, and it clears as payments settle or expire.
       content:
         application/problem+json:
           schema:

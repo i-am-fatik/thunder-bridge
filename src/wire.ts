@@ -8,7 +8,9 @@ import { MalformedRequest, type WalletFailure } from "./problem.ts";
 const ASSET_CODE = "BTC";
 const ASSET_SCALE = 11;
 const MAX_ADDRESSES = 16;
+const MAX_ADDRESS_CHARS = 320;
 const MAX_SEALED_CHARS = 4096;
+const MAX_SECRET_CHARS = 256;
 
 export type Amount = { value: string; asset_code: string; asset_scale: number };
 
@@ -173,10 +175,14 @@ function readAddresses(value: unknown): string[] {
 	if (!listed || value.length === 0) {
 		throw new MalformedRequest("ln_addresses must be a non-empty list of lightning addresses");
 	}
-	if (value.length > MAX_ADDRESSES) {
+	const addresses = value as string[];
+	if (addresses.length > MAX_ADDRESSES) {
 		throw new MalformedRequest(`ln_addresses takes at most ${MAX_ADDRESSES} addresses`);
 	}
-	return value as string[];
+	if (addresses.some((one) => one.length > MAX_ADDRESS_CHARS)) {
+		throw new MalformedRequest(`a lightning address is at most ${MAX_ADDRESS_CHARS} characters`);
+	}
+	return addresses;
 }
 
 function readAmount(value: unknown, field: string): number {
@@ -243,8 +249,10 @@ function readWebhook(value: unknown): Webhook | null {
 	}
 
 	const secret = hook["secret"];
-	if (secret !== undefined && typeof secret !== "string") {
-		throw new MalformedRequest("webhook.secret must be a string");
+	if (secret !== undefined && (typeof secret !== "string" || secret.length > MAX_SECRET_CHARS)) {
+		throw new MalformedRequest(
+			`webhook.secret must be a string of at most ${MAX_SECRET_CHARS} characters`,
+		);
 	}
 	return { url, secret: secret ?? null };
 }

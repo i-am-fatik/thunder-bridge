@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { dirname } from "node:path";
 import type { Duplex } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { WebSocketServer, type WebSocket } from "ws";
 
@@ -16,6 +17,7 @@ import { quote, resolve, RESOLVE_TIMEOUT_MS } from "../core/lnurl.ts";
 import type { Payment } from "./payment.ts";
 import {
 	ALREADY_WATCHED,
+	BodyTooLarge,
 	INVALID_REQUEST,
 	KEY_REUSED,
 	MalformedRequest,
@@ -25,7 +27,7 @@ import {
 	statusForWallets,
 } from "./problem.ts";
 import { Store } from "./store.ts";
-import { tick, unixNow, type Watcher } from "./watch.ts";
+import { tick, unixNow, WATCH_HORIZON_SECS, type Watcher } from "./watch.ts";
 import {
 	fingerprint,
 	paymentToWire,
@@ -58,10 +60,26 @@ const REPLAY_WINDOW = 500;
 const SETTLED_WINDOW = 1_000;
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 500;
+const MAX_INBOUND_BYTES = 64 * 1024;
 const BEARER = "Bearer ";
 const TICKET_TTL_SECS = 60;
-const UNGATED = new Set(["/health", "/openapi.yaml", "/docs"]);
+const UNGATED = new Set(["/health", "/ready", "/openapi.yaml", "/docs"]);
+const STALLED = "the watch loop has stopped being scheduled, so this instance needs replacing";
+const LEAVING = "this instance is shutting down and is not taking new work";
+const AT_CAPACITY = "this instance is watching as many payments as it can";
 const SPEC = readFileSync(new URL("../openapi.yaml", import.meta.url), "utf8");
+const RENDERER = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.64.0/dist/browser/standalone.js";
+const RENDERER_HASH = "sha384-ei8P62VHbV+6AdLO3hN333PsTEYp6k9OAVhlYvpmer+zdPIf8jSbdgh9ojiLWX3T";
+const RENDERER_ORIGIN = new URL(RENDERER).origin;
+const DOCS_POLICY = [
+	"default-src 'none'",
+	`script-src ${RENDERER_ORIGIN} 'unsafe-inline'`,
+	"style-src 'unsafe-inline'",
+	`font-src ${RENDERER_ORIGIN} data:`,
+	"img-src 'self' data:",
+	"connect-src 'self'",
+	"frame-ancestors 'none'",
+].join("; ");
 const DOCS = `<!doctype html>
 <html lang="en">
 	<head>
@@ -70,8 +88,9 @@ const DOCS = `<!doctype html>
 		<title>Thunder Bridge</title>
 	</head>
 	<body>
-		<script id="api-reference" data-url="/openapi.yaml"></script>
-		<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+		<script id="api-reference" data-url="/openapi.yaml" data-configuration='{"withDefaultFonts":false}'></script>
+		<script src="${RENDERER}" integrity="${RENDERER_HASH}" crossorigin="anonymous"></script>
+		<main><a href="/openapi.yaml">this specification, unrendered</a></main>
 	</body>
 </html>
 `;
@@ -82,14 +101,18 @@ export type Options = {
 	port: number;
 	eagerDelayMs: number;
 	pollsPerSecond: number;
+	tickStallMs: number;
+	drainTimeoutMs: number;
 	token: string | null;
 	key: Uint8Array;
 };
 
 export type Service = {
 	port: number;
-	stop: () => void;
+	stop: () => Promise<void>;
 };
+
+type Vitals = "serving" | "stalled" | "draining";
 
 export async function start(options: Options, store: Store): Promise<Service> {
 	const watcher: Watcher = {
@@ -98,13 +121,25 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		budget: { perSecond: options.pollsPerSecond, nextAt: new Map() },
 	};
 
+	let draining = false;
+	let firedAt = Date.now();
+	const vitals = (): Vitals =>
+		draining ? "draining" : Date.now() - firedAt > options.tickStallMs ? "stalled" : "serving";
+
 	const followers = new Map<WebSocket, Follower>();
-	const upgrades = new WebSocketServer({ noServer: true });
+	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
-		void respond(incoming, store, options.token, options.key).then((answer) => reply(answer, outgoing));
+		void respond(incoming, store, options.token, options.key, vitals()).then((answer) =>
+			reply(answer, outgoing),
+		);
 	});
 
 	server.on("upgrade", (incoming, socket, head) => {
+		if (draining) {
+			refuseUpgrade(socket, "503 Service Unavailable");
+			return;
+		}
+
 		const path = pathOf(incoming);
 		const ticketed = TICKETED.exec(path);
 		if (ticketed) {
@@ -175,10 +210,12 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	}, SWEEP_INTERVAL_MS);
 
 	let ticking = false;
+	let inFlight: Promise<void> = Promise.resolve();
 	const ticker = setInterval(() => {
+		firedAt = Date.now();
 		if (ticking) return;
 		ticking = true;
-		void tick(watcher)
+		inFlight = tick(watcher)
 			.catch((error: unknown) => console.warn(`tick failed: ${String(error)}`))
 			.finally(() => {
 				ticking = false;
@@ -190,11 +227,14 @@ export async function start(options: Options, store: Store): Promise<Service> {
 
 	return {
 		port,
-		stop: () => {
+		stop: async () => {
+			if (draining) return;
+			draining = true;
 			clearInterval(keepalive);
 			clearInterval(ticker);
 			clearInterval(sweeper);
-			for (const socket of followers.keys()) socket.terminate();
+			await Promise.race([inFlight, sleep(options.drainTimeoutMs, undefined, { ref: false })]);
+			for (const socket of followers.keys()) socket.close();
 			upgrades.close();
 			server.closeAllConnections();
 			server.close();
@@ -265,11 +305,13 @@ async function respond(
 	store: Store,
 	token: string | null,
 	key: Uint8Array,
+	vitals: Vitals,
 ): Promise<Response> {
 	if (incoming.method === "OPTIONS") return new Response(null, { status: 204, headers: OPEN });
 
 	const answer =
-		refused(incoming, token) ?? (await route(incoming, store, token, key).catch(unhandled));
+		refused(incoming, token) ??
+		(await route(incoming, store, token, key, vitals).catch(oversized).catch(unhandled));
 	for (const [header, value] of Object.entries(OPEN)) answer.headers.set(header, value);
 
 	return answer;
@@ -288,9 +330,39 @@ function bearerMatches(incoming: IncomingMessage, token: string): boolean {
 	return equalInConstantTime(bearer, token);
 }
 
-function refuseUpgrade(socket: Duplex): void {
-	socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+function refuseUpgrade(socket: Duplex, status = "401 Unauthorized"): void {
+	socket.write(`HTTP/1.1 ${status}\r\n\r\n`);
 	socket.destroy();
+}
+
+function readiness(
+	incoming: IncomingMessage,
+	store: Store,
+	token: string | null,
+	vitals: Vitals,
+): Response {
+	if (vitals === "draining") return unavailable(LEAVING);
+
+	const trusted = token !== null && bearerMatches(incoming, token);
+	if (!trusted) return json({ status: "ready" });
+
+	const info = store.info();
+
+	return json({
+		status: "ready",
+		origin: info.origin,
+		peers: info.peers,
+		pending: info.pending,
+		max_pending: info.maxPending,
+		watching: vitals === "stalled" ? "stalled" : "scheduled",
+		sync: {
+			state: info.convergedAt !== null ? "converged" : info.peers > 0 ? "catching-up" : "alone",
+			converged_at: info.convergedAt,
+			origins: info.origins,
+			marks: info.marks,
+			rows: info.rows,
+		},
+	});
 }
 
 async function reply(answer: Response, outgoing: ServerResponse): Promise<void> {
@@ -303,11 +375,13 @@ async function route(
 	store: Store,
 	token: string | null,
 	key: Uint8Array,
+	vitals: Vitals,
 ): Promise<Response> {
 	const path = pathOf(incoming);
-	if (path === "/health") return new Response("OK");
-	if (path === "/openapi.yaml") return served(SPEC, "application/yaml");
-	if (path === "/docs") return served(DOCS, "text/html; charset=utf-8");
+	if (path === "/health") return vitals === "stalled" ? unavailable(STALLED) : new Response("OK");
+	if (path === "/ready") return readiness(incoming, store, token, vitals);
+	if (path === "/openapi.yaml") return spec();
+	if (path === "/docs") return rendered();
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
@@ -342,7 +416,7 @@ async function create(request: Request, store: Store): Promise<Response> {
 	}
 
 	if (store.full()) {
-		return unavailable("this instance is watching as many payments as it can");
+		return unavailable(AT_CAPACITY);
 	}
 
 	const key = request.headers.get("idempotency-key");
@@ -454,10 +528,16 @@ async function watchOnly(request: Request, store: Store, key: Uint8Array): Promi
 	}
 
 	if (store.full()) {
-		return unavailable("this instance is watching as many payments as it can");
+		return unavailable(AT_CAPACITY);
 	}
-	if (asked.expiresAt <= unixNow()) {
+	const now = unixNow();
+	if (asked.expiresAt <= now) {
 		return invalidRequest("expires_at is already in the past, there is nothing left to watch");
+	}
+	if (asked.expiresAt > now + WATCH_HORIZON_SECS) {
+		return invalidRequest(
+			`expires_at is further off than the ${WATCH_HORIZON_SECS / 86_400} days this gateway will watch for`,
+		);
 	}
 
 	const known = store.get(paymentId(key, asked.paymentHash));
@@ -473,7 +553,7 @@ async function watchOnly(request: Request, store: Store, key: Uint8Array): Promi
 		bolt11: null,
 		preimage: null,
 		expiresAt: asked.expiresAt,
-		createdAt: unixNow(),
+		createdAt: now,
 		verifyUrl: asked.verifyUrl,
 		trigger: asked.trigger,
 		sealed: asked.sealed,
@@ -511,12 +591,19 @@ function pathOf(incoming: IncomingMessage): string {
 }
 
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
+	if (Number(incoming.headers["content-length"] ?? 0) > MAX_INBOUND_BYTES) throw new BodyTooLarge();
+
 	const headers = new Headers();
 	for (const [name, value] of Object.entries(incoming.headers)) {
 		if (typeof value === "string") headers.set(name, value);
 	}
 	const chunks: Buffer[] = [];
-	for await (const chunk of incoming) chunks.push(chunk as Buffer);
+	let bytes = 0;
+	for await (const chunk of incoming) {
+		bytes += (chunk as Buffer).length;
+		if (bytes > MAX_INBOUND_BYTES) throw new BodyTooLarge();
+		chunks.push(chunk as Buffer);
+	}
 
 	return new Request(`http://${incoming.headers.host ?? "app"}${incoming.url ?? "/"}`, {
 		method: incoming.method,
@@ -531,8 +618,18 @@ function unreadable(error: unknown): Response {
 	throw error;
 }
 
-function served(body: string, type: string): Response {
-	return new Response(body, { headers: { "content-type": type } });
+function spec(): Response {
+	return new Response(SPEC, { headers: { "content-type": "application/yaml" } });
+}
+
+function rendered(): Response {
+	return new Response(DOCS, {
+		headers: {
+			"content-type": "text/html; charset=utf-8",
+			"content-security-policy": DOCS_POLICY,
+			"x-content-type-options": "nosniff",
+		},
+	});
 }
 
 function json(body: unknown, status = 200): Response {
@@ -570,6 +667,16 @@ function unavailable(detail: string): Response {
 	return problem(503, { title: "Service Unavailable", detail });
 }
 
+function oversized(error: unknown): Response {
+	if (!(error instanceof BodyTooLarge)) throw error;
+
+	return problem(413, {
+		type: INVALID_REQUEST,
+		title: "The request body is larger than this gateway will read",
+		detail: `the ceiling is ${MAX_INBOUND_BYTES} bytes, far above any request this API defines`,
+	});
+}
+
 function unhandled(error: unknown): Response {
 	console.error(`request failed: ${String(error)}`);
 	return problem(500, { title: "Internal Server Error" });
@@ -585,7 +692,7 @@ if (import.meta.main) {
 		deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
 	});
 	const store = new Store(ledger, clusterKey, positive("MAX_PENDING", 5000));
-	new Cluster(store.gossip, {
+	const cluster = new Cluster(store.gossip, {
 		key: clusterKey,
 		listenPort: whole("REPLICATE_LISTEN", 0),
 		peers: (process.env["REPLICATE_PEERS"] ?? "").split(",").filter((peer) => peer.length > 0),
@@ -593,14 +700,30 @@ if (import.meta.main) {
 	});
 	console.log(`ledger ${path}, origin ${store.info().origin}`);
 
-	await start(
+	const service = await start(
 		{
 			port: whole("PORT", 3000),
 			eagerDelayMs: positive("POLL_INTERVAL_SECS", 5) * 1000,
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
+			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
+			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,
 			token: process.env["GATEWAY_TOKEN"] ?? null,
 			key: clusterKey,
 		},
 		store,
 	);
+
+	let leaving = false;
+	const leave = () => {
+		if (leaving) process.exit(1);
+		leaving = true;
+		console.log("draining, and leaving once the tick in flight is done");
+		void service.stop().then(() => {
+			cluster.close();
+			store.close();
+			process.exit(0);
+		});
+	};
+	process.on("SIGTERM", leave);
+	process.on("SIGINT", leave);
 }

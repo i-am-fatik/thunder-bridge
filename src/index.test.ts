@@ -13,7 +13,7 @@ import {
 	REQUEST_IN_FLIGHT,
 } from "./problem.ts";
 import type { Store } from "./store.ts";
-import { CLUSTER_KEY, openStore } from "./testing.ts";
+import { CLUSTER_KEY, openStore, until } from "./testing.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
 
 const MSAT_21K = { value: "21000", asset_code: "BTC", asset_scale: 11 };
@@ -22,10 +22,18 @@ const PAYMENT_HASH = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d
 
 type App = { service: Service; store: Store; stop: () => void };
 
-async function running(token: string | null = null): Promise<App> {
+async function running(token: string | null = null, drainTimeoutMs = 10_000): Promise<App> {
 	const opened = openStore();
 	const service = await start(
-		{ port: 0, eagerDelayMs: 3000, pollsPerSecond: 5, token, key: CLUSTER_KEY },
+		{
+			port: 0,
+			eagerDelayMs: 3000,
+			pollsPerSecond: 5,
+			tickStallMs: 30_000,
+			drainTimeoutMs,
+			token,
+			key: CLUSTER_KEY,
+		},
 		opened.store,
 	);
 
@@ -565,7 +573,7 @@ const WATCHED_HASH = "cc".repeat(32);
 const WATCHABLE = {
 	payment_hash: WATCHED_HASH,
 	verify_url: "https://coinos.io/api/lnurl/verify/blind",
-	expires_at: new Date(1_900_000_000 * 1000).toISOString(),
+	expires_at: new Date(Date.now() + 3_600_000).toISOString(),
 };
 
 function postWatch(app: App, body: unknown): Promise<Response> {
@@ -660,7 +668,7 @@ test("a payment the gateway minted itself can never be re-registered as a blind 
 	const fishing = await postWatch(app, {
 		payment_hash: minted.paymentHash,
 		verify_url: minted.verifyUrl,
-		expires_at: new Date(minted.expiresAt * 1000).toISOString(),
+		expires_at: WATCHABLE.expires_at,
 	});
 
 	expect(fishing.status).toBe(409);
@@ -686,6 +694,21 @@ test("a blind watch is refused when there is nothing left to watch or nothing to
 
 	const unhashed = await postWatch(app, { ...WATCHABLE, payment_hash: "nope" });
 	expect(unhashed.status).toBe(400);
+
+	app.stop();
+});
+
+test("a watch reaching past the three days the gateway promises is refused, and stores nothing", async () => {
+	const app = await running();
+
+	const tooFar = await postWatch(app, {
+		...WATCHABLE,
+		expires_at: new Date(Date.now() + 4 * 86_400_000).toISOString(),
+	});
+	expect(tooFar.status).toBe(400);
+	expect(String(((await tooFar.json()) as Problem)["detail"])).toContain("3 days");
+
+	expect((await postWatch(app, WATCHABLE)).status).toBe(201);
 
 	app.stop();
 });
@@ -788,6 +811,82 @@ test("a trigger that is not the hash of anything is refused before a wallet is c
 });
 
 type Problem = Record<string, unknown>;
+
+test("readiness says only that it is ready until a bearer proves the instance is yours", async () => {
+	const shared = await running();
+	const bare = await fetch(`http://127.0.0.1:${shared.service.port}/ready`);
+	expect(bare.status).toBe(200);
+	expect(await bare.json()).toEqual({ status: "ready" });
+	shared.stop();
+
+	const mine = await running("secret-token");
+	const told = await fetch(`http://127.0.0.1:${mine.service.port}/ready`, {
+		headers: { authorization: "Bearer secret-token" },
+	});
+	expect(await told.json()).toMatchObject({
+		status: "ready",
+		peers: 0,
+		pending: 0,
+		max_pending: 5000,
+		watching: "scheduled",
+		sync: {
+			state: "alone",
+			converged_at: null,
+			origins: 0,
+			rows: { accepted: 0, paid: 0, outbox: 0, delivered: 0 },
+		},
+	});
+	mine.stop();
+});
+
+test("a draining instance turns readiness down and waits for the tick in flight", async () => {
+	const real = globalThis.fetch;
+	let asked = 0;
+	globalThis.fetch = (() => {
+		asked += 1;
+		return new Promise((answer) => setTimeout(() => answer(Response.json({ settled: false })), 400));
+	}) as typeof fetch;
+
+	const app = await running(null, 3000);
+	try {
+		app.store.insert(pendingPayment());
+		await until(() => asked > 0, "the watcher to reach the wallet");
+
+		const stopping = app.service.stop();
+		const draining = await real(`http://127.0.0.1:${app.service.port}/ready`);
+		expect(draining.status).toBe(503);
+		expect(((await draining.json()) as Problem)["title"]).toBe("Service Unavailable");
+		await stopping;
+	} finally {
+		globalThis.fetch = real;
+		app.stop();
+	}
+});
+
+test("a body larger than this gateway reads is refused before anything parses it", async () => {
+	const app = await running();
+	const tooMuch = "x".repeat(70_000);
+
+	const declared = await failing(app, `{"pad":"${tooMuch}"}`);
+	expect(declared.status).toBe(413);
+	expect(declared.contentType).toContain("application/problem+json");
+	expect(declared.problem["type"]).toBe(INVALID_REQUEST);
+
+	const streamed = await fetch(`http://127.0.0.1:${app.service.port}/incoming-payments`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode(tooMuch));
+				controller.close();
+			},
+		}),
+		duplex: "half",
+	} as RequestInit);
+	expect(streamed.status).toBe(413);
+
+	app.stop();
+});
 
 function post(app: App, body: unknown, key?: string): Promise<Response> {
 	const headers: Record<string, string> = { "content-type": "application/json" };

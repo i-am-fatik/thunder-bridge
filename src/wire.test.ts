@@ -100,3 +100,11 @@ test("an empty or oversized address list is refused", () => {
 	expect(refusal(asked({ ln_addresses: "charter@coinos.io" }))).toContain("non-empty");
 	expect(refusal(asked({ ln_addresses: Array(17).fill("charter@coinos.io") }))).toContain("16");
 });
+
+test("every field that is kept has a length, so nothing unbounded is stored or signed", () => {
+	const long = "a".repeat(400);
+	expect(refusal(asked({ ln_addresses: [`${long}@coinos.io`] }))).toContain("320 characters");
+	expect(
+		refusal(asked({ webhook: { url: "https://example.com/hook", secret: long } })),
+	).toContain("256 characters");
+});

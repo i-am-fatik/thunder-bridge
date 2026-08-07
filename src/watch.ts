@@ -1,14 +1,15 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { checkSettled } from "../core/lnurl.ts";
+import { ask } from "../core/outbound.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Store } from "./store.ts";
 
 const EAGER_WINDOW_SECS = 300;
 const STALENESS = 0.1;
-const DAILY_DELAY_MS = 86_400_000;
-const GIVE_UP_AFTER_SECS = 2_592_000;
 const LEASE_SECS = 30;
+
+export const WATCH_HORIZON_SECS = 259_200;
 
 export type Budget = { perSecond: number; nextAt: Map<string, number> };
 
@@ -19,17 +20,18 @@ export type Watcher = {
 };
 
 export async function tick(watcher: Watcher): Promise<void> {
-	await pollDue(watcher);
-	await deliverDue(watcher);
+	await Promise.all([pollDue(watcher), deliverDue(watcher)]);
 }
 
 async function pollDue(watcher: Watcher): Promise<void> {
 	const due = watcher.store.duePolls(watcher.budget.perSecond, LEASE_SECS);
-	for (const payment of due) {
-		await poll(watcher, payment).catch((error: unknown) => {
-			console.error(`poll for ${payment.id} stopped: ${String(error)}`);
-		});
-	}
+	await Promise.all(
+		due.map((payment) =>
+			poll(watcher, payment).catch((error: unknown) => {
+				console.error(`poll for ${payment.id} stopped: ${String(error)}`);
+			}),
+		),
+	);
 }
 
 async function poll(watcher: Watcher, payment: Payment): Promise<void> {
@@ -52,11 +54,13 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 
 async function deliverDue(watcher: Watcher): Promise<void> {
 	const owed = watcher.store.dueDeliveries(watcher.budget.perSecond, LEASE_SECS);
-	for (const one of owed) {
-		await deliver(watcher, one).catch((error: unknown) => {
-			console.error(`webhook for ${one.id} stopped: ${String(error)}`);
-		});
-	}
+	await Promise.all(
+		owed.map((one) =>
+			deliver(watcher, one).catch((error: unknown) => {
+				console.error(`webhook for ${one.id} stopped: ${String(error)}`);
+			}),
+		),
+	);
 }
 
 async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {
@@ -80,9 +84,9 @@ async function notify(owed: Delivery): Promise<boolean> {
 	}
 
 	try {
-		const response = await fetch(owed.url, { method: "POST", headers, body: owed.body });
-		if (!response.ok) console.warn(`webhook for ${owed.id} rejected with ${response.status}`);
-		return response.ok;
+		const answer = await ask(owed.url, { method: "POST", headers, body: owed.body });
+		if (!answer.ok) console.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
+		return answer.ok;
 	} catch (error: unknown) {
 		console.warn(`webhook for ${owed.id} failed: ${String(error)}`);
 		return false;
@@ -92,7 +96,7 @@ async function notify(owed: Delivery): Promise<boolean> {
 export function nextDue(payment: Payment, eagerMs: number): number | null {
 	const now = unixNow();
 	const waited = now - payment.createdAt;
-	if (now >= payment.expiresAt || waited >= GIVE_UP_AFTER_SECS) return null;
+	if (now >= payment.expiresAt || waited >= WATCH_HORIZON_SECS) return null;
 
 	return Math.min(now + Math.ceil(pollDelayMs(waited, eagerMs) / 1000), payment.expiresAt);
 }
@@ -114,7 +118,7 @@ function hostOf(url: string): string {
 
 export function pollDelayMs(waitedSecs: number, eagerMs: number): number {
 	if (waitedSecs < EAGER_WINDOW_SECS) return eagerMs;
-	return Math.min(waitedSecs * STALENESS * 1000, DAILY_DELAY_MS);
+	return waitedSecs * STALENESS * 1000;
 }
 
 export async function sign(secret: string, body: string): Promise<string> {
