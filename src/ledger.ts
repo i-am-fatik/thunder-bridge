@@ -385,10 +385,6 @@ export class Ledger {
 		return this.keep(payment, unixNow());
 	}
 
-	mirror(payment: Payment): Taken {
-		return this.keep(payment, this.watchAfter(payment.id));
-	}
-
 	private keep(payment: Payment, dueAt: number): Taken {
 		return this.transact(() => {
 			const held = this.read(payment.id);
