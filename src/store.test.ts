@@ -400,23 +400,22 @@ test("a peer that names no accepted facts is still heard on the ones it does nam
 	}
 });
 
-test("a payment is written where a build without accepted facts would look for it", () => {
-	const directory = mkdtempSync(join(tmpdir(), "tbd-rollback-"));
+test("the worklist a rollback used to read is gone, and the stamp says so", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-retired-"));
 	const ledger = join(directory, "ledger.db");
 	const { store, stop } = openStore({ ledger });
-	const waiting = store.insert(payment(0));
+	store.insert(payment(0));
 	stop();
 
-	const older = new DatabaseSync(ledger);
+	const opened = new DatabaseSync(ledger);
 	try {
-		expect(schemaVersionOf(ledger)).toBe(1);
-		const rows = older.prepare("SELECT payment FROM pending WHERE id = ?").all(waiting.id) as {
-			payment: string;
-		}[];
-		expect(rows).toHaveLength(1);
-		expect(JSON.parse(rows[0]!.payment)).toMatchObject({ paymentHash: waiting.paymentHash });
+		expect(schemaVersionOf(ledger)).toBe(2);
+		const tables = opened
+			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending'")
+			.all();
+		expect(tables).toHaveLength(0);
 	} finally {
-		older.close();
+		opened.close();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
@@ -429,9 +428,16 @@ test("a ledger written before accepted facts existed keeps its worklist", () => 
 	before.stop();
 
 	const written = new DatabaseSync(ledger);
+	written.exec(
+		"CREATE TABLE pending (id TEXT PRIMARY KEY, expiresAt INTEGER NOT NULL, dueAt INTEGER, announced INTEGER NOT NULL DEFAULT 0, payment TEXT NOT NULL)",
+	);
+	written
+		.prepare("INSERT INTO pending (id, expiresAt, dueAt, payment) VALUES (?, ?, ?, ?)")
+		.run(waiting.id, waiting.expiresAt, null, JSON.stringify({ ...waiting, webhooks: [] }));
 	written.exec("DELETE FROM accepted");
 	written.exec("DELETE FROM schedule");
 	written.exec("DELETE FROM progress WHERE source = 'accepted'");
+	written.exec("PRAGMA user_version = 1");
 	written.close();
 
 	const { store, stop } = openStore({ ledger });
@@ -458,7 +464,7 @@ test("a ledger from before the schema was versioned keeps its payments and gets 
 	const { store, stop } = openStore({ ledger });
 	try {
 		expect(store.get(waiting.id)).not.toBeNull();
-		expect(schemaVersionOf(ledger)).toBe(1);
+		expect(schemaVersionOf(ledger)).toBe(2);
 	} finally {
 		stop();
 		rmSync(directory, { recursive: true, force: true });
@@ -485,13 +491,13 @@ test("a stamped ledger still rebuilds an index that went missing", () => {
 	openStore({ ledger }).stop();
 
 	const damaged = new DatabaseSync(ledger);
-	damaged.exec("DROP INDEX pending_by_due");
+	damaged.exec("DROP INDEX schedule_by_due");
 	damaged.close();
-	expect(indexesOf(ledger)).not.toContain("pending_by_due");
+	expect(indexesOf(ledger)).not.toContain("schedule_by_due");
 
 	const { stop } = openStore({ ledger });
 	try {
-		expect(indexesOf(ledger)).toContain("pending_by_due");
+		expect(indexesOf(ledger)).toContain("schedule_by_due");
 	} finally {
 		stop();
 		rmSync(directory, { recursive: true, force: true });

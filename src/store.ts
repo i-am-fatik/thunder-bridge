@@ -41,13 +41,6 @@ export class Store {
 			self: this.ledger.origin,
 			key: this.key,
 			peers: new Map(),
-			onAdd: (payment) => {
-				if (payment.id !== paymentId(this.key, payment.paymentHash)) return;
-				if (this.ledger.settlement(payment.id)) return;
-				const taken = this.ledger.mirror(payment);
-				this.spread(taken.facts);
-				this.onChange(taken.payment);
-			},
 			onFacts: (facts) => {
 				for (const settled of this.ledger.absorb(facts)) {
 					this.onChange(asPayment(settled));
@@ -57,7 +50,6 @@ export class Store {
 				this.convergedAt = Math.floor(Date.now() / 1000);
 			},
 			watermarks: () => this.ledger.watermarks(),
-			held: () => this.ledger.all(),
 			since: (theirs) => this.ledger.since(theirs),
 		};
 	}
@@ -85,7 +77,6 @@ export class Store {
 
 		const taken = this.ledger.accept({ ...unsaved, id });
 		this.spread(taken.facts);
-		announce(this.gossip, { add: taken.payment });
 
 		return taken.payment;
 	}

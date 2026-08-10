@@ -24,16 +24,6 @@ const SCHEMA = `
 		value TEXT NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS pending (
-		id TEXT PRIMARY KEY,
-		expiresAt INTEGER NOT NULL,
-		dueAt INTEGER,
-		announced INTEGER NOT NULL DEFAULT 0,
-		payment TEXT NOT NULL
-	);
-	CREATE INDEX IF NOT EXISTS pending_by_expiry ON pending (expiresAt);
-	CREATE INDEX IF NOT EXISTS pending_by_due ON pending (dueAt);
-
 	CREATE TABLE IF NOT EXISTS accepted (
 		origin TEXT NOT NULL,
 		seq INTEGER NOT NULL,
@@ -113,7 +103,7 @@ const SCHEMA = `
 	CREATE INDEX IF NOT EXISTS requests_by_age ON requests (claimedAt);
 `;
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const DELIVERY_ATTEMPTS = 6;
 const TAKEOVER_SPREAD = 8;
@@ -200,15 +190,12 @@ type Statements = {
 	factCounts: Record<Source, StatementSync>;
 	insertAccepted: StatementSync;
 	insertSchedule: StatementSync;
-	rememberForRollback: StatementSync;
 	forget: StatementSync;
-	forgetForRollback: StatementSync;
 	claim: StatementSync;
 	polled: StatementSync;
 	justExpired: StatementSync;
 	announce: StatementSync;
 	prune: StatementSync;
-	pruneForRollback: StatementSync;
 	pruneAccepted: StatementSync;
 	pruneSettled: StatementSync;
 	unowed: StatementSync;
@@ -276,11 +263,7 @@ export class Ledger {
 			insertSchedule: this.db.prepare(
 				"INSERT INTO schedule (id, expiresAt, dueAt) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING",
 			),
-			rememberForRollback: this.db.prepare(
-				"INSERT INTO pending (id, expiresAt, dueAt, payment) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET payment = excluded.payment",
-			),
 			forget: this.db.prepare("DELETE FROM schedule WHERE id = ?"),
-			forgetForRollback: this.db.prepare("DELETE FROM pending WHERE id = ?"),
 			claim: this.db.prepare(
 				"UPDATE schedule SET dueAt = ? WHERE id IN (SELECT id FROM schedule WHERE dueAt <= ? ORDER BY dueAt LIMIT ?) RETURNING id",
 			),
@@ -288,7 +271,6 @@ export class Ledger {
 			justExpired: this.db.prepare("SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0"),
 			announce: this.db.prepare("UPDATE schedule SET announced = 1 WHERE expiresAt <= ?"),
 			prune: this.db.prepare("DELETE FROM schedule WHERE expiresAt <= ?"),
-			pruneForRollback: this.db.prepare("DELETE FROM pending WHERE expiresAt <= ?"),
 			pruneAccepted: this.db.prepare("DELETE FROM accepted WHERE expiresAt <= ?"),
 			unowed: this.db.prepare(`
 				SELECT DISTINCT accepted.id AS id,
@@ -367,23 +349,26 @@ export class Ledger {
 			),
 		};
 
-		this.adoptWorklistWrittenBeforeAccepted();
+		this.retireTheWorklistWrittenBeforeAccepted();
 	}
 
-	private adoptWorklistWrittenBeforeAccepted(): void {
+	private retireTheWorklistWrittenBeforeAccepted(): void {
+		const held = this.db
+			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending'")
+			.all();
+		if (held.length === 0) return;
+
 		const orphans = this.db
 			.prepare("SELECT payment, dueAt FROM pending WHERE id NOT IN (SELECT id FROM accepted)")
 			.all() as (Row & { dueAt: number | null })[];
 
 		for (const row of orphans) this.keep(revive(row), row.dueAt ?? unixNow());
+
+		this.db.exec("DROP TABLE pending");
 	}
 
 	read(id: string): Payment | null {
 		return groupById(this.statements.read.all(id) as AcceptedRow[])[0] ?? null;
-	}
-
-	all(): Payment[] {
-		return groupById(this.statements.all.all() as AcceptedRow[]);
 	}
 
 	count(): number {
@@ -415,12 +400,6 @@ export class Ledger {
 			if (fresh) this.recordAccepted(fresh);
 
 			this.scheduleWatch(taken.id, taken.expiresAt, dueAt);
-			this.statements.rememberForRollback.run(
-				taken.id,
-				taken.expiresAt,
-				dueAt,
-				JSON.stringify(taken),
-			);
 
 			return { payment: withStatus(taken), facts: fresh ? { accepted: [fresh] } : {} };
 		});
@@ -458,7 +437,6 @@ export class Ledger {
 
 	forget(id: string): void {
 		this.statements.forget.run(id);
-		this.statements.forgetForRollback.run(id);
 	}
 
 	claim(limit: number, leaseSecs: number): Payment[] {
@@ -688,7 +666,6 @@ export class Ledger {
 		);
 		this.statements.announce.run(now);
 		this.statements.prune.run(now - graceSecs);
-		this.statements.pruneForRollback.run(now - graceSecs);
 		this.statements.pruneAccepted.run(now - graceSecs);
 		this.statements.pruneSettled.run(now - graceSecs);
 		this.statements.pruneOutbox.run(now - graceSecs);

@@ -5,25 +5,18 @@ import Protomux from "protomux";
 
 import * as log from "./log.ts";
 import type { Facts, Watermarks } from "./ledger.ts";
-import type { Payment } from "./payment.ts";
 
 const PROTOCOL = "thunder-cluster";
 
-export type Note =
-	| { have: Watermarks }
-	| { facts: Facts; more: boolean }
-	| { pending: Payment[] }
-	| { add: Payment };
+export type Note = { have: Watermarks } | { facts: Facts; more: boolean };
 
 export type Gossip = {
 	self: string;
 	key: Uint8Array;
 	peers: Map<string, (note: Note) => void>;
-	onAdd: (payment: Payment) => void;
 	onFacts: (facts: Facts) => void;
 	onConverged: () => void;
 	watermarks: () => Watermarks;
-	held: () => Payment[];
 	since: (theirs: Watermarks) => { facts: Facts; more: boolean };
 };
 
@@ -51,7 +44,6 @@ export function attach(gossip: Gossip, stream: unknown): void {
 			peer = them.self;
 			gossip.peers.set(peer, (outgoing) => note.send(outgoing));
 			note.send({ have: gossip.watermarks() });
-			note.send({ pending: gossip.held() });
 		},
 		onclose: () => {
 			if (peer) gossip.peers.delete(peer);
@@ -81,10 +73,6 @@ function receive(gossip: Gossip, note: Note, reply: { send(note: Note): void }):
 		gossip.onFacts(note.facts);
 		if (note.more) reply.send({ have: gossip.watermarks() });
 		else gossip.onConverged();
-	} else if ("pending" in note) {
-		for (const payment of note.pending) gossip.onAdd(payment);
-	} else {
-		gossip.onAdd(note.add);
 	}
 }
 

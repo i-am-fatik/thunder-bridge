@@ -1,8 +1,10 @@
+import { createHmac } from "node:crypto";
+
 import { expect, test } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
 import type { Store } from "./store.ts";
-import { paymentId } from "./ledger.ts";
+
 import { CLUSTER_KEY, freePort, openStore, until, type TestOptions } from "./testing.ts";
 
 const TAKEOVER_TIMEOUT_MS = 25_000;
@@ -35,6 +37,13 @@ function payment(nth: number): UnsavedPayment {
 		sealed: null,
 		webhooks: [{ url: "https://example.com/hook", secret: "hunter2" }],
 	};
+}
+
+function signedAsCluster(source: string, fields: (string | number | null)[]): string {
+	const hmac = createHmac("sha256", CLUSTER_KEY).update(source);
+	for (const field of fields) hmac.update("\x00").update(field === null ? "\x01" : String(field));
+
+	return hmac.digest("hex");
 }
 
 function spread(nth: number): UnsavedPayment {
@@ -132,26 +141,27 @@ test("every instance takes on every pending payment, whoever created it", async 
 	}
 });
 
-test("a payment pushed the way the last release pushed it becomes a fact and travels", async () => {
+test("an accepted fact whose id does not name its own invoice is refused, key or no key", async () => {
 	const cluster = await connected();
 	try {
-		const pushed = { ...payment(0), id: paymentId(CLUSTER_KEY, payment(0).paymentHash) };
-		cluster.first.gossip.onAdd(pushed);
+		const lying = { ...payment(1), id: "0".repeat(64) };
+		const fact = {
+			origin: "a-peer-that-holds-the-key",
+			seq: 1,
+			id: lying.id,
+			payment: JSON.stringify(lying),
+			acceptedAt: 1_700_000_000,
+			expiresAt: lying.expiresAt,
+		};
 
-		await until(() => cluster.second.get(pushed.id) !== null, "the pushed payment to reach a peer");
-		expect(cluster.second.info().marks.accepted).toBeGreaterThan(0);
-	} finally {
-		cluster.stop();
-	}
-});
-
-test("a pushed payment whose id does not name its own invoice never becomes a fact", async () => {
-	const cluster = await connected();
-	try {
-		cluster.first.gossip.onAdd({ ...payment(1), id: "0".repeat(64) });
+		expect(() =>
+			cluster.first.gossip.onFacts({
+				accepted: [{ ...fact, mac: signedAsCluster("accepted", Object.values(fact)) }],
+			}),
+		).toThrow("does not name the invoice it watches");
 
 		expect(cluster.first.info().rows.accepted).toBe(0);
-		expect(cluster.first.get("0".repeat(64))).toBeNull();
+		expect(cluster.first.get(lying.id)).toBeNull();
 	} finally {
 		cluster.stop();
 	}
