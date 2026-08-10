@@ -1,6 +1,3 @@
-import { lookup } from "node:dns/promises";
-import { setTimeout as sleep } from "node:timers/promises";
-
 import { publicAddress, publicHttps, sameOrigin } from "./url.ts";
 
 const HTTP_TIMEOUT_MS = 15_000;
@@ -54,6 +51,8 @@ export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
 }
 
 export async function resolvesNothingPrivate(url: string): Promise<boolean> {
+	const { lookup } = await import("node:dns/promises");
+	const { setTimeout: sleep } = await import("node:timers/promises");
 	const host = new URL(url).hostname.replace(/^\[|]$/g, "");
 	const found = await Promise.race([
 		lookup(host, { all: true, verbatim: true }).catch(() => []),

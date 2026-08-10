@@ -13,6 +13,32 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 0.8.3
+
+0.8.2 could not be loaded in a browser at all. Anything server-only now lives behind
+`thunder-bridge/server`, so the main entry carries no Node built-in.
+
+### Fixed
+
+- The package pulled `node:dns/promises` and `node:timers/promises` into whatever
+  imported it, so a bundler building for a browser failed to resolve them and the
+  import took the page down with it. Only `resolvesNothingPrivate` ever wanted them,
+  the SSRF guard on every outbound hop, and it now asks for them when it runs rather
+  than when the module loads. The guard itself is unchanged: it still resolves the name
+  and refuses a private address, and a missing built-in would throw rather than wave a
+  hop through.
+- The build no longer splits its output. A shared chunk put the server half back into
+  the browser half's import graph, which defeated the split above.
+
+### Changed
+
+- `lnurlPayEndpoint` and `blindLightningRail` moved to `thunder-bridge/server`, with
+  `Minted`, `TriggerConfig` and `BlindLightningRailConfig`. Both resolve a Lightning
+  address themselves, which needs the name lookup a browser cannot do, so neither had
+  any business on an entry a browser reads. Everything else stayed where it was,
+  `bankRail` and `fioStatement` included, because they hold a secret rather than a
+  resolver and never reached the lookup.
+
 ## 0.8.2
 
 Every payment method now answers one type, and the retired problem-type namespace is

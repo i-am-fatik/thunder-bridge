@@ -106,7 +106,7 @@ them and this table does not repeat them.
 
 | Export | What it does |
 |---|---|
-| `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your domain |
+| `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your domain. From `thunder-bridge/server` |
 | `seal(secret, plaintext)`, `unseal` | the blob the gateway stores and cannot read |
 | `toLnurl(url)` | bech32-encode an endpoint url |
 | `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway that serves strangers |
@@ -127,7 +127,7 @@ whatever runtime you keep state in.
 |---|---|
 | `bankRail(config)` | a `Rail` selling for a bank transfer, reading back through any `Statement` |
 | `lightningRail(config)` | a `Rail` where the gateway mints the invoice, so it learns the address and the amount |
-| `blindLightningRail(config)` | a `Rail` that resolves the address itself and tells the gateway only a hash |
+| `blindLightningRail(config)` | a `Rail` that resolves the address itself and tells the gateway only a hash. From `thunder-bridge/server` |
 
 `Rail` is `(order: Order) => Promise<Leg>`. Everything that differs between rails
 is bound once when the rail is built, so the only thing passed per sale is which

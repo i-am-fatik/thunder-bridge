@@ -6,8 +6,6 @@ export type {
   WaitOptions,
 } from "./client.js";
 export { seal, unseal } from "../../core/sealed.js";
-export { lnurlPayEndpoint } from "./trigger.js";
-export type { Minted, TriggerConfig } from "./trigger.js";
 export { bankTransfer, bankVerifyEndpoint } from "./bank.js";
 export type {
   BankTransfer,
@@ -18,15 +16,8 @@ export type {
 } from "./bank.js";
 export { fioStatement } from "./fio.js";
 export type { FioConfig } from "./fio.js";
-export { bankRail, blindLightningRail, lightningRail } from "./rail.js";
-export type {
-  BankRailConfig,
-  BlindLightningRailConfig,
-  Leg,
-  LightningRailConfig,
-  Order,
-  Rail,
-} from "./rail.js";
+export { bankRail, lightningRail } from "./rail.js";
+export type { BankRailConfig, Leg, LightningRailConfig, Order, Rail } from "./rail.js";
 export { bitstamp, coinbase, coinmate, kraken, medianOf, msatFor } from "./price.js";
 export type { MedianOptions, Ticker } from "./price.js";
 export { minorScaleOf, minorUnitsOf } from "./currency.js";

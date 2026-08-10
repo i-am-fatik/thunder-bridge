@@ -1,10 +1,10 @@
 import {
   type CreatePaymentParams,
-  lnurlPayEndpoint,
   parseWebhookRequest,
   proveSettlement,
   ThunderBridge,
 } from "thunder-bridge";
+import { lnurlPayEndpoint } from "thunder-bridge/server";
 
 function randomSecret(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
