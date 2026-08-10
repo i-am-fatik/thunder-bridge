@@ -109,7 +109,7 @@ them and this table does not repeat them.
 | `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your domain |
 | `seal(secret, plaintext)`, `unseal` | the blob the gateway stores and cannot read |
 | `toLnurl(url)` | bech32-encode an endpoint url |
-| `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway with no token |
+| `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway that serves strangers |
 | `bankVerifyEndpoint(config)` | the other half, the LUD-21 shape backed by your own statement |
 | `fioStatement(config)` | a `Statement` reading a Fio account, several tokens used strictly in turn |
 
@@ -120,6 +120,24 @@ What your service answers once those handlers are mounted is written out in
 another function of that shape and persistence wraps it from outside rather than
 living inside it. Nothing above it changes, and the package stays ignorant of
 whatever runtime you keep state in.
+
+**One shape for every payment method** - [`src/rail.ts`](src/rail.ts)
+
+| Export | What it does |
+|---|---|
+| `bankRail(config)` | a `Rail` selling for a bank transfer, reading back through any `Statement` |
+| `lightningRail(config)` | a `Rail` where the gateway mints the invoice, so it learns the address and the amount |
+| `blindLightningRail(config)` | a `Rail` that resolves the address itself and tells the gateway only a hash |
+
+`Rail` is `(order: Order) => Promise<Leg>`. Everything that differs between rails
+is bound once when the rail is built, so the only thing passed per sale is which
+sale it is: a reference, an amount in minor units and a currency. A `Leg` reads
+the same whichever rail made it, which is what lets `firstToSettle` take a mixed
+list without being told what is in it.
+
+The gateway is already indifferent to all of this. It holds a payment hash, polls
+a verify URL and reports what came back, so a rail is an SDK-side arrangement of
+calls the gateway already answers, not a plugin it has to load.
 
 **Pricing a fiat order** - [`src/price.ts`](src/price.ts), [`src/currency.ts`](src/currency.ts)
 
@@ -133,10 +151,12 @@ whatever runtime you keep state in.
 **QR codes** - [`src/qr.ts`](src/qr.ts)
 
 Every renderer returns a string, so they work on a server, in a worker and in a
-browser with no canvas involved. `invoiceToSvg` takes an invoice or a lightning
-address, `lnurlToSvg` takes your own endpoint url, `spdToSvg` takes the `spd` from
-`bankTransfer`. Each has a `…ToDataUrl` twin for an `<img>` `src`. A BOLT12 offer
-is not handled, because this gateway never returns one.
+browser with no canvas involved. `qrToSvg` takes any rail's `Leg.qr` and needs to
+know nothing else, because a rail states its own payload. Below it sit the
+format-named ones for calling directly: `invoiceToSvg` takes an invoice or a
+lightning address, `lnurlToSvg` takes your own endpoint url, `spdToSvg` takes a
+Short Payment Descriptor. Each has a `…ToDataUrl` twin for an `<img>` `src`. A
+BOLT12 offer is not handled, because this gateway never returns one.
 
 ```ts
 import { invoiceToSvg, lnurlToSvg } from "thunder-bridge";

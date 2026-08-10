@@ -19,6 +19,7 @@ const WHERE_A_PAYER_WRITES = [
   USER_IDENTIFICATION,
   PAYER_REFERENCE,
 ];
+const UTC_OFFSET = /^[+-]\d{4}$/;
 
 export interface FioConfig {
   /**
@@ -65,8 +66,9 @@ interface FioStatement {
  *
  * Every field on a Fio transaction is optional and arrives as `null` when it is
  * absent, the amount carries its direction in its sign rather than in a flag,
- * and the date is unix milliseconds. This reads all three the way the bank
- * documents them and treats a missing field as absent rather than guessing.
+ * and the date is a day and a UTC offset, `2026-07-15+0200`. This reads all
+ * three the way the bank answers them and treats a missing field as absent
+ * rather than guessing.
  */
 export function fioStatement(config: FioConfig): Statement {
   const named = typeof config.token === "string" ? [config.token] : config.token;
@@ -136,8 +138,25 @@ function asCredit(transaction: FioTransaction): Credit {
     reference: WHERE_A_PAYER_WRITES.map((column) => textIn(transaction[column]))
       .filter((written) => written.length > 0)
       .join(" "),
-    bookedAt: Math.floor(numberIn(transaction[BOOKED_AT]) / MILLIS),
+    bookedAt: bookedAtIn(transaction[BOOKED_AT]),
   };
+}
+
+function bookedAtIn(cell: Cell): number {
+  const value = cell?.value;
+  if (typeof value === "number") return Math.floor(value / MILLIS);
+
+  const at = Date.parse(asIso8601(textIn(cell)));
+
+  return Number.isFinite(at) ? Math.floor(at / MILLIS) : 0;
+}
+
+function asIso8601(booked: string): string {
+  const day = booked.slice(0, DATE_CHARS);
+  const zone = booked.slice(DATE_CHARS);
+  if (!UTC_OFFSET.test(zone)) return `${day}T00:00:00Z`;
+
+  return `${day}T00:00:00${zone.slice(0, 3)}:${zone.slice(3)}`;
 }
 
 function numberIn(cell: Cell): number {

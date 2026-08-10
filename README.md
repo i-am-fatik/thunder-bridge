@@ -171,6 +171,14 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   after day three, it just is not being watched here.
 - **Every outbound URL must be public https.** A webhook to a private address is
   refused along with everything else on the local network.
+- **Without `GATEWAY_TOKEN` every write is anonymous, and nothing here rate limits
+  one.** That is what a public instance is for, but it means one caller can take all
+  `MAX_PENDING` slots with watches nobody will ever pay, and every later create or
+  watch answers 503 until those expire. `POST /quotes` is the same shape pointed
+  outward: it makes this service fetch a host the caller names, which is why it may
+  only name a public https one. An instance meant to be reachable by strangers wants
+  a rate limit in front of it. Reads are not the exposure here: listing is refused
+  outright without a token, and a payment id is an HMAC nobody can guess.
 
 ## More
 

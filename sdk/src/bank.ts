@@ -15,6 +15,12 @@ export interface Credit {
   currency: string;
   /** Whatever the payer wrote, wherever this bank puts it. Matching is a substring, so noise around it is fine */
   reference: string;
+
+  /**
+   * Unix seconds. A bank that books a day rather than an instant, as Fio does,
+   * gives the day's midnight in its own zone, so rendering this in UTC can show
+   * the day before. Nothing here matches on it, it is yours to read
+   */
   bookedAt: number;
 }
 
@@ -125,6 +131,7 @@ export interface BankVerifyConfig {
 export async function bankTransfer(params: BankTransferParams): Promise<BankTransfer> {
   const currency = params.currency ?? DEFAULT_CURRENCY;
   refuseUnusable(params, currency);
+  await refuseAnOpenGateway(params);
   const spd = shortPaymentDescriptor(params, currency);
   const subject = subjectOf(params.reference, params.amountMinor, currency);
 
@@ -232,12 +239,16 @@ function major(amountMinor: number, currency: string): string {
   return (amountMinor / minorScaleOf(currency)).toFixed(minorUnitsOf(currency));
 }
 
+async function refuseAnOpenGateway(params: BankTransferParams): Promise<void> {
+  if (params.allowPublicGateway === true) return;
+  if (await params.gateway.refusesStrangers()) return;
+
+  throw new Error(
+    "this gateway serves callers with no token, so it is not yours, and its operator would read the amount and the reference off every verify URL. Point at one that answers 401 to a stranger, or say allowPublicGateway",
+  );
+}
+
 function refuseUnusable(params: BankTransferParams, currency: string): void {
-  if (!params.gateway.isPrivate && params.allowPublicGateway !== true) {
-    throw new Error(
-      "this gateway has no token, so it is not yours, and its operator would read the amount and the reference off every verify URL. Give it a token or say allowPublicGateway",
-    );
-  }
   if (!IBAN.test(params.iban)) throw new Error(`${params.iban} is not an IBAN`);
   if (!Number.isInteger(params.amountMinor) || params.amountMinor <= 0) {
     throw new Error("amountMinor must be a whole number of minor units above zero");

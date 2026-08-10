@@ -1,5 +1,5 @@
 import {
-  bankTransfer,
+  bankRail,
   bankVerifyEndpoint,
   bitstamp,
   coinbase,
@@ -7,11 +7,14 @@ import {
   type Credit,
   fioStatement,
   kraken,
+  lightningRail,
   medianOf,
   minorScaleOf,
   minorUnitsOf,
   msatFor,
+  type Order,
   preimageMatchesHash,
+  type Rail,
   type Statement,
   ThunderBridge,
   type Ticker,
@@ -119,44 +122,53 @@ const proveOnStatement = bankVerifyEndpoint({
   statement: acrossInvocations,
 });
 
-async function sellOne(origin: string): Promise<Response> {
-  const reference = `ORDER-${randomSecret().slice(0, 8).toUpperCase()}`;
-  const expiresAt = Math.floor(Date.now() / 1000) + PAY_WITHIN_DAYS * 24 * 60 * 60;
+function railsFor(origin: string): Rail[] {
+  const rails = [
+    bankRail({
+      gateway,
+      secret: BANK_SECRET,
+      iban: IBAN,
+      verifyUrl: `${origin}${VERIFY_PATH}`,
+      expiresAt: () => Math.floor(Date.now() / 1000) + PAY_WITHIN_DAYS * 24 * 60 * 60,
+      trigger: TRIGGER_SECRET,
+    }),
+  ];
+  if (!OFFERS_LIGHTNING) return rails;
 
-  const transfer = await bankTransfer({
-    gateway,
-    secret: BANK_SECRET,
-    reference,
+  return [
+    ...rails,
+    lightningRail({
+      gateway,
+      lnAddresses: LN_ADDRESSES,
+      amountMsat: async (order) =>
+        msatFor(order.amountMinor, await priceOf(order.currency), { spreadBps: SPREAD_BPS }),
+      idempotencyKey: (order) => order.reference,
+      trigger: TRIGGER_SECRET,
+    }),
+  ];
+}
+
+async function sellOne(origin: string): Promise<Response> {
+  const order: Order = {
+    reference: `ORDER-${randomSecret().slice(0, 8).toUpperCase()}`,
     amountMinor: AMOUNT_MINOR,
     currency: CURRENCY,
-    iban: IBAN,
-    verifyUrl: `${origin}${VERIFY_PATH}`,
-    expiresAt,
-    trigger: TRIGGER_SECRET,
-  });
+  };
 
-  const amountMsat = OFFERS_LIGHTNING
-    ? msatFor(AMOUNT_MINOR, await priceOf(CURRENCY), { spreadBps: SPREAD_BPS })
-    : 0;
-  const invoice = OFFERS_LIGHTNING
-    ? await gateway.createPayment(
-      { lnAddresses: LN_ADDRESSES, amountMsat },
-      { idempotencyKey: reference, trigger: TRIGGER_SECRET },
-    )
-    : null;
-
-  const legs = invoice ? [transfer.id, invoice.id] : [transfer.id];
+  const legs = await Promise.all(railsFor(origin).map((rail) => rail(order)));
 
   return Response.json({
-    reference,
-    transfer: {
-      id: transfer.id,
-      amount_minor: AMOUNT_MINOR,
-      currency: CURRENCY,
-      spd: transfer.spd,
-    },
-    lightning: invoice && { id: invoice.id, amount_msat: amountMsat, bolt11: invoice.bolt11 },
-    content_url: `${origin}/content?legs=${legs.join(",")}`,
+    reference: order.reference,
+    amount_minor: order.amountMinor,
+    currency: order.currency,
+    legs: legs.map((leg) => ({
+      id: leg.id,
+      rail: leg.rail,
+      scan: leg.scan,
+      qr: leg.qr,
+      expires_at: leg.expiresAt,
+    })),
+    content_url: `${origin}/content?legs=${legs.map((leg) => leg.id).join(",")}`,
   });
 }
 

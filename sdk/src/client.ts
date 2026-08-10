@@ -34,6 +34,18 @@ const TERMINAL: ReadonlySet<PaymentStatus> = new Set(["paid", "expired"]);
 const RECONNECT_DELAY_MS = 3_000;
 const RECONNECT_CAP_MS = 30_000;
 const UNANSWERED_ATTEMPTS = 5;
+const TRIGGER_MIN_CHARS = 16;
+const STRANGER_PROBE = "is-this-gateway-yours";
+
+function unguessable(trigger: string): string {
+  if (trigger.length < TRIGGER_MIN_CHARS) {
+    throw new Error(
+      `a trigger secret is the only thing guarding its stream, and nothing rate limits a guess at it, so it has to be at least ${TRIGGER_MIN_CHARS} characters nobody can predict`,
+    );
+  }
+
+  return trigger;
+}
 
 function backoffMs(firstDelay: number, attempt: number): number {
   const grown = Math.min(firstDelay * 2 ** (attempt - 1), RECONNECT_CAP_MS);
@@ -82,9 +94,12 @@ export interface CreateOptions {
 
   /**
    * Groups this payment with every other one carrying the same secret, so
-   * `followTrigger` can watch the place rather than the payment. Only its
-   * sha256 reaches the gateway, and the secret itself is what authorises the
-   * stream, so keep it apart from any URL a payer sees
+   * `followTrigger` can watch the place rather than the payment. Registering
+   * sends only its sha256, which is also all the gateway stores, so a stolen
+   * ledger cannot subscribe. Following sends the secret itself, because the
+   * gateway hashes what it is given to find the stream, so the operator of a
+   * gateway you do not own learns it the first time you connect. Keep it apart
+   * from any URL a payer sees
    */
   trigger?: string;
 }
@@ -121,6 +136,7 @@ export class ThunderBridge {
   private readonly baseUrl: string;
   private readonly verify: boolean;
   private readonly token: string | null;
+  private strangers: Promise<boolean> | null = null;
 
   constructor(baseUrl: string, options?: ThunderBridgeOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
@@ -138,6 +154,25 @@ export class ThunderBridge {
   }
 
   /**
+   * Whether the gateway turns away a caller carrying no token, asked by making
+   * one unauthenticated read it would have to refuse. `isPrivate` answers only
+   * whether you configured a token, which is your side of the arrangement and
+   * says nothing about the gateway's, so a made-up token against a public
+   * instance reads as private and is not. Asked once and remembered, because an
+   * instance does not change its mind. Anything other than a refusal counts as
+   * open, so an unreachable gateway fails closed
+   */
+  async refusesStrangers(): Promise<boolean> {
+    this.strangers ??= fetch(`${this.baseUrl}/incoming-payments/${STRANGER_PROBE}`, {
+      headers: { accept: "application/json" },
+    })
+      .then((answer) => answer.status === 401)
+      .catch(() => false);
+
+    return await this.strangers;
+  }
+
+  /**
    * Ask the gateway for an invoice payable to the first address on your list
    * that can issue a provable one, throws `NoWalletAvailableError` when none can
    * and `GatewayCheatError` when what comes back is not what you asked for
@@ -149,7 +184,10 @@ export class ThunderBridge {
     const response = await fetch(`${this.baseUrl}/incoming-payments`, {
       method: "POST",
       headers,
-      body: createRequestBody(params, options?.trigger ? sha256Hex(options.trigger) : null),
+      body: createRequestBody(
+        params,
+        options?.trigger ? sha256Hex(unguessable(options.trigger)) : null,
+      ),
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -429,7 +467,10 @@ export class ThunderBridge {
     const response = await fetch(`${this.baseUrl}/watched-payments`, {
       method: "POST",
       headers: this.sending(),
-      body: watchRequestBody(params, params.trigger ? sha256Hex(params.trigger) : null),
+      body: watchRequestBody(
+        params,
+        params.trigger ? sha256Hex(unguessable(params.trigger)) : null,
+      ),
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -450,7 +491,7 @@ export class ThunderBridge {
    */
   followTrigger(secret: string, options: FollowOptions): () => void {
     const base = this.baseUrl.replace(/^http/, "ws");
-    const direct = `${base}/ws/triggers/${encodeURIComponent(secret)}`;
+    const direct = `${base}/ws/triggers/${encodeURIComponent(unguessable(secret))}`;
     const firstDelay = options.reconnectDelayMs ?? RECONNECT_DELAY_MS;
 
     let socket: WebSocket | null = null;

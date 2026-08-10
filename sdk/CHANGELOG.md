@@ -15,8 +15,22 @@ releases a version number once it has been published.
 
 ## 0.8.2
 
-The retired problem-type namespace is gone. Breaking for a client that talks to an
-instance still emitting it.
+Every payment method now answers one type, and the retired problem-type namespace is
+gone. Breaking for a client that talks to an instance still emitting it.
+
+### Added
+
+- `Rail`, one type every payment method satisfies: `(order: Order) => Promise<Leg>`.
+  Everything that differs between rails is bound when the rail is built, so the only
+  thing passed per sale is which sale it is. `bankRail`, `lightningRail` and
+  `blindLightningRail` are the three that ship, and a `Leg` reads the same whichever
+  one made it, so `firstToSettle` takes a mixed list without knowing what is in it.
+- `qrToSvg` and `qrToDataUrl` render any rail's `Leg.qr`. A rail states its own QR
+  payload, a BOLT11 invoice under the `LIGHTNING` scheme or a Short Payment Descriptor
+  as it stands, so nothing has to ask which rail it is looking at. The three
+  format-named pairs stay for anyone calling them directly.
+- `lightningRail` sends no idempotency key unless asked. A key stable across re-offers
+  is one the gateway can join against the bank leg's reference, so it is opt in.
 
 ### Removed
 
@@ -25,6 +39,31 @@ instance still emitting it.
   arrives as a plain `ProblemError` instead of the class its type names. 0.8.1 read
   both to carry callers across the rename, and that transition is over: nothing this
   house runs emits the old spelling any more.
+
+### Fixed
+
+- `bankTransfer` asked the wrong side whether a gateway was private. `isPrivate` reports
+  whether *you* configured a token, so a made-up token against a public instance read as
+  private and the rail registered happily, handing that operator the amount and the
+  reference off every verify URL. It now asks the gateway itself through the new
+  `refusesStrangers()`, one unauthenticated read a private instance has to refuse, asked
+  once per client and remembered. Anything but a refusal counts as open, so an
+  unreachable gateway fails closed. `isPrivate` stays, it just no longer guards the rail.
+- A trigger secret shorter than 16 characters is now refused wherever one is given.
+  Following a trigger is an unauthenticated WebSocket the gateway does not rate limit,
+  and the socket opening is itself the confirmation, so a short secret was brute
+  forceable online. Every stream carries preimages, so guessing one is worth real money.
+- The `trigger` doc comment claimed only its sha256 ever reaches the gateway. That is
+  true of registering, and false of following: `followTrigger` puts the secret itself in
+  the socket URL, because the gateway hashes what it is handed to find the stream. The
+  ledger still stores only the hash, so a stolen database cannot subscribe, but the
+  operator of a gateway you do not own learns the secret the first time you connect.
+- `fioStatement` read `Credit.bookedAt` as unix milliseconds and got `0` for every
+  credit. Fio books a day and a UTC offset, `2026-07-15+0200`, which is neither a
+  number nor something `Date.parse` takes. Found against a real account, on a response
+  the tests had never been shaped like. Settlement was never affected, because
+  `bankVerifyEndpoint` matches on amount, currency and reference and never reads the
+  booking day, so this corrupted a field a caller could read rather than a proof.
 
 
 ## 0.8.1

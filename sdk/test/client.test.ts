@@ -1553,6 +1553,14 @@ describe("watchPayment", () => {
     expect(String(calls[0].init?.body)).not.toContain("the-overlay-holds-this");
   });
 
+  it("refuses a trigger short enough to guess, because nothing rate limits a guess at it", async () => {
+    stubFetch(gatewayWatches());
+
+    await expect(
+      new ThunderBridge(GATEWAY).watchPayment(watchable({ trigger: "shop1" })),
+    ).rejects.toThrow(/at least 16 characters/);
+  });
+
   it("passes a sealed blob through untouched, since only the watcher can read it", async () => {
     const calls = stubFetch(gatewayWatches());
 
@@ -1771,5 +1779,37 @@ describe("a payment the gateway only watches", () => {
     const winner = await winning;
     expect(winner?.id).toBe(WATCHED);
     expect(winner?.preimage).toBe(PREIMAGE_FOR);
+  });
+});
+
+describe("refusesStrangers", () => {
+  const PROBE = `${GATEWAY}/incoming-payments/is-this-gateway-yours`;
+
+  it("reads a refusal of an unauthenticated read as a gateway that is yours", async () => {
+    stubFetch({ [PROBE]: () => problemResponse({}, 401) });
+
+    expect(await new ThunderBridge(GATEWAY).refusesStrangers()).toBe(true);
+  });
+
+  it("reads anything else as open, so a made-up token cannot make an instance private", async () => {
+    stubFetch({ [PROBE]: () => jsonResponse({}, 404) });
+
+    expect(await new ThunderBridge(GATEWAY, { token: "wishful" }).refusesStrangers()).toBe(false);
+  });
+
+  it("counts an unreachable gateway as open, so the doubt fails closed", async () => {
+    stubFetch({});
+
+    expect(await new ThunderBridge(GATEWAY).refusesStrangers()).toBe(false);
+  });
+
+  it("asks once and remembers, because an instance does not change its mind", async () => {
+    const calls = stubFetch({ [PROBE]: () => problemResponse({}, 401) });
+    const gateway = new ThunderBridge(GATEWAY);
+
+    await gateway.refusesStrangers();
+    await gateway.refusesStrangers();
+
+    expect(calls).toHaveLength(1);
   });
 });
