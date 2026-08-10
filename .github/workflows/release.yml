@@ -1,0 +1,34 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: the image a client can pin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: a tag that is not the version it claims
+        run: |
+          tagged=${GITHUB_REF_NAME#v}
+          package=$(node -p "require('./package.json').version")
+          test "$tagged" = "$package" || {
+            echo "the tag says $tagged and package.json says $package"
+            exit 1
+          }
+      - name: an image nobody can push
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: build it and push it under the tag
+        run: |
+          image=ghcr.io/${{ github.repository_owner }}/thunder-bridge-gateway
+          version=${GITHUB_REF_NAME#v}
+          docker build --tag "$image:$version" --tag "$image:latest" .
+          docker push "$image:$version"
+          docker push "$image:latest"

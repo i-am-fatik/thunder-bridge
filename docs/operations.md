@@ -4,12 +4,26 @@ Reference for whoever is holding the pager. Why it is shaped this way is
 [design.md](design.md), what the variables mean is the
 [README](../README.md#configuration). This file is only what to do.
 
+## What to run
+
+`ghcr.io/i-am-fatik/thunder-bridge-gateway:<version>`, pushed by the release workflow
+when a `v*` tag lands, and refused if that tag does not match the version in
+`package.json`. The name says gateway because `thunder-bridge` on npm is the client
+that talks to it, and because that container name is already taken by another
+repository. Pin the version rather than `latest`: this gateway is one process
+holding a client's payment records, and a surprise upgrade on restart is not a thing
+you want to debug at two in the morning.
+
 ## Deploy a new build
 
 Railway is not wired to the repository. Merging to `main` deploys nothing: run
 `railway up` from the repo root, and check `railway deployment list` says SUCCESS
 before believing it. `/health` answering 200 is the healthcheck Railway itself
 waits on, so a deploy that goes live has at least booted.
+
+Railway builds from the `Dockerfile` rather than pulling that image, so the two are
+the same recipe and not the same artifact. A client running the image is pinned. This
+deployment is not.
 
 A shutdown drains: the instance stops accepting, finishes the tick in flight, and
 leaves. `DRAIN_TIMEOUT_SECS` bounds the wait. A webhook may go out twice across a
