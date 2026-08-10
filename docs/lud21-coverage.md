@@ -13,12 +13,59 @@ shape.
 **Read every list below as of its date, not as of today.** A wallet that shipped
 LUD-21 last month is still refused here, and the refusal comes from this snapshot
 rather than from anything measured. Re-run the harvest above before a release,
-because the denylist is the one part of it that costs a real recipient. Spot
-checks since the survey, which are one address each and prove nothing about a
-provider's other domains:
+because the denylist is the one part of it that costs a real recipient.
 
-- 2026-08-10, `iamfatik@blink.sv` still answers `verify` at
-  `lnurl.blink.sv/verify/{hash}`, the shape recorded below.
+## Re-surveyed 2026-08-10
+
+The harvest again, wider: 643 addresses across 97 domains from six relays, sampling
+two addresses per domain because support belongs to the domain rather than the
+account, then a deeper pass of up to six addresses on every domain the thin sample
+could not settle.
+
+**The denylist costs nobody, as far as this can tell.** `zeuspay.com` still answers
+`verify` with no `preimage` key at all, so the entry that refuses it is still right.
+`zeusnuts.com` and `ecash.love` appeared in no profile in this harvest, so they are
+unrefuted rather than confirmed. Nothing turned up a wallet that shipped LUD-21 since
+and is being refused from a stale list, which was the fear behind the gap.
+
+**A trap worth writing down.** A domain looks like it has no LUD-21 when the sampled
+account is simply broken. `king21@getalby.com` answers `Recipient wallet error`,
+`satoshiplanet@stacker.news` answers `could not generate invoice to customer's
+attached wallet`. On two addresses Alby therefore read as unreachable, and Alby is one
+of the largest providers here at 90 of the 643. Six addresses in, it answers `verify`
+with a preimage field, exactly as in the first survey. Never conclude a provider from a
+thin sample.
+
+### Still usable, measured again
+
+`getalby.com`, `coinos.io` and `coinos.pro`, `blink.sv`, `minibits.cash`, `cake.cash`,
+`breez.tips`, `blitzwalletapp.com`, `cluborange.org`, `radar.cash`,
+`sats.zap.cooking`, and the BTCPay instances `pay.aerarium.money`,
+`btcpay.fiattolightning.de`, `pay.bbw.sv`, `pay.sdbitcoiners.com`.
+
+### Usable and new to this survey
+
+`speed.app`, which the first survey could only list as untested for want of a live
+address. Plus `arkzap.me`, `stacked.cash`, `sidecar.top`, `nostrplebs.com`,
+`orangem.art`, and the self-hosted `bencousens.com`, `cyberguy.fyi`, `enesis.md`,
+`mwaters.net`, `onyxcatpottery.com`, `rodbishop.nz`, `vitorpamplona.com`.
+
+### Still no verify at all
+
+Every name the first survey listed that appeared again answers the same way:
+`walletofsatoshi.com`, `strike.me`, `cash.app`, `zbd.gg`, `primal.net`,
+`fountain.fm`, `npub.cash`, `npubx.cash`, `wallet.yakihonne.com`, `sats.mobi`,
+`rizful.com`, and every LNbits instance in the sample. New to the list and answering
+the same: `linky.fit`, `sendsats.lol`, `satpicks.com`, `safebox.dev`,
+`nostrcheck.me`, `nostrdvm.com`, `btcmap.org`, `orangepillapp.com`, `nextblock.city`,
+`nostrcade.com`, `bitcointxoko.org`, `westernbtc.com`.
+
+### Settled nothing either way
+
+`stacker.news`, `pay.blink.sv`, `phoenixwallet.me`, `noahwallet.io`, `breez.fun`,
+`zap.stream` and a dozen small self-hosted domains: every address sampled had a
+broken wallet behind it, so these are unmeasured rather than refused. The first
+survey called Stacker News usable and nothing here contradicts it.
 
 ## Usable: verify present, preimage released
 

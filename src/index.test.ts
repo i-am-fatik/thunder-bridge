@@ -662,15 +662,37 @@ test("a watched payment can be owed a webhook, which is the bank rail's only way
 	app.stop();
 });
 
+test("re-registering the same watch with another webhook owes both, because webhooks are a set", async () => {
+	const app = await running();
+	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
+
+	await postWatch(app, { ...watchable, webhook: { url: "https://shop.example/hooks/one" } });
+	const again = await postWatch(app, {
+		...watchable,
+		webhook: { url: "https://shop.example/hooks/two" },
+	});
+
+	expect(again.status).toBe(201);
+
+	const created = (await again.json()) as Problem;
+	expect(app.store.get(String(created["id"]))?.webhooks.map((hook) => hook.url).sort()).toEqual([
+		"https://shop.example/hooks/one",
+		"https://shop.example/hooks/two",
+	]);
+
+	app.stop();
+});
+
 test("a watch asking for a webhook somewhere private is refused, like a create is", async () => {
 	const app = await running();
 
 	const refused = await postWatch(app, {
 		...WATCHABLE,
-		webhook: { url: "http://192.168.1.10/hooks", secret: null },
+		webhook: { url: "http://192.168.1.10/hooks", secret: "s".repeat(32) },
 	});
 
 	expect(refused.status).toBe(400);
+	expect(((await refused.json()) as Problem)["detail"]).toContain("webhook.url");
 
 	app.stop();
 });

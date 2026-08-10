@@ -4,7 +4,7 @@
     "deploy": "deployctl deploy --prod --env-file"
   },
   "imports": {
-    "thunder-bridge": "npm:thunder-bridge@0.8.3"
+    "thunder-bridge": "npm:thunder-bridge@0.8.4"
   },
   "fmt": {
     "lineWidth": 100

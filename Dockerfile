@@ -1,4 +1,4 @@
-FROM node:24.19-slim AS check
+FROM --platform=$BUILDPLATFORM node:24.19-slim AS check
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /app

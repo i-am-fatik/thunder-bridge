@@ -10,7 +10,13 @@ Reference for whoever is holding the pager. Why it is shaped this way is
 when a `v*` tag lands, and refused if that tag does not match the version in
 `package.json`. The name says gateway because `thunder-bridge` on npm is the client
 that talks to it, and because that container name is already taken by another
-repository. Pin the version rather than `latest`: this gateway is one process
+repository.
+
+It is built for `linux/amd64` and `linux/arm64`, so Graviton and Apple Silicon run it
+native. The suite still runs once, on the builder's own architecture: the `check` stage
+is pinned to `$BUILDPLATFORM` and every native dependency here ships both `linux-x64`
+and `linux-arm64` prebuilds, which the prune step keeps. Only the two cheap steps in the
+final layer are emulated. Pin the version rather than `latest`: this gateway is one process
 holding a client's payment records, and a surprise upgrade on restart is not a thing
 you want to debug at two in the morning.
 
@@ -56,6 +62,29 @@ survives both a redeploy and a disk.
 `sync.marks` plus `sync.rows` compared across two instances is strong evidence
 they agree. Read from one instance it proves nothing: a mark is a maximum and says
 nothing about holes below it.
+
+## Where the bank rail's verify endpoint runs
+
+The bank rail needs a public https endpoint serving `bankVerifyEndpoint`, because the
+gateway polls it and refuses anything private. That endpoint, not the gateway, is what
+holds the client's bank read token, so where it runs is a question about who holds that
+token rather than about hosting.
+
+Run it with the client's own application, on the client's own host. It is one route in
+whatever already serves them, it keeps the bank token on their side, and the gateway
+stays a thing that polls a URL and knows an amount only from a query string. Standing it
+up in our own infrastructure would mean holding a client's bank credential for them,
+which is a different business than running a gateway.
+
+An unreachable endpoint costs nothing but time. A poll that fails is logged and the
+payment is scheduled again, so an endpoint down for an afternoon means the settlement is
+noticed late rather than lost, as long as it is back inside the three day watch horizon.
+The money is in the account either way, which is the whole point of reading a bank
+statement rather than trusting a callback.
+
+What that does mean is that a client who takes their app down for a week and had an
+unpaid order open will see it expire unsettled with the money received. Say so in the
+integration, and re-register rather than arguing with it.
 
 ## Hold one key per client
 
