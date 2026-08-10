@@ -24,6 +24,9 @@ COPY --from=check /app/core ./core
 COPY --from=check /app/src ./src
 COPY --from=check /app/openapi.yaml ./
 COPY --from=check /data /data
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh && chown -R node:node /app /data
 ENV LEDGER=/data/ledger.db
 EXPOSE 3000/tcp
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "src/index.ts"]

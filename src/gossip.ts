@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import c from "compact-encoding";
 import Protomux from "protomux";
 
+import * as log from "./log.ts";
 import type { Facts, Watermarks } from "./ledger.ts";
 import type { Payment } from "./payment.ts";
 
@@ -43,7 +44,7 @@ export function attach(gossip: Gossip, stream: unknown): void {
 		handshake: c.json,
 		onopen: (them: Introduction) => {
 			if (!introduces(gossip.key, them)) {
-				console.warn("a peer without the cluster key tried to join");
+				log.warn("a peer without the cluster key tried to join");
 				channel?.close();
 				return;
 			}
@@ -64,7 +65,7 @@ export function attach(gossip: Gossip, stream: unknown): void {
 			try {
 				receive(gossip, incoming, note);
 			} catch (error: unknown) {
-				console.warn(`dropping a peer that sent an unusable note: ${String(error)}`);
+				log.warn(`dropping a peer that sent an unusable note: ${String(error)}`);
 				channel.close();
 			}
 		},

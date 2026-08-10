@@ -166,7 +166,8 @@ const tipJar = lnurlToSvg("https://agora.gripe/tip");
 ```
 
 **Webhooks** - [`src/webhook.ts`](src/webhook.ts): `parseWebhookRequest`,
-`parseWebhook`, `verifyWebhookSignature`. See [Webhooks](#webhooks).
+`parseWebhook`, `parseWatchedWebhookRequest`, `parseWatchedWebhook`,
+`verifyWebhookSignature`. See [Webhooks](#webhooks).
 
 **Errors** - [`src/errors.ts`](src/errors.ts): `ProblemError`,
 `NoWalletAvailableError`, `GatewayCheatError`, `UnverifiedRecipientError`,
@@ -224,6 +225,27 @@ such as `nas`, the trailing-dot `localhost.`, and anything whose last label is
 `local`, `internal`, `lan`, `arpa`, `test` or `invalid`.
 
 It vets the first hop only. See below.
+
+### Which transfer counts as paying
+
+`bankVerifyEndpoint` calls a credit a settlement when the amount and the currency
+match exactly and the reference appears anywhere in what the payer wrote,
+case-insensitively. With `fioStatement` "what the payer wrote" is four Fio columns
+joined: the variable symbol, the user identification, the message for the recipient
+and the payer's own reference. So a bank that prefixes, appends, or moves the text
+between those fields still settles.
+
+Two shapes do not settle, and both leave the payment `pending` while the money is
+already in the account:
+
+- **A shortened reference.** The match asks whether the reference is inside what the
+  bank forwarded, not the other way round, so a bank that truncates it never matches.
+- **A payer whose bank forwards nothing but a numeric variable symbol.** The
+  reference is alphanumeric and cannot travel in a numeric field, and the match does
+  not read `X-VS` as an alternative.
+
+Neither has been seen with Fio, which forwards the message untouched. Check it
+against the banks your payers actually use before you promise them a rail.
 
 ## What is still trusted
 
@@ -315,9 +337,9 @@ try {
 
 ## Webhooks
 
-Pass `webhookUrl` and optionally `webhookSecret` when you create a payment. Once
-it reaches `paid` the gateway POSTs the same JSON the API returns, so the body is
-a `Payment`. Every delivery carries `x-timestamp`, and with a secret set
+Pass `webhookUrl` and optionally `webhookSecret` when you create a payment, or on
+any rail. Once it reaches `paid` the gateway POSTs the same JSON the API returns,
+so the body is a `Payment`. Every delivery carries `x-timestamp`, and with a secret set
 `x-signature: sha256=<hmac>` over `<timestamp>.<body>` rather than the body alone,
 so a captured delivery cannot be replayed at you later. Six attempts on a widening
 backoff, then it parks. An invoice that expires fires nothing.
@@ -338,6 +360,29 @@ app.post("/hooks/paid", async (context) => {
   return context.text("ok");
 });
 ```
+
+### A watched payment sends a different body
+
+`bankRail` and `blindLightningRail` register a payment the gateway was told almost
+nothing about, so its webhook carries no address, no amount and no invoice. That is
+not a `Payment`, and `parseWebhook` answers `null` for it, which looks exactly like a
+bad signature. Use `parseWatchedWebhookRequest` there instead and you get a
+`TriggerEvent`, the shape `getWatched` hands back.
+
+```ts
+import { parseWatchedWebhookRequest } from "thunder-bridge";
+
+app.post("/hooks/bank", async (context) => {
+  const settled = await parseWatchedWebhookRequest(context.req.raw, secret);
+  if (settled === null) return context.text("bad signature", 401);
+
+  await fulfil(settled.id, settled.preimage);
+  return context.text("ok");
+});
+```
+
+Give each rail its own path, as above, and neither endpoint has to guess which body
+it was handed.
 
 `parseWebhookRequest` refuses anything more than five minutes out of date,
 adjustable with `toleranceSecs`. The signature proves the body came from someone

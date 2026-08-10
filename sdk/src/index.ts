@@ -36,7 +36,13 @@ export {
 } from "./qr.js";
 export type { QrOptions } from "./qr.js";
 export { toLnurl } from "../../core/lnurl.js";
-export { parseWebhook, parseWebhookRequest, verifyWebhookSignature } from "./webhook.js";
+export {
+  parseWatchedWebhook,
+  parseWatchedWebhookRequest,
+  parseWebhook,
+  parseWebhookRequest,
+  verifyWebhookSignature,
+} from "./webhook.js";
 export type { WebhookOptions } from "./webhook.js";
 export {
   GatewayCheatError,

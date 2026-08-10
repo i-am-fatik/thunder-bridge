@@ -1,6 +1,6 @@
 import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
-import type { Payment } from "./types.js";
-import { paymentFromWire } from "./wire.js";
+import type { Payment, TriggerEvent } from "./types.js";
+import { paymentFromWire, triggerEventFromWire } from "./wire.js";
 
 const SIGNATURE_HEADER = "x-signature";
 const TIMESTAMP_HEADER = "x-timestamp";
@@ -55,6 +55,39 @@ export async function parseWebhookRequest(
   const timestamp = request.headers.get(TIMESTAMP_HEADER);
   if (signature === null || timestamp === null) return null;
   return parseWebhook(await request.text(), signature, secret, timestamp, options);
+}
+
+/**
+ * The same, for a payment the gateway only watched. A bank transfer and a blind
+ * Lightning leg carry no address, amount or invoice, so they arrive in the shape
+ * `followTrigger` and `getWatched` hand back rather than the minted one
+ */
+export async function parseWatchedWebhook(
+  body: string | Uint8Array,
+  signature: string,
+  secret: string,
+  timestamp: string,
+  options: WebhookOptions = {},
+): Promise<TriggerEvent | null> {
+  if (!(await verifyWebhookSignature(body, signature, secret, timestamp, options))) return null;
+  const text = typeof body === "string" ? body : new TextDecoder().decode(body);
+  try {
+    return triggerEventFromWire(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
+/** `parseWatchedWebhook` from a Fetch API `Request`, the way `parseWebhookRequest` is */
+export async function parseWatchedWebhookRequest(
+  request: Request,
+  secret: string,
+  options: WebhookOptions = {},
+): Promise<TriggerEvent | null> {
+  const signature = request.headers.get(SIGNATURE_HEADER);
+  const timestamp = request.headers.get(TIMESTAMP_HEADER);
+  if (signature === null || timestamp === null) return null;
+  return parseWatchedWebhook(await request.text(), signature, secret, timestamp, options);
 }
 
 function recent(timestamp: string, toleranceSecs: number): boolean {

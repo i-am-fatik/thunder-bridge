@@ -1,7 +1,13 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Payment } from "../src/types";
-import { parseWebhook, parseWebhookRequest, verifyWebhookSignature } from "../src/webhook";
+import {
+  parseWatchedWebhook,
+  parseWatchedWebhookRequest,
+  parseWebhook,
+  parseWebhookRequest,
+  verifyWebhookSignature,
+} from "../src/webhook";
 
 const SECRET = "whsec_bd41a4f0c8e94d0fa1b7";
 const OTHER_SECRET = "whsec_0000000000000000ffff";
@@ -185,6 +191,69 @@ describe("parseWebhookRequest", () => {
       body: BODY,
     });
     await expect(parseWebhookRequest(request, SECRET)).resolves.toBeNull();
+  });
+});
+
+describe("a bank transfer's webhook, which names no address, amount or invoice", () => {
+  const WATCHED = JSON.stringify({
+    id: "9500f6c684d69021968e8d3f98536812ff3e7505c3928154f7663068c8396a11",
+    status: "paid",
+    payment_hash: "fa3b58ce01b89960260dbdc03a933733b2bbe2a53377baea6958a1d3c3166d69",
+    verify_url: "https://shop.example.org/verify/bank?ref=ORDER-MSNM5N4N&minor=1&cc=CZK&sig=325f",
+    preimage: "63d16c80a9b84c53b36bc0128a48af5057f32b1a2a3c4cbd761ce94a795a9b54",
+    expires_at: "2026-08-10T20:17:32.000Z",
+    created_at: "2026-08-10T19:17:32.000Z",
+  });
+
+  it("is refused by parseWebhook, because that shape wants an address and an invoice", async () => {
+    const stamped = now();
+
+    await expect(
+      parseWebhook(WATCHED, header(WATCHED, SECRET, stamped), SECRET, stamped),
+    ).resolves.toBeNull();
+  });
+
+  it("parses through parseWatchedWebhook, preimage and all", async () => {
+    const stamped = now();
+
+    const event = await parseWatchedWebhook(
+      WATCHED,
+      header(WATCHED, SECRET, stamped),
+      SECRET,
+      stamped,
+    );
+
+    expect(event?.status).toBe("paid");
+    expect(event?.preimage).toBe(
+      "63d16c80a9b84c53b36bc0128a48af5057f32b1a2a3c4cbd761ce94a795a9b54",
+    );
+    expect(event?.lnAddress).toBeNull();
+    expect(event?.amountMsat).toBeNull();
+  });
+
+  it("still refuses a body signed with the wrong secret", async () => {
+    const stamped = now();
+
+    await expect(
+      parseWatchedWebhook(WATCHED, header(WATCHED, OTHER_SECRET, stamped), SECRET, stamped),
+    ).resolves.toBeNull();
+  });
+
+  it("reads the same body off a Request", async () => {
+    const stamped = now();
+    const request = new Request("https://shop.example.org/hooks/bank", {
+      method: "POST",
+      headers: {
+        "x-signature": header(WATCHED, SECRET, stamped),
+        "x-timestamp": stamped,
+        "content-type": "application/json",
+      },
+      body: WATCHED,
+    });
+
+    await expect(parseWatchedWebhookRequest(request, SECRET)).resolves.toMatchObject({
+      status: "paid",
+    });
   });
 });
 

@@ -13,6 +13,35 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 0.8.4
+
+A bank transfer can now be told to a server. Until this release the only way to hear
+about one was to hold a socket open or to keep asking.
+
+### Added
+
+- `webhookUrl` and `webhookSecret` on `bankRail`, `blindLightningRail` and
+  `bankTransfer`, and on `watchPayment` underneath them. A watched payment could
+  never carry a webhook, only a minted one could, so the bank rail had no
+  server-to-server path at all and `lightningRail` was the odd one out for having
+  one. Delivery, signing and the retry ladder are the same outbox a minted payment
+  uses, and re-registering with a different hook adds it rather than replacing it,
+  because webhooks on a payment are a set every instance unions.
+
+  Needs a gateway at 0.2.0 or later. An older one ignores the field and delivers
+  nothing, which looks exactly like not asking, so check what you are pointed at.
+
+- `parseWatchedWebhook` and `parseWatchedWebhookRequest`, because the body a watched
+  payment sends is not the body a minted one sends. It carries no address, no amount
+  and no invoice, so `parseWebhook` returns `null` for it, which reads exactly like a
+  bad signature and is the first thing anyone wiring the bank rail would hit. Measured
+  against a real delivery from a real gateway, not a fixture: the signature verified
+  and the parse still failed.
+
+  The pair mirrors the existing one and returns a `TriggerEvent`, the same shape
+  `getWatched` and `followTrigger` hand back. Give each rail its own webhook path and
+  each path knows which of the two it wants.
+
 ## 0.8.3
 
 0.8.2 could not be loaded in a browser at all. Anything server-only now lives behind

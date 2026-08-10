@@ -34,6 +34,7 @@ export type WatchRequest = {
 	expiresAt: number;
 	trigger: string | null;
 	sealed: string | null;
+	webhook: Webhook | null;
 };
 
 export type QuoteOffer = {
@@ -91,6 +92,7 @@ export function readWatchRequest(body: unknown): WatchRequest {
 		expiresAt: readExpiry(fields["expires_at"]),
 		trigger: readTrigger(fields["trigger"]),
 		sealed: readSealed(fields["sealed"]),
+		webhook: readWebhook(fields["webhook"]),
 	};
 }
 

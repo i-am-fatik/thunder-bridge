@@ -104,6 +104,9 @@ export function watchRequestBody(params: WatchPaymentParams, trigger: string | n
     expires_at: expiresAt.toISOString(),
     trigger: trigger ?? undefined,
     sealed: params.sealed,
+    webhook: params.webhookUrl
+      ? { url: params.webhookUrl, secret: params.webhookSecret }
+      : undefined,
   });
 }
 

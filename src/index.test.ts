@@ -637,6 +637,44 @@ test("what the gateway stores about a blind watch names no recipient and no amou
 	app.stop();
 });
 
+test("a watched payment can be owed a webhook, which is the bank rail's only way to be told", async () => {
+	const app = await running();
+
+	const created = (await (
+		await postWatch(app, {
+			...WATCHABLE,
+			payment_hash: PAYMENT_HASH,
+			webhook: { url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
+		})
+	).json()) as Problem;
+	const stored = app.store.get(String(created["id"]));
+
+	expect(stored?.webhooks).toEqual([
+		{ url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
+	]);
+
+	app.store.paid(String(created["id"]), PREIMAGE);
+
+	expect(app.store.dueDeliveries(10, 60).map((owed) => owed.url)).toContain(
+		"https://shop.example/hooks/bank",
+	);
+
+	app.stop();
+});
+
+test("a watch asking for a webhook somewhere private is refused, like a create is", async () => {
+	const app = await running();
+
+	const refused = await postWatch(app, {
+		...WATCHABLE,
+		webhook: { url: "http://192.168.1.10/hooks", secret: null },
+	});
+
+	expect(refused.status).toBe(400);
+
+	app.stop();
+});
+
 test("a sealed blob is handed back untouched, and the gateway keeps it out of nothing else", async () => {
 	const app = await running();
 

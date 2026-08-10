@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
@@ -314,17 +314,18 @@ test("a poll and a webhook owed in the same tick go out together, not one after 
 });
 
 test("the next poll never lands after the invoice has expired", () => {
-	const now = unixNow();
-	const near = (value: number | null, expected: number) => {
-		expect(value).not.toBeNull();
-		expect(Math.abs((value ?? 0) - expected)).toBeLessThanOrEqual(1);
-	};
+	vi.useFakeTimers();
+	try {
+		const now = unixNow();
 
-	near(nextDue(payment({ createdAt: now, expiresAt: now + 3600 }), 5000), now + 5);
-	near(nextDue(payment({ createdAt: now - 600, expiresAt: now + 3600 }), 5000), now + 60);
-	expect(nextDue(payment({ createdAt: now - 600, expiresAt: now + 10 }), 5000)).toBe(now + 10);
-	expect(nextDue(payment({ createdAt: now, expiresAt: now }), 5000)).toBeNull();
-	expect(nextDue(payment({ createdAt: now - 259_200, expiresAt: now + 3600 }), 5000)).toBeNull();
+		expect(nextDue(payment({ createdAt: now, expiresAt: now + 3600 }), 5000)).toBe(now + 5);
+		expect(nextDue(payment({ createdAt: now - 600, expiresAt: now + 3600 }), 5000)).toBe(now + 60);
+		expect(nextDue(payment({ createdAt: now - 600, expiresAt: now + 10 }), 5000)).toBe(now + 10);
+		expect(nextDue(payment({ createdAt: now, expiresAt: now }), 5000)).toBeNull();
+		expect(nextDue(payment({ createdAt: now - 259_200, expiresAt: now + 3600 }), 5000)).toBeNull();
+	} finally {
+		vi.useRealTimers();
+	}
 });
 
 test("the signature is an hmac a receiver can recompute", async () => {

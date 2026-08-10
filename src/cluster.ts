@@ -4,6 +4,7 @@ import { connect, createServer, type Server, type Socket } from "node:net";
 import SecretStream from "@hyperswarm/secret-stream";
 import Hyperswarm from "hyperswarm";
 
+import * as log from "./log.ts";
 import { attach, resync, type Gossip } from "./gossip.ts";
 
 const RESYNC_INTERVAL_MS = 30_000;
@@ -50,7 +51,7 @@ export class Cluster {
 		const swarm = new Hyperswarm();
 		swarm.on("connection", (connection) => attach(this.gossip, connection));
 		swarm.join(topic, { server: true, client: true });
-		console.log(`swarming on ${topic.toString("hex")}`);
+		log.debug(`swarming on ${topic.toString("hex")}`);
 
 		return swarm;
 	}

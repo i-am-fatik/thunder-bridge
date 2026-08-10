@@ -7,6 +7,7 @@ import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { WebSocketServer, type WebSocket } from "ws";
+import * as log from "./log.ts";
 
 import { equalInConstantTime } from "../core/hmac.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
@@ -218,14 +219,14 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		if (ticking) return;
 		ticking = true;
 		inFlight = tick(watcher)
-			.catch((error: unknown) => console.warn(`tick failed: ${String(error)}`))
+			.catch((error: unknown) => log.warn(`tick failed: ${String(error)}`))
 			.finally(() => {
 				ticking = false;
 			});
 	}, TICK_INTERVAL_MS);
 
 	const { port } = server.address() as AddressInfo;
-	console.log(`listening on :${port}, polling ${watcher.budget.perSecond} payments a second`);
+	log.info(`listening on :${port}, polling ${watcher.budget.perSecond} payments a second`);
 
 	return {
 		port,
@@ -559,7 +560,7 @@ async function watchOnly(request: Request, store: Store, key: Uint8Array): Promi
 		verifyUrl: asked.verifyUrl,
 		trigger: asked.trigger,
 		sealed: asked.sealed,
-		webhooks: [],
+		webhooks: asked.webhook ? [asked.webhook] : [],
 	});
 
 	return json(paymentToWire(watched), 201);
@@ -680,7 +681,7 @@ function oversized(error: unknown): Response {
 }
 
 function unhandled(error: unknown): Response {
-	console.error(`request failed: ${String(error)}`);
+	log.error(`request failed: ${String(error)}`);
 	return problem(500, { title: "Internal Server Error" });
 }
 
@@ -700,7 +701,7 @@ if (import.meta.main) {
 		peers: (process.env["REPLICATE_PEERS"] ?? "").split(",").filter((peer) => peer.length > 0),
 		swarm: process.env["SWARM"] !== "0",
 	});
-	console.log(`ledger ${path}, origin ${store.info().origin}`);
+	log.info(`ledger ${path}, origin ${store.info().origin}`);
 
 	const service = await start(
 		{
@@ -719,7 +720,7 @@ if (import.meta.main) {
 	const leave = () => {
 		if (leaving) process.exit(1);
 		leaving = true;
-		console.log("draining, and leaving once the tick in flight is done");
+		log.info("draining, and leaving once the tick in flight is done");
 		void service.stop().then(() => {
 			cluster.close();
 			store.close();

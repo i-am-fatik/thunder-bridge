@@ -114,6 +114,7 @@ standard's camelCase, and there is no authorization server.
 | `MAX_PENDING` | `5000` | payments the cluster watches before a create or a watch answers 503, never a limit on what an instance knows |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, six attempts then it parks |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`. At `info` a line names every payment paid and every webhook delivered, so a shop's order flow is in your logs until you turn it down |
 | `SWARM` | on | `0` turns off Hyperswarm DHT discovery |
 | `REPLICATE_LISTEN` | none | also accept direct TCP replication on this port |
 | `REPLICATE_PEERS` | none | comma-separated `host:port` peers to dial directly |
@@ -143,6 +144,11 @@ gates it with `npm ci`, the whole test suite, and `tsc --noEmit`.
 
 Live at
 [thunder-bridge-production.up.railway.app](https://thunder-bridge-production.up.railway.app/health).
+That instance is a demo. It runs with no `GATEWAY_TOKEN`, so it answers anyone, it
+keeps no durability promise, and its ledger may be wiped whenever. Point nothing you
+care about at it: run your own, and the client refuses a gateway that serves
+strangers unless you say otherwise.
+
 The template carries this repo, a volume at `/data`, and a `CLUSTER_KEY`
 generated per deploy, so there is nothing to fill in. Copy that key somewhere
 once it is up. Losing it locks you out of your own cluster and there is nobody to
@@ -182,6 +188,8 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
 
 ## More
 
+- [docs/operations.md](docs/operations.md) - deploying, rolling back, and what
+  durability actually depends on, for whoever runs one of these for somebody else.
 - [sdk/](sdk) - the JavaScript client, which proves an invoice before the payer
   sees it.
 - [examples/deno-deploy](examples/deno-deploy) - a paywall and a lightning

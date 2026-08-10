@@ -10,6 +10,16 @@ Surveyed 2026-08-01. Method: harvest ~100 real lightning addresses from nostr
 GET every one of those URLs and check the real `{status, settled, preimage, pr}`
 shape.
 
+**Read every list below as of its date, not as of today.** A wallet that shipped
+LUD-21 last month is still refused here, and the refusal comes from this snapshot
+rather than from anything measured. Re-run the harvest above before a release,
+because the denylist is the one part of it that costs a real recipient. Spot
+checks since the survey, which are one address each and prove nothing about a
+provider's other domains:
+
+- 2026-08-10, `iamfatik@blink.sv` still answers `verify` at
+  `lnurl.blink.sv/verify/{hash}`, the shape recorded below.
+
 ## Usable: verify present, preimage released
 
 | Provider | verify URL shape |

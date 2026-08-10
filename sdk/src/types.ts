@@ -80,6 +80,8 @@ export interface WatchPaymentParams {
   expiresAt: number;
   trigger?: string;
   sealed?: string;
+  webhookUrl?: string;
+  webhookSecret?: string;
 }
 
 /** Why one wallet in the list could not be used */

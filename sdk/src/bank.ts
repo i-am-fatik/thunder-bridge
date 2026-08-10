@@ -76,6 +76,15 @@ export interface BankTransferParams {
   sealed?: string;
 
   /**
+   * Where the gateway posts once the money lands, a public https URL. Without one
+   * a transfer is only ever learned by following the trigger or asking
+   */
+  webhookUrl?: string;
+
+  /** Signs that delivery, so `verifyWebhookSignature` can tell it came from the gateway */
+  webhookSecret?: string;
+
+  /**
    * Register on a gateway you do not own anyway. The verify URL names the amount
    * and the reference, so its operator ends up reading your order book, and the
    * URL itself answers whether that order was paid. Say true only when the order
@@ -148,6 +157,8 @@ export async function bankTransfer(params: BankTransferParams): Promise<BankTran
     expiresAt: params.expiresAt,
     trigger: params.trigger,
     sealed: params.sealed,
+    webhookUrl: params.webhookUrl,
+    webhookSecret: params.webhookSecret,
   });
 
   return { id: watched.id, paymentHash: watched.paymentHash, verifyUrl, spd };

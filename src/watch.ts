@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { checkSettled } from "../core/lnurl.ts";
 import { ask } from "../core/outbound.ts";
+import * as log from "./log.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Store } from "./store.ts";
 
@@ -28,7 +29,7 @@ async function pollDue(watcher: Watcher): Promise<void> {
 	await Promise.all(
 		due.map((payment) =>
 			poll(watcher, payment).catch((error: unknown) => {
-				console.error(`poll for ${payment.id} stopped: ${String(error)}`);
+				log.error(`poll for ${payment.id} stopped: ${String(error)}`);
 			}),
 		),
 	);
@@ -39,7 +40,7 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 
 	const preimage = await checkSettled(payment.verifyUrl, payment.paymentHash).catch(
 		(error: unknown) => {
-			console.warn(`verify poll for ${payment.id} failed: ${String(error)}`);
+			log.warn(`verify poll for ${payment.id} failed: ${String(error)}`);
 			return null;
 		},
 	);
@@ -49,7 +50,7 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 	}
 
 	const { payment: settled, won } = watcher.store.paid(payment.id, preimage);
-	console.log(`payment ${settled.id} paid${won ? "" : ", settled elsewhere"}`);
+	log.info(`payment ${settled.id} paid${won ? "" : ", settled elsewhere"}`);
 }
 
 async function deliverDue(watcher: Watcher): Promise<void> {
@@ -57,7 +58,7 @@ async function deliverDue(watcher: Watcher): Promise<void> {
 	await Promise.all(
 		owed.map((one) =>
 			deliver(watcher, one).catch((error: unknown) => {
-				console.error(`webhook for ${one.id} stopped: ${String(error)}`);
+				log.error(`webhook for ${one.id} stopped: ${String(error)}`);
 			}),
 		),
 	);
@@ -69,7 +70,7 @@ async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {
 		return;
 	}
 
-	console.log(`webhook for ${owed.id} delivered`);
+	log.info(`webhook for ${owed.id} delivered`);
 	watcher.store.delivered(owed);
 }
 
@@ -85,10 +86,10 @@ async function notify(owed: Delivery): Promise<boolean> {
 
 	try {
 		const answer = await ask(owed.url, { method: "POST", headers, body: owed.body });
-		if (!answer.ok) console.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
+		if (!answer.ok) log.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
 		return answer.ok;
 	} catch (error: unknown) {
-		console.warn(`webhook for ${owed.id} failed: ${String(error)}`);
+		log.warn(`webhook for ${owed.id} failed: ${String(error)}`);
 		return false;
 	}
 }

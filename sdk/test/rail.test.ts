@@ -197,6 +197,19 @@ describe("bankRail", () => {
     expect(JSON.stringify(body)).not.toContain(IBAN);
   });
 
+  it("asks for a webhook when given one, which is the only way a bank leg tells a server anything", async () => {
+    const calls = stubFetch(railsServing());
+
+    await bank({ webhookUrl: "https://shop.example.org/hooks/bank", webhookSecret: "s".repeat(32) })(
+      ORDER,
+    );
+
+    expect(bodyOf(`${GATEWAY}/watched-payments`, calls)["webhook"]).toEqual({
+      url: "https://shop.example.org/hooks/bank",
+      secret: "s".repeat(32),
+    });
+  });
+
   it("still names the amount and the reference in the verify URL, which is why the gateway must be yours", async () => {
     const calls = stubFetch(railsServing());
 

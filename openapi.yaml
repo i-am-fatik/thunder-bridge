@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Thunder Bridge
-  version: 0.1.0
+  version: 0.2.0
   license:
     name: MIT
     identifier: MIT
@@ -376,6 +376,11 @@ paths:
         because a payment hash sits in every invoice a payer holds while the payment id is the
         read capability. Repeating your own registration byte for byte still answers `201`, so
         an honest retry after a timeout works.
+
+        A `webhook` is delivered on settlement exactly as it is for a payment this gateway
+        minted, which is what lets a bank transfer be told to a server rather than watched on a
+        socket. Re-registering with a different one adds it rather than replacing it, because
+        webhooks on a payment are a set every instance unions.
       requestBody:
         required: true
         content:
@@ -844,6 +849,8 @@ components:
           $ref: "#/components/schemas/trigger"
         sealed:
           $ref: "#/components/schemas/sealed"
+        webhook:
+          $ref: "#/components/schemas/webhook"
       required: [payment_hash, verify_url, expires_at]
 
     create_ws_ticket_request:

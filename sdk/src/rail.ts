@@ -72,6 +72,10 @@ export interface BankRailConfig {
   /** Up to ten digits, for accounting systems that still want one */
   variableSymbol?: (order: Order) => string | undefined;
 
+  webhookUrl?: string;
+
+  webhookSecret?: string;
+
   /** Register on a gateway you do not own anyway, on the terms `bankTransfer` sets out */
   allowPublicGateway?: boolean;
 
@@ -122,6 +126,10 @@ export interface BlindLightningRailConfig {
   /** Only a watched leg has anywhere to carry this */
   sealed?: (order: Order) => string | Promise<string>;
 
+  webhookUrl?: string;
+
+  webhookSecret?: string;
+
   /** What `Leg.rail` reads, for a shop running more than one wallet */
   name?: string;
 }
@@ -148,6 +156,8 @@ export function bankRail(config: BankRailConfig): Rail {
       trigger: config.trigger,
       sealed: await config.sealed?.(order),
       variableSymbol: config.variableSymbol?.(order),
+      webhookUrl: config.webhookUrl,
+      webhookSecret: config.webhookSecret,
       allowPublicGateway: config.allowPublicGateway,
     });
 
@@ -203,6 +213,8 @@ export function blindLightningRail(config: BlindLightningRailConfig): Rail {
       expiresAt: resolved.expiresAt,
       trigger: config.trigger,
       sealed: await config.sealed?.(order),
+      webhookUrl: config.webhookUrl,
+      webhookSecret: config.webhookSecret,
     });
 
     return {
