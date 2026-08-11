@@ -74,7 +74,7 @@ function counting(answer: (url: string) => Response): { peak: () => number; rest
 }
 
 function paced(perSecond = 1000): Budget {
-	return { perSecond, perTick: 100, nextAt: new Map(), pace: new Map() };
+	return { perSecond, perTick: 100, nextAt: new Map(), pace: new Map(), ceiling: new Map() };
 }
 
 function payment(overrides: Partial<Payment> = {}): Payment {
@@ -406,6 +406,40 @@ test("an endpoint that asks for a pace is polled at it, and one that does not ke
 	} finally {
 		wire.restore();
 	}
+});
+
+test("an endpoint that names its own ceiling is spaced by that, not by the operator's number", async () => {
+	const wire = intercepting(() =>
+		Response.json(
+			{ settled: false },
+			{ headers: { "cache-control": "max-age=5", "ratelimit-limit": "30;w=60" } },
+		),
+	);
+	const { watcher } = queueing([payment()], settlesAs(true));
+
+	try {
+		await tick(watcher);
+		expect(watcher.budget.ceiling.get("coinos.io")).toBe(0.5);
+
+		const started = Date.now();
+		await spend(watcher.budget, "coinos.io");
+		await spend(watcher.budget, "coinos.io");
+
+		expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
+	} finally {
+		wire.restore();
+	}
+});
+
+test("a host that names no ceiling still falls back to the operator's number", async () => {
+	const budget = paced(5);
+
+	const started = Date.now();
+	await spend(budget, "coinos.io");
+	await spend(budget, "coinos.io");
+
+	expect(Date.now() - started).toBeGreaterThanOrEqual(190);
+	expect(Date.now() - started).toBeLessThan(500);
 });
 
 test("a pace nobody could have meant is clamped rather than obeyed", async () => {

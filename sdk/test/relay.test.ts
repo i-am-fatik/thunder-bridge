@@ -100,6 +100,6 @@ describe("lightningVerifyEndpoint", () => {
       ),
     );
 
-    expect(await checkSettled(url, HASH)).toEqual({ preimage: PREIMAGE, pace: 5 });
+    expect(await checkSettled(url, HASH)).toEqual({ preimage: PREIMAGE, pace: 5, ceiling: null });
   });
 });

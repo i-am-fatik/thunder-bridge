@@ -151,6 +151,15 @@ host. So a client's own endpoint sets the rate it wants to be asked at, and a wa
 that says nothing keeps the widening interval. Nothing here is per payment: the pace,
 like the ceiling, belongs to the host being asked.
 
+The ceiling can be named the same way, with `RateLimit-Limit: 12;w=60` on any verify
+answer, which is the header the IETF draft defines for exactly this. Cadence and
+aggregate rate are different quantities and `max-age` can only express the first: a
+thousand open orders at `max-age=5` is two hundred requests a second however polite the
+interval looks. So an endpoint that expects volume should name both, and then
+`POLLS_PER_SEC` governs nothing it asks about. On an instance pinned with
+`VERIFY_HOSTS` where every endpoint speaks for itself, that variable governs nothing at
+all and is only there for the hosts that stay silent.
+
 ## A gateway that talks to nobody but its clients
 
 Worth knowing when someone asks whether this thing calls out to strangers. By default

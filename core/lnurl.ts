@@ -50,10 +50,16 @@ type CallbackInvoice = { pr: string; verify?: string | null };
 
 type Verification = { settled: boolean; preimage?: string | null };
 
-export type Settlement = { preimage: string | null; pace: number | null };
+export type Settlement = {
+	preimage: string | null;
+	pace: number | null;
+	ceiling: number | null;
+};
 
 const MIN_PACE_SECS = 1;
 const MAX_PACE_SECS = 3600;
+const MIN_PER_SECOND = 0.01;
+const MAX_PER_SECOND = 100;
 
 export async function resolve(addresses: string[], amountMsat: number): Promise<Resolved> {
 	const served = await firstThatServes(addresses, (address, deadline) =>
@@ -185,13 +191,16 @@ function decodeIssued(address: string, bolt11: string): Issued {
 
 export async function checkSettled(verifyUrl: string, paymentHash: string): Promise<Settlement> {
 	const answer = await answeredJson<Verification>(verifyUrl);
-	const pace = paceAskedFor(answer.headers);
-	if (!answer.said.settled || !answer.said.preimage) return { preimage: null, pace };
+	const asked = {
+		pace: paceAskedFor(answer.headers),
+		ceiling: ceilingAskedFor(answer.headers),
+	};
+	if (!answer.said.settled || !answer.said.preimage) return { preimage: null, ...asked };
 	if (!preimageMatchesHash(answer.said.preimage, paymentHash)) {
 		throw new Error(`verify returned a preimage that does not hash to ${paymentHash}`);
 	}
 
-	return { preimage: answer.said.preimage, pace };
+	return { preimage: answer.said.preimage, ...asked };
 }
 
 export async function speaksVerify(url: string): Promise<boolean> {
@@ -207,6 +216,17 @@ function paceAskedFor(headers: Headers): number | null {
 	if (!asked) return null;
 
 	return Math.min(Math.max(Number(asked[1]), MIN_PACE_SECS), MAX_PACE_SECS);
+}
+
+function ceilingAskedFor(headers: Headers): number | null {
+	const asked = /^\s*(\d+)\s*(?:;\s*w\s*=\s*(\d+))?/i.exec(headers.get("ratelimit-limit") ?? "");
+	if (!asked) return null;
+
+	const perWindow = Number(asked[1]);
+	const window = asked[2] === undefined ? 1 : Number(asked[2]);
+	if (perWindow === 0 || window === 0) return null;
+
+	return Math.min(Math.max(perWindow / window, MIN_PER_SECOND), MAX_PER_SECOND);
 }
 
 export function cannotReleaseAPreimage(host: string): boolean {

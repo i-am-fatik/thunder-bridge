@@ -124,7 +124,7 @@ standard's camelCase, and there is no authorization server.
 | `VERIFY_HOSTS` | none | comma-separated hostnames this instance may poll. Set it and the gateway talks to nobody else: a watch naming another host is refused 403, and minting is refused outright because an invoice it mints is always verified on a wallet's host. Leave it unset and any public https verify URL is allowed |
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
-| `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per host, so one wallet everybody uses is never hit harder than this however many payments point at it |
+| `POLLS_PER_SEC` | `5` | fallback ceiling on outbound `verify` polls per host, used only where the endpoint names none itself with `RateLimit-Limit`. It stops one wallet everybody uses being hit harder than this however many payments point at it |
 | `MAX_PENDING` | `5000` | payments the cluster watches before a create or a watch answers 503, never a limit on what an instance knows |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, each one that far further off than the last, retried for as long as the payment has left and never under an hour |

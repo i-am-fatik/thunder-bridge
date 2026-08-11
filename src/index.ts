@@ -146,6 +146,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 			perTick: options.workPerTick,
 			nextAt: new Map(),
 			pace: new Map(),
+			ceiling: new Map(),
 		},
 		webhookKey: serving.webhookKey,
 	};

@@ -326,6 +326,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
     expect(await checkSettled(transfer.verifyUrl, transfer.paymentHash)).toEqual({
       preimage: null,
       pace: 30,
+      ceiling: null,
     });
   });
 

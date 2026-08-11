@@ -423,6 +423,12 @@ paths:
         being asked on whatever schedule the operator configured. An endpoint that names
         nothing keeps the gateway's own widening interval, which is what every wallet does.
 
+        `RateLimit-Limit: 12;w=60` on the same answer sets the ceiling, which is a different
+        quantity: the pace is per payment while the ceiling is what every payment on that
+        host adds up to. An endpoint expecting many open payments at once wants both, because
+        a thousand of them at `max-age=5` is two hundred requests a second whatever the
+        interval says. Named that way, neither number is the operator's to pick.
+
         It does not have to be an invoice. All this endpoint requires is a hash and a URL that
         will one day answer with something hashing to it, so anything able to release a secret
         on settlement can be watched here. The SDK's `bankTransfer` uses that to put a bank

@@ -23,6 +23,7 @@ export type Budget = {
 	perTick: number;
 	nextAt: Map<string, number>;
 	pace: Map<string, number>;
+	ceiling: Map<string, number>;
 };
 
 export type Watcher = {
@@ -58,6 +59,7 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 		},
 	);
 	if (settlement?.pace) watcher.budget.pace.set(host, settlement.pace);
+	if (settlement?.ceiling) watcher.budget.ceiling.set(host, settlement.ceiling);
 
 	if (!settlement?.preimage) {
 		watcher.store.polled(payment.id, nextDue(payment, watcher.eagerDelayMs, paceAsked(watcher, host)));
@@ -189,7 +191,7 @@ export function nextDue(
 export async function spend(budget: Budget, host: string): Promise<void> {
 	const now = Date.now();
 	const slot = Math.max(now, budget.nextAt.get(host) ?? 0);
-	budget.nextAt.set(host, slot + 1000 / budget.perSecond);
+	budget.nextAt.set(host, slot + 1000 / (budget.ceiling.get(host) ?? budget.perSecond));
 	await sleep(slot - now);
 }
 
