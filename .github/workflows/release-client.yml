@@ -1,0 +1,24 @@
+name: release-client
+
+on:
+  push:
+    tags: ["sdk-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: a client tag that is not the version npm gets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: a tag that is not the version it claims
+        run: |
+          tagged=${GITHUB_REF_NAME#sdk-v}
+          package=$(node -p "require('./sdk/package.json').version")
+          test "$tagged" = "$package" || {
+            echo "the tag says $tagged and sdk/package.json says $package"
+            exit 1
+          }

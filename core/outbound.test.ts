@@ -1,6 +1,17 @@
-import { expect, test } from "vitest";
+import type { LookupAllOptions } from "node:dns";
+
+import { expect, test, vi } from "vitest";
 
 import { ask, resolvesNothingPrivate } from "./outbound.ts";
+
+vi.mock("node:dns/promises", async (importOriginal) => {
+	const dns = await importOriginal<typeof import("node:dns/promises")>();
+	return {
+		...dns,
+		lookup: (host: string, options: LookupAllOptions) =>
+			host === "nothing.example" ? Promise.reject(new Error("ENOTFOUND")) : dns.lookup(host, options),
+	};
+});
 
 const ENTRY = "https://93.184.216.34/pay";
 const ELSEWHERE = "https://198.51.100.7/pay";

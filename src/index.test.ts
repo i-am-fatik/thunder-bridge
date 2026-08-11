@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { connect } from "node:net";
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { start, type Service } from "./index.ts";
 import type { UnsavedPayment } from "./payment.ts";
@@ -16,6 +16,12 @@ import {
 import type { Store } from "./store.ts";
 import { CLUSTER_KEY, openStore, until } from "./testing.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
+
+vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
+
+async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
+	return [{ address: "203.0.113.1", family: 4 }];
+}
 
 const MSAT_21K = { value: "21000", asset_code: "BTC", asset_scale: 11 };
 const PREIMAGE = "00".repeat(32);

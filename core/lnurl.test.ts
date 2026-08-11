@@ -1,7 +1,13 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { cannotReleaseAPreimage, quote, resolve, toLnurl } from "./lnurl.ts";
 import { NoWalletAvailable, statusForWallets } from "../src/problem.ts";
+
+vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
+
+async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
+	return [{ address: "203.0.113.1", family: 4 }];
+}
 
 test("a server that answers verify without a preimage is known", () => {
 	expect(cannotReleaseAPreimage("zeuspay.com")).toBe(true);

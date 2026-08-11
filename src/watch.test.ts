@@ -6,6 +6,12 @@ import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
 import { nextDue, pollDelayMs, sign, spend, tick, unixNow, type Watcher } from "./watch.ts";
 
+vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
+
+async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
+	return [{ address: "203.0.113.1", family: 4 }];
+}
+
 const PREIMAGE = "0".repeat(64);
 const PAYMENT_HASH = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925";
 const VERIFY_URL = "https://coinos.io/api/lnurl/verify/1";
