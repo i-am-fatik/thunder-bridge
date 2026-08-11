@@ -355,3 +355,26 @@ test("a payment minted with nobody listening reaches the instance that joins lat
 		late.stop();
 	}
 });
+
+test("an instance rolled onto a new key still takes the facts its unrolled peers signed", () => {
+	const NEXT_KEY = Buffer.from("11".repeat(32), "hex");
+	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
+
+	const before = openStore();
+	const taken = before.store.insert(payment(0));
+	const { facts } = before.store.gossip.since(nothingSeen);
+	before.stop();
+
+	const rolled = openStore({ key: NEXT_KEY, retiredKeys: [CLUSTER_KEY] });
+	const alone = openStore({ key: NEXT_KEY });
+	try {
+		rolled.store.gossip.onFacts(facts);
+		expect(rolled.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
+
+		expect(() => alone.store.gossip.onFacts(facts)).toThrow("without the cluster key");
+		expect(alone.store.get(taken.id)).toBeNull();
+	} finally {
+		rolled.stop();
+		alone.stop();
+	}
+});

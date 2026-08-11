@@ -27,3 +27,15 @@ export function secret(name: string): Uint8Array {
 
 	return bytes;
 }
+
+export function secrets(name: string): Uint8Array[] {
+	const raw = (process.env[name] ?? "").trim();
+	if (raw === "") return [];
+
+	return raw.split(",").map((one) => {
+		const bytes = Buffer.from(one.trim(), "hex");
+		if (bytes.length !== 32) throw new Error(`every ${name} entry must be 32 bytes of hex`);
+
+		return bytes;
+	});
+}

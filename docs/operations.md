@@ -96,6 +96,25 @@ two clients' payments.
 Losing the key locks you out of that cluster and nobody can reissue it. Copy it
 out of Railway the moment the instance is up.
 
+## Rotate a cluster key
+
+Set `CLUSTER_KEYS_RETIRED` to the old key on every instance first, then move
+`CLUSTER_KEY` to the new one, instance by instance. A retired key still verifies a
+peer's facts and a peer's handshake, so a rolled instance keeps absorbing what an
+unrolled one signs, and the ledger it already holds stays readable throughout: the
+fact MAC is only ever checked on arrival from a peer, never on a local read.
+
+Two costs, both bounded. The swarm topic comes from `CLUSTER_KEY` alone, so while
+the roll is half done the two halves cannot find each other over the DHT and
+converge only once everyone carries the new key. And a socket ticket is signed with
+`CLUSTER_KEY` alone too, so a ticket minted by one half and presented to the other
+is refused for its 60 second life, which costs the client a re-mint.
+
+Payments keep the id they were minted under, because an id is a keyed hash of the
+payment hash. After a rotation the same invoice registered again gets a different
+id, and both remain readable. Drop the retired key once every instance carries the
+new one and nothing is left to verify from before.
+
 Where those keys are kept, who can read them, and what happens when the person
 holding them leaves is not decided yet, and this file will not pretend otherwise.
 Decide it before the second client.

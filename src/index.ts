@@ -14,7 +14,7 @@ import { signingKeyFromSeed, type SigningKey } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
-import { bearer, positive, secret, whole } from "./env.ts";
+import { bearer, positive, secret, secrets, whole } from "./env.ts";
 import { Ledger, paymentId } from "./ledger.ts";
 import { quote, resolve, RESOLVE_TIMEOUT_MS } from "../core/lnurl.ts";
 import type { Payment } from "./payment.ts";
@@ -706,11 +706,17 @@ if (import.meta.main) {
 	mkdirSync(dirname(path), { recursive: true });
 
 	const clusterKey = secret("CLUSTER_KEY");
-	const ledger = new Ledger(path, clusterKey, {
-		takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS", 600),
-		deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
-	});
-	const store = new Store(ledger, clusterKey, positive("MAX_PENDING", 5000));
+	const retiredKeys = secrets("CLUSTER_KEYS_RETIRED");
+	const ledger = new Ledger(
+		path,
+		clusterKey,
+		{
+			takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS", 600),
+			deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
+		},
+		retiredKeys,
+	);
+	const store = new Store(ledger, clusterKey, positive("MAX_PENDING", 5000), retiredKeys);
 	const cluster = new Cluster(store.gossip, {
 		key: clusterKey,
 		listenPort: whole("REPLICATE_LISTEN", 0),

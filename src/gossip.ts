@@ -13,6 +13,7 @@ export type Note = { have: Watermarks } | { facts: Facts; more: boolean };
 export type Gossip = {
 	self: string;
 	key: Uint8Array;
+	retired: Uint8Array[];
 	peers: Map<string, (note: Note) => void>;
 	onFacts: (facts: Facts) => void;
 	onConverged: () => void;
@@ -36,7 +37,7 @@ export function attach(gossip: Gossip, stream: unknown): void {
 		protocol: PROTOCOL,
 		handshake: c.json,
 		onopen: (them: Introduction) => {
-			if (!introduces(gossip.key, them)) {
+			if (!introduces([gossip.key, ...gossip.retired], them)) {
 				log.warn("a peer without the cluster key tried to join");
 				channel?.close();
 				return;
@@ -80,10 +81,12 @@ function proofOf(key: Uint8Array, self: string): string {
 	return createHmac("sha256", key).update("cluster-handshake").update(self).digest("hex");
 }
 
-function introduces(key: Uint8Array, them: Introduction): boolean {
+function introduces(keys: Uint8Array[], them: Introduction): boolean {
 	if (typeof them?.self !== "string" || typeof them.proof !== "string") return false;
-	const want = Buffer.from(proofOf(key, them.self), "hex");
 	const got = Buffer.from(them.proof, "hex");
 
-	return want.length === got.length && timingSafeEqual(want, got);
+	return keys.some((key) => {
+		const want = Buffer.from(proofOf(key, them.self), "hex");
+		return want.length === got.length && timingSafeEqual(want, got);
+	});
 }

@@ -226,15 +226,17 @@ export class Ledger {
 	readonly origin: string;
 	private readonly db: DatabaseSync;
 	private readonly key: Uint8Array;
+	private readonly retired: Uint8Array[];
 	private readonly tuning: Tuning;
 	private readonly statements: Statements;
 
-	constructor(path: string, key: Uint8Array, tuning: Tuning) {
+	constructor(path: string, key: Uint8Array, tuning: Tuning, retired: Uint8Array[] = []) {
 		this.db = new DatabaseSync(path);
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec("PRAGMA foreign_keys = ON");
 		this.migrate();
 		this.key = key;
+		this.retired = retired;
 		this.tuning = tuning;
 
 		this.db
@@ -805,17 +807,24 @@ export class Ledger {
 	}
 
 	private sign(source: Source, fields: (string | number | null)[]): string {
-		const hmac = createHmac("sha256", this.key).update(source);
-		for (const field of fields) hmac.update("\x00").update(field === null ? "\x01" : String(field));
-		return hmac.digest("hex");
+		return macWith(this.key, source, fields);
 	}
 
 	private verify(source: Source, fields: (string | number | null)[], mac: string): void {
-		const want = Buffer.from(this.sign(source, fields), "hex");
 		const got = Buffer.from(mac, "hex");
-		if (want.length !== got.length || !timingSafeEqual(want, got)) {
-			throw new Error(`a ${source} fact arrived without the cluster key`);
-		}
+		const holds = this.everyKeyHeld().some((key) => {
+			const want = Buffer.from(macWith(key, source, fields), "hex");
+			return want.length === got.length && timingSafeEqual(want, got);
+		});
+		if (!holds) throw new Error(`a ${source} fact arrived without the cluster key`);
+	}
+
+	private everyKeyHeld(): Uint8Array[] {
+		return [this.key, ...this.retired];
+	}
+
+	private namesItsOwnHash(id: string, paymentHash: string): boolean {
+		return this.everyKeyHeld().some((key) => id === paymentId(key, paymentHash));
 	}
 
 	private provenAccepted(fact: AcceptedFact): void {
@@ -826,7 +835,7 @@ export class Ledger {
 		);
 
 		const payment = JSON.parse(fact.payment) as Payment;
-		if (payment.id !== fact.id || fact.id !== paymentId(this.key, payment.paymentHash)) {
+		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment.paymentHash)) {
 			throw new Error(`accepted fact ${fact.id} does not name the invoice it watches`);
 		}
 		if (payment.expiresAt !== fact.expiresAt) {
@@ -842,7 +851,7 @@ export class Ledger {
 		this.verify("paid", [fact.origin, fact.seq, fact.id, fact.payment, fact.settledAt], fact.mac);
 
 		const payment = JSON.parse(fact.payment) as PublicPayment;
-		if (payment.id !== fact.id || fact.id !== paymentId(this.key, payment.paymentHash)) {
+		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment.paymentHash)) {
 			throw new Error(`paid fact ${fact.id} does not name the invoice it settles`);
 		}
 		proves(payment.preimage, payment.paymentHash);
@@ -864,6 +873,13 @@ export class Ledger {
 
 export function paymentId(key: Uint8Array, paymentHash: string): string {
 	return createHmac("sha256", key).update("payment-id").update(paymentHash).digest("hex");
+}
+
+function macWith(key: Uint8Array, source: Source, fields: (string | number | null)[]): string {
+	const hmac = createHmac("sha256", key).update(source);
+	for (const field of fields) hmac.update("\x00").update(field === null ? "\x01" : String(field));
+
+	return hmac.digest("hex");
 }
 
 function bySource<T>(build: (source: Source) => T): Record<Source, T> {
