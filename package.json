@@ -1,6 +1,6 @@
 {
 	"name": "thunder-bridge",
-	"version": "0.3.1",
+	"version": "0.4.0",
 	"description": "Lightning payments with no node: the payer pays the recipient's own invoice and LUD-21 proves delivery",
 	"license": "MIT",
 	"private": true,
