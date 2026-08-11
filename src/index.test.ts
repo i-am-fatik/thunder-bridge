@@ -928,6 +928,19 @@ test("readiness says only that it is ready until a bearer proves the instance is
 	mine.stop();
 });
 
+test("a blank token leaves the gateway public, not private and open to everyone", async () => {
+	const blank = await running("");
+	try {
+		const ready = await fetch(`http://127.0.0.1:${blank.service.port}/ready`);
+		expect(await ready.json()).toEqual({ status: "ready" });
+
+		const inventory = await fetch(`http://127.0.0.1:${blank.service.port}/incoming-payments`);
+		expect(inventory.status).toBe(404);
+	} finally {
+		blank.stop();
+	}
+});
+
 test("a draining instance turns readiness down and waits for the tick in flight", async () => {
 	const real = globalThis.fetch;
 	let asked = 0;

@@ -15,6 +15,12 @@ export function positive(name: string, fallback: number): number {
 	return value;
 }
 
+export function bearer(name: string): string | null {
+	const raw = (process.env[name] ?? "").trim();
+
+	return raw === "" ? null : raw;
+}
+
 export function secret(name: string): Uint8Array {
 	const bytes = Buffer.from(process.env[name] ?? "", "hex");
 	if (bytes.length !== 32) throw new Error(`${name} must be set to 32 bytes of hex`);

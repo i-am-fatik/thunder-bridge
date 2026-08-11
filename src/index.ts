@@ -12,7 +12,7 @@ import * as log from "./log.ts";
 import { equalInConstantTime } from "../core/hmac.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
-import { positive, secret, whole } from "./env.ts";
+import { bearer, positive, secret, whole } from "./env.ts";
 import { Ledger, paymentId } from "./ledger.ts";
 import { quote, resolve, RESOLVE_TIMEOUT_MS } from "../core/lnurl.ts";
 import type { Payment } from "./payment.ts";
@@ -116,6 +116,7 @@ export type Service = {
 type Vitals = "serving" | "stalled" | "draining";
 
 export async function start(options: Options, store: Store): Promise<Service> {
+	const token = options.token === "" ? null : options.token;
 	const watcher: Watcher = {
 		store,
 		eagerDelayMs: options.eagerDelayMs,
@@ -130,7 +131,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	const followers = new Map<WebSocket, Follower>();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
-		void respond(incoming, store, options.token, options.key, vitals()).then((answer) =>
+		void respond(incoming, store, token, options.key, vitals()).then((answer) =>
 			reply(answer, outgoing),
 		);
 	});
@@ -160,7 +161,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 			return;
 		}
 
-		if (options.token !== null && !bearerMatches(incoming, options.token)) {
+		if (token !== null && !bearerMatches(incoming, token)) {
 			refuseUpgrade(socket);
 			return;
 		}
@@ -710,7 +711,7 @@ if (import.meta.main) {
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,
-			token: process.env["GATEWAY_TOKEN"] ?? null,
+			token: bearer("GATEWAY_TOKEN"),
 			key: clusterKey,
 		},
 		store,
