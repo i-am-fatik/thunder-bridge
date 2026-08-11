@@ -169,6 +169,14 @@ Both arrangements run on the same gateway with the same code, which is the point
 is not on the table is making the second one the only one, because it costs the client a
 service that has to stay up for days and a browser cannot provide that.
 
+`VERIFY_HOSTS` turns the second arrangement from something the client chooses into
+something the instance enforces. List the client's own hostnames and this gateway polls
+nothing else: a watch naming another host answers 403, and minting is refused outright,
+because an invoice this gateway mints is always verified on a wallet's host and failing
+after the mint would burn a real invoice. Then "this instance talks to these endpoints
+and no others" is a line in the config a client can read for themselves, rather than a
+promise they have to take on trust.
+
 ## A settlement nobody was told about
 
 `parked_deliveries` on `/ready` counts webhooks this instance gave up on, and every one

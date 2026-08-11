@@ -121,6 +121,7 @@ standard's camelCase, and there is no authorization server.
 | `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/ready`, `/openapi.yaml`, `/docs` and `/webhook-key`. Blank counts as none, so a variable someone emptied leaves the gateway public rather than private and open to everyone |
 | `POLL_INTERVAL_SECS` | `5` | how often a payment under five minutes old polls `verify`, used only where the endpoint names no pace of its own with `Cache-Control: max-age` |
 | `WORK_PER_TICK` | `50` | polls and webhook deliveries a tick takes on, which is the throughput ceiling, not the politeness one |
+| `VERIFY_HOSTS` | none | comma-separated hostnames this instance may poll. Set it and the gateway talks to nobody else: a watch naming another host is refused 403, and minting is refused outright because an invoice it mints is always verified on a wallet's host. Leave it unset and any public https verify URL is allowed |
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
 | `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per host, so one wallet everybody uses is never hit harder than this however many payments point at it |

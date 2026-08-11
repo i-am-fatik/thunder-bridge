@@ -330,6 +330,8 @@ paths:
           $ref: "#/components/responses/body_too_large"
         "422":
           $ref: "#/components/responses/unprovable"
+        "403":
+          $ref: "#/components/responses/verify_host_refused"
         "424":
           $ref: "#/components/responses/webhook_unconfirmed"
         "502":
@@ -459,6 +461,8 @@ paths:
           $ref: "#/components/responses/watch_taken"
         "413":
           $ref: "#/components/responses/body_too_large"
+        "403":
+          $ref: "#/components/responses/verify_host_refused"
         "424":
           $ref: "#/components/responses/nothing_confirmed"
         "503":
@@ -608,6 +612,8 @@ paths:
                 $ref: "#/components/schemas/quote"
         "400":
           $ref: "#/components/responses/bad_request"
+        "403":
+          $ref: "#/components/responses/verify_host_refused"
         "413":
           $ref: "#/components/responses/body_too_large"
         "422":
@@ -1172,6 +1178,23 @@ components:
                     enum:
                       - "urn:problem-type:thunder-bridge:request-in-flight"
                       - "urn:problem-type:thunder-bridge:idempotency-key-reused"
+
+    verify_host_refused:
+      description: |
+        This instance is pinned with `VERIFY_HOSTS` to a fixed set of verify endpoints and
+        will poll nothing else, so the watch was refused. The same status answers
+        `POST /incoming-payments` and `POST /quotes` on such an instance: an invoice it
+        minted is always verified on a wallet's host, so it does not mint at all. Resolve
+        the address yourself and register the payment as a watch.
+      content:
+        application/problem+json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/problem"
+              - type: object
+                properties:
+                  type:
+                    const: "urn:problem-type:thunder-bridge:verify-host-refused"
 
     nothing_confirmed:
       description: |

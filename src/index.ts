@@ -14,7 +14,7 @@ import { signingKeyFromSeed, type SigningKey } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
-import { bearer, positive, secret, secrets, whole } from "./env.ts";
+import { bearer, hosts, positive, secret, secrets, whole } from "./env.ts";
 import { Ledger, paymentId } from "./ledger.ts";
 import { quote, resolve, RESOLVE_TIMEOUT_MS, speaksVerify } from "../core/lnurl.ts";
 import type { Payment } from "./payment.ts";
@@ -28,6 +28,7 @@ import {
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
 	statusForWallets,
+	VERIFY_HOST_REFUSED,
 	VERIFY_UNCONFIRMED,
 	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
@@ -108,6 +109,7 @@ export type Options = {
 	eagerDelayMs: number;
 	pollsPerSecond: number;
 	workPerTick: number;
+	verifyHosts: Set<string> | null;
 	tickStallMs: number;
 	drainTimeoutMs: number;
 	token: string | null;
@@ -121,9 +123,21 @@ export type Service = {
 
 type Vitals = "serving" | "stalled" | "draining";
 
+type Serving = {
+	token: string | null;
+	key: Uint8Array;
+	webhookKey: SigningKey;
+	verifyHosts: Set<string> | null;
+};
+
 export async function start(options: Options, store: Store): Promise<Service> {
 	const token = options.token === "" ? null : options.token;
-	const webhookKey = await webhookSigningKey(options.key);
+	const serving: Serving = {
+		token,
+		key: options.key,
+		webhookKey: await webhookSigningKey(options.key),
+		verifyHosts: options.verifyHosts,
+	};
 	const watcher: Watcher = {
 		store,
 		eagerDelayMs: options.eagerDelayMs,
@@ -133,7 +147,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 			nextAt: new Map(),
 			pace: new Map(),
 		},
-		webhookKey,
+		webhookKey: serving.webhookKey,
 	};
 
 	let draining = false;
@@ -144,7 +158,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	const followers = new Map<WebSocket, Follower>();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
-		void respond(incoming, store, token, options.key, webhookKey, vitals()).then((answer) =>
+		void respond(incoming, store, serving, vitals()).then((answer) =>
 			reply(answer, outgoing),
 		);
 	});
@@ -320,18 +334,14 @@ function keepFresh(
 async function respond(
 	incoming: IncomingMessage,
 	store: Store,
-	token: string | null,
-	key: Uint8Array,
-	webhookKey: SigningKey,
+	serving: Serving,
 	vitals: Vitals,
 ): Promise<Response> {
 	if (incoming.method === "OPTIONS") return new Response(null, { status: 204, headers: OPEN });
 
 	const answer =
-		refused(incoming, token) ??
-		(await route(incoming, store, token, key, webhookKey, vitals)
-			.catch(oversized)
-			.catch(unhandled));
+		refused(incoming, serving.token) ??
+		(await route(incoming, store, serving, vitals).catch(oversized).catch(unhandled));
 	for (const [header, value] of Object.entries(OPEN)) answer.headers.set(header, value);
 
 	return answer;
@@ -394,17 +404,15 @@ async function reply(answer: Response, outgoing: ServerResponse): Promise<void> 
 async function route(
 	incoming: IncomingMessage,
 	store: Store,
-	token: string | null,
-	key: Uint8Array,
-	webhookKey: SigningKey,
+	serving: Serving,
 	vitals: Vitals,
 ): Promise<Response> {
 	const path = pathOf(incoming);
 	if (path === "/health") return vitals === "stalled" ? unavailable(STALLED) : new Response("OK");
-	if (path === "/ready") return readiness(incoming, store, token, vitals);
+	if (path === "/ready") return readiness(incoming, store, serving.token, vitals);
 	if (path === "/openapi.yaml") return spec();
 	if (path === "/docs") return rendered();
-	if (path === "/webhook-key") return publishedWebhookKey(webhookKey);
+	if (path === "/webhook-key") return publishedWebhookKey(serving.webhookKey);
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
@@ -412,19 +420,21 @@ async function route(
 		return payment ? json(paymentToWire(payment)) : notFound();
 	}
 	if (path === "/incoming-payments" && incoming.method === "GET") {
-		return token === null ? notFound() : listed(incoming, store);
+		return serving.token === null ? notFound() : listed(incoming, store);
 	}
 	if (path === "/incoming-payments" && incoming.method === "POST") {
-		return await create(await asRequest(incoming), store, webhookKey);
+		if (serving.verifyHosts) return mintsNothing();
+		return await create(await asRequest(incoming), store, serving.webhookKey);
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
+		if (serving.verifyHosts) return mintsNothing();
 		return await quoted(await asRequest(incoming));
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
-		return await watchOnly(await asRequest(incoming), store, key, webhookKey);
+		return await watchOnly(await asRequest(incoming), store, serving);
 	}
 	if (path === "/ws-tickets" && incoming.method === "POST") {
-		return await ticketed(await asRequest(incoming), store, key);
+		return await ticketed(await asRequest(incoming), store, serving.key);
 	}
 
 	return notFound();
@@ -549,12 +559,8 @@ function listed(incoming: IncomingMessage, store: Store): Response {
 	});
 }
 
-async function watchOnly(
-	request: Request,
-	store: Store,
-	key: Uint8Array,
-	webhookKey: SigningKey,
-): Promise<Response> {
+async function watchOnly(request: Request, store: Store, serving: Serving): Promise<Response> {
+	const { key, webhookKey } = serving;
 	let asked: WatchRequest;
 	try {
 		asked = readWatchRequest(await request.json());
@@ -578,6 +584,9 @@ async function watchOnly(
 	const known = store.get(paymentId(key, asked.paymentHash));
 	if (known && !isThisWatch(known, asked)) {
 		return conflict(ALREADY_WATCHED, "This payment hash is already being watched here");
+	}
+	if (serving.verifyHosts && !serving.verifyHosts.has(hostOf(asked.verifyUrl))) {
+		return refusedVerifyHost(asked.verifyUrl);
 	}
 	if (!(await speaksVerify(asked.verifyUrl))) {
 		return unconfirmedVerify(asked.verifyUrl);
@@ -726,6 +735,27 @@ function publishedWebhookKey(key: SigningKey): Response {
 	return json({ algorithm: "ed25519", public_key: key.publicKeyHex });
 }
 
+function hostOf(url: string): string {
+	return new URL(url).hostname.toLowerCase();
+}
+
+function mintsNothing(): Response {
+	return problem(403, {
+		type: VERIFY_HOST_REFUSED,
+		title: "This gateway only watches, it does not mint",
+		detail:
+			"VERIFY_HOSTS pins this instance to a list of verify endpoints, and minting an invoice would put it on a wallet's host instead. Resolve the address yourself and register the payment with POST /watched-payments.",
+	});
+}
+
+function refusedVerifyHost(url: string): Response {
+	return problem(403, {
+		type: VERIFY_HOST_REFUSED,
+		title: "This gateway does not poll that host",
+		detail: `${hostOf(url)} is not in the VERIFY_HOSTS this instance is pinned to, so it will not be polled. This gateway talks to a fixed set of endpoints and nothing else.`,
+	});
+}
+
 function unconfirmedVerify(url: string): Response {
 	return problem(424, {
 		type: VERIFY_UNCONFIRMED,
@@ -776,6 +806,7 @@ if (import.meta.main) {
 			port: whole("PORT", 3000),
 			eagerDelayMs: positive("POLL_INTERVAL_SECS", 5) * 1000,
 			workPerTick: positive("WORK_PER_TICK", 50),
+			verifyHosts: hosts("VERIFY_HOSTS"),
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,

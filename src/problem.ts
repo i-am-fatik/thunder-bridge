@@ -14,6 +14,7 @@ export const KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reuse
 export const ALREADY_WATCHED = "urn:problem-type:thunder-bridge:payment-already-watched";
 export const WEBHOOK_UNCONFIRMED = "urn:problem-type:thunder-bridge:webhook-unconfirmed";
 export const VERIFY_UNCONFIRMED = "urn:problem-type:thunder-bridge:verify-unconfirmed";
+export const VERIFY_HOST_REFUSED = "urn:problem-type:thunder-bridge:verify-host-refused";
 
 const STATUS: Record<WalletReason, number> = {
 	"address-unusable": 400,

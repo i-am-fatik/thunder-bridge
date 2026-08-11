@@ -21,6 +21,13 @@ export function bearer(name: string): string | null {
 	return raw === "" ? null : raw;
 }
 
+export function hosts(name: string): Set<string> | null {
+	const raw = (process.env[name] ?? "").trim();
+	if (raw === "") return null;
+
+	return new Set(raw.split(",").map((one) => one.trim().toLowerCase()));
+}
+
 export function secret(name: string): Uint8Array {
 	const bytes = Buffer.from(process.env[name] ?? "", "hex");
 	if (bytes.length !== 32) throw new Error(`${name} must be set to 32 bytes of hex`);

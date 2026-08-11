@@ -13,6 +13,7 @@ import {
 	KEY_REUSED,
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
+	VERIFY_HOST_REFUSED,
 	VERIFY_UNCONFIRMED,
 	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
@@ -41,6 +42,7 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			eagerDelayMs: 3000,
 			pollsPerSecond: 5,
 			workPerTick: 50,
+			verifyHosts: null,
 			tickStallMs: 30_000,
 			drainTimeoutMs,
 			token,
@@ -731,6 +733,68 @@ test("re-registering the same watch with another webhook owes both, because webh
 	]);
 
 	app.stop();
+});
+
+async function pinnedTo(allowed: string[]): Promise<App> {
+	const opened = openStore();
+	const service = await start(
+		{
+			port: 0,
+			eagerDelayMs: 3000,
+			pollsPerSecond: 5,
+			workPerTick: 50,
+			verifyHosts: new Set(allowed),
+			tickStallMs: 30_000,
+			drainTimeoutMs: 10_000,
+			token: null,
+			key: CLUSTER_KEY,
+		},
+		opened.store,
+	);
+
+	return {
+		service,
+		store: opened.store,
+		stop: () => {
+			service.stop();
+			opened.stop();
+		},
+	};
+}
+
+test("an instance pinned to its own endpoints will not poll anywhere else", async () => {
+	const app = await pinnedTo(["shop.example"]);
+	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
+
+	try {
+		const elsewhere = await postWatch(app, watchable);
+		expect(elsewhere.status).toBe(403);
+		expect(((await elsewhere.json()) as Problem)["type"]).toBe(VERIFY_HOST_REFUSED);
+		expect(app.store.get(paymentId(CLUSTER_KEY, PAYMENT_HASH))).toBeNull();
+
+		const ours = await postWatch(app, {
+			...watchable,
+			verify_url: "https://shop.example/verify/lightning?w=sealed",
+		});
+		expect(ours.status).toBe(201);
+	} finally {
+		app.stop();
+	}
+});
+
+test("an instance pinned that way mints nothing, because minting lands on a wallet's host", async () => {
+	const app = await pinnedTo(["shop.example"]);
+
+	try {
+		const minted = await post(app, UNUSABLE);
+		expect(minted.status).toBe(403);
+		expect(((await minted.json()) as Problem)["type"]).toBe(VERIFY_HOST_REFUSED);
+
+		const quoted = await postQuote(app, UNUSABLE);
+		expect(quoted.status).toBe(403);
+	} finally {
+		app.stop();
+	}
 });
 
 test("a verify URL that answers nothing like LUD-21 is refused, so nobody else gets polled", async () => {
