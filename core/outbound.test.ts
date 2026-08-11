@@ -142,7 +142,7 @@ test("an empty answer is read without a body to read", async () => {
 	const { restore } = answering(() => new Response(null, { status: 204 }));
 	try {
 		const answer = await ask(ENTRY);
-		expect(answer).toEqual({ status: 204, ok: true, body: "", truncated: false });
+		expect(answer).toMatchObject({ status: 204, ok: true, body: "", truncated: false });
 	} finally {
 		restore();
 	}

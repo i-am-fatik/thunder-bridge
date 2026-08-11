@@ -50,6 +50,11 @@ type CallbackInvoice = { pr: string; verify?: string | null };
 
 type Verification = { settled: boolean; preimage?: string | null };
 
+export type Settlement = { preimage: string | null; pace: number | null };
+
+const MIN_PACE_SECS = 1;
+const MAX_PACE_SECS = 3600;
+
 export async function resolve(addresses: string[], amountMsat: number): Promise<Resolved> {
 	const served = await firstThatServes(addresses, (address, deadline) =>
 		resolveAddress(address, amountMsat, deadline),
@@ -178,16 +183,30 @@ function decodeIssued(address: string, bolt11: string): Issued {
 	return { paymentHash, descriptionHash, amountMsat, expiresAt };
 }
 
-export async function checkSettled(
-	verifyUrl: string,
-	paymentHash: string,
-): Promise<string | null> {
-	const verify = await fetchJson<Verification>(verifyUrl);
-	if (!verify.settled || !verify.preimage) return null;
-	if (!preimageMatchesHash(verify.preimage, paymentHash)) {
+export async function checkSettled(verifyUrl: string, paymentHash: string): Promise<Settlement> {
+	const answer = await answeredJson<Verification>(verifyUrl);
+	const pace = paceAskedFor(answer.headers);
+	if (!answer.said.settled || !answer.said.preimage) return { preimage: null, pace };
+	if (!preimageMatchesHash(answer.said.preimage, paymentHash)) {
 		throw new Error(`verify returned a preimage that does not hash to ${paymentHash}`);
 	}
-	return verify.preimage;
+
+	return { preimage: answer.said.preimage, pace };
+}
+
+export async function speaksVerify(url: string): Promise<boolean> {
+	try {
+		return typeof (await answeredJson<Verification>(url)).said.settled === "boolean";
+	} catch {
+		return false;
+	}
+}
+
+function paceAskedFor(headers: Headers): number | null {
+	const asked = /max-age\s*=\s*(\d+)/i.exec(headers.get("cache-control") ?? "");
+	if (!asked) return null;
+
+	return Math.min(Math.max(Number(asked[1]), MIN_PACE_SECS), MAX_PACE_SECS);
 }
 
 export function cannotReleaseAPreimage(host: string): boolean {
@@ -282,11 +301,18 @@ function splitAddress(address: string): [string, string] {
 }
 
 async function fetchJson<T>(url: string, deadline?: AbortSignal): Promise<T> {
+	return (await answeredJson<T>(url, deadline)).said;
+}
+
+async function answeredJson<T>(
+	url: string,
+	deadline?: AbortSignal,
+): Promise<{ said: T; headers: Headers }> {
 	const answer = await ask(url, { headers: { accept: "application/json" }, deadline });
 	if (!answer.ok) throw new Error(`${url} answered ${answer.status}`);
 	if (answer.truncated) {
 		throw new Error(`${url} answered with more than the ${BODY_LIMIT_BYTES} bytes we read`);
 	}
 
-	return JSON.parse(answer.body) as T;
+	return { said: JSON.parse(answer.body) as T, headers: answer.headers };
 }

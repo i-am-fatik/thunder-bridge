@@ -18,7 +18,12 @@ export const CHALLENGE = "webhook-challenge";
 
 export const WATCH_HORIZON_SECS = 259_200;
 
-export type Budget = { perSecond: number; nextAt: Map<string, number> };
+export type Budget = {
+	perSecond: number;
+	perTick: number;
+	nextAt: Map<string, number>;
+	pace: Map<string, number>;
+};
 
 export type Watcher = {
 	store: Store;
@@ -32,7 +37,7 @@ export async function tick(watcher: Watcher): Promise<void> {
 }
 
 async function pollDue(watcher: Watcher): Promise<void> {
-	const due = watcher.store.duePolls(watcher.budget.perSecond, LEASE_SECS);
+	const due = watcher.store.duePolls(watcher.budget.perTick, LEASE_SECS);
 	await Promise.all(
 		due.map((payment) =>
 			poll(watcher, payment).catch((error: unknown) => {
@@ -43,25 +48,34 @@ async function pollDue(watcher: Watcher): Promise<void> {
 }
 
 async function poll(watcher: Watcher, payment: Payment): Promise<void> {
-	await spend(watcher.budget, hostOf(payment.verifyUrl));
+	const host = hostOf(payment.verifyUrl);
+	await spend(watcher.budget, host);
 
-	const preimage = await checkSettled(payment.verifyUrl, payment.paymentHash).catch(
+	const settlement = await checkSettled(payment.verifyUrl, payment.paymentHash).catch(
 		(error: unknown) => {
 			log.warn(`verify poll for ${payment.id} failed: ${String(error)}`);
 			return null;
 		},
 	);
-	if (!preimage) {
-		watcher.store.polled(payment.id, nextDue(payment, watcher.eagerDelayMs));
+	if (settlement?.pace) watcher.budget.pace.set(host, settlement.pace);
+
+	if (!settlement?.preimage) {
+		watcher.store.polled(payment.id, nextDue(payment, watcher.eagerDelayMs, paceAsked(watcher, host)));
 		return;
 	}
 
-	const { payment: settled, won } = watcher.store.paid(payment.id, preimage);
+	const { payment: settled, won } = watcher.store.paid(payment.id, settlement.preimage);
 	log.info(`payment ${settled.id} paid${won ? "" : ", settled elsewhere"}`);
 }
 
+function paceAsked(watcher: Watcher, host: string): number | null {
+	const asked = watcher.budget.pace.get(host);
+
+	return asked === undefined ? null : asked * 1000;
+}
+
 async function deliverDue(watcher: Watcher): Promise<void> {
-	const owed = watcher.store.dueDeliveries(watcher.budget.perSecond, LEASE_SECS);
+	const owed = watcher.store.dueDeliveries(watcher.budget.perTick, LEASE_SECS);
 	await Promise.all(
 		owed.map((one) =>
 			deliver(watcher, one).catch((error: unknown) => {
@@ -160,12 +174,16 @@ async function signedHeaders(
 	};
 }
 
-export function nextDue(payment: Payment, eagerMs: number): number | null {
+export function nextDue(
+	payment: Payment,
+	eagerMs: number,
+	askedMs: number | null = null,
+): number | null {
 	const now = unixNow();
 	const waited = now - payment.createdAt;
 	if (now >= payment.expiresAt || waited >= WATCH_HORIZON_SECS) return null;
 
-	return Math.min(now + Math.ceil(pollDelayMs(waited, eagerMs) / 1000), payment.expiresAt);
+	return Math.min(now + Math.ceil(pollDelayMs(waited, eagerMs, askedMs) / 1000), payment.expiresAt);
 }
 
 export async function spend(budget: Budget, host: string): Promise<void> {
@@ -183,7 +201,12 @@ function hostOf(url: string): string {
 	}
 }
 
-export function pollDelayMs(waitedSecs: number, eagerMs: number): number {
+export function pollDelayMs(
+	waitedSecs: number,
+	eagerMs: number,
+	askedMs: number | null = null,
+): number {
+	if (askedMs !== null) return askedMs;
 	if (waitedSecs < EAGER_WINDOW_SECS) return eagerMs;
 	return waitedSecs * STALENESS * 1000;
 }

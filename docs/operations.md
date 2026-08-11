@@ -136,6 +136,21 @@ it used to have, a name lookup, is bounded now.
 every webhook delivered. That is a client's order flow sitting in your log
 aggregator. `warn` keeps the failures and drops the flow.
 
+## How often anything gets polled
+
+Three separate things, and they used to be one number. `POLLS_PER_SEC` is politeness:
+a ceiling per host, so one wallet a thousand payments point at is never hit harder
+than that. `WORK_PER_TICK` is throughput: how many polls and deliveries a tick takes
+on at all, and it is the knob to raise when an instance is watching thousands and
+sweeping them too slowly. `POLL_INTERVAL_SECS` is only the fallback pace for an
+endpoint that does not name its own.
+
+An endpoint names its own with `Cache-Control: max-age` on any verify answer, clamped
+to between a second and an hour, and that pace then applies to every payment on that
+host. So a client's own endpoint sets the rate it wants to be asked at, and a wallet
+that says nothing keeps the widening interval. Nothing here is per payment: the pace,
+like the ceiling, belongs to the host being asked.
+
 ## A settlement nobody was told about
 
 `parked_deliveries` on `/ready` counts webhooks this instance gave up on, and every one

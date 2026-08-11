@@ -13,6 +13,7 @@ import {
 	KEY_REUSED,
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
+	VERIFY_UNCONFIRMED,
 	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
 import type { Store } from "./store.ts";
@@ -39,6 +40,7 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			port: 0,
 			eagerDelayMs: 3000,
 			pollsPerSecond: 5,
+			workPerTick: 50,
 			tickStallMs: 30_000,
 			drainTimeoutMs,
 			token,
@@ -629,12 +631,26 @@ const WATCHABLE = {
 	expires_at: new Date(Date.now() + 3_600_000).toISOString(),
 };
 
-function postWatch(app: App, body: unknown): Promise<Response> {
-	return fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
-	});
+async function postWatch(app: App, body: unknown): Promise<Response> {
+	const outer = globalThis.fetch;
+	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
+		const target = String(args[0]);
+		if (!target.includes("127.0.0.1") && target.includes("/verify")) {
+			return Promise.resolve(Response.json({ settled: false }));
+		}
+
+		return outer(...args);
+	}) as typeof fetch;
+
+	try {
+		return await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	} finally {
+		globalThis.fetch = outer;
+	}
 }
 
 test("an invoice can be watched without telling the gateway who or how much", async () => {
@@ -715,6 +731,32 @@ test("re-registering the same watch with another webhook owes both, because webh
 	]);
 
 	app.stop();
+});
+
+test("a verify URL that answers nothing like LUD-21 is refused, so nobody else gets polled", async () => {
+	const app = await running();
+	const real = globalThis.fetch;
+	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
+		const target = String(args[0]);
+		if (target.includes("127.0.0.1")) return real(...args);
+
+		return Promise.resolve(new Response("<html>a stranger's home page</html>"));
+	}) as typeof fetch;
+
+	try {
+		const refused = await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ ...WATCHABLE, payment_hash: PAYMENT_HASH }),
+		});
+
+		expect(refused.status).toBe(424);
+		expect(((await refused.json()) as Problem)["type"]).toBe(VERIFY_UNCONFIRMED);
+		expect(app.store.get(paymentId(CLUSTER_KEY, PAYMENT_HASH))).toBeNull();
+	} finally {
+		globalThis.fetch = real;
+		app.stop();
+	}
 });
 
 test("a webhook that will not answer the challenge is refused, and nothing is watched", async () => {

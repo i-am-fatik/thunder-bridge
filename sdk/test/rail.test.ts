@@ -313,7 +313,7 @@ describe("a leg the bank rail built, against the gateway's own settlement check"
       bookedAt: 1_780_000_000,
     });
 
-    const preimage = await checkSettled(told.verifyUrl, told.paymentHash);
+    const { preimage } = await checkSettled(told.verifyUrl, told.paymentHash);
 
     expect(preimage).toMatch(/^[0-9a-f]{64}$/);
     expect(preimageMatchesHash(String(preimage), told.paymentHash)).toBe(true);
@@ -323,7 +323,7 @@ describe("a leg the bank rail built, against the gateway's own settlement check"
     const told = await toldToTheGateway();
     paidInto();
 
-    expect(await checkSettled(told.verifyUrl, told.paymentHash)).toBeNull();
+    expect((await checkSettled(told.verifyUrl, told.paymentHash)).preimage).toBeNull();
   });
 
   it("does not settle on a credit for a different order", async () => {
@@ -335,6 +335,6 @@ describe("a leg the bank rail built, against the gateway's own settlement check"
       bookedAt: 1_780_000_000,
     });
 
-    expect(await checkSettled(told.verifyUrl, told.paymentHash)).toBeNull();
+    expect((await checkSettled(told.verifyUrl, told.paymentHash)).preimage).toBeNull();
   });
 });

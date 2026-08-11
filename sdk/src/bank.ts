@@ -6,6 +6,7 @@ import { minorScaleOf, minorUnitsOf } from "./currency.js";
 
 const DEFAULT_CURRENCY = "CZK";
 const DEFAULT_LOOK_BACK_SECS = 7 * 24 * 60 * 60;
+const DEFAULT_POLL_EVERY_SECS = 30;
 const IBAN = /^[A-Z]{2}[0-9]{2}[0-9A-Z]{8,30}$/;
 const FORBIDDEN_IN_SPD = "*";
 
@@ -116,6 +117,14 @@ export interface BankVerifyConfig {
 
   /** How far back a credit still counts, seven days by default */
   lookBackSecs?: number;
+
+  /**
+   * How often you want the gateway to ask, in seconds. It goes out as
+   * `Cache-Control: max-age`, so the pace is yours to set rather than the
+   * gateway's, and a bank that updates once a minute should say so instead of
+   * being polled every few seconds. Thirty by default, clamped to an hour
+   */
+  pollEverySecs?: number;
 }
 
 /**
@@ -179,6 +188,10 @@ export async function bankTransfer(params: BankTransferParams): Promise<BankTran
 export function bankVerifyEndpoint(
   config: BankVerifyConfig,
 ): (request: Request) => Promise<Response> {
+  const paced = {
+    "cache-control": `max-age=${config.pollEverySecs ?? DEFAULT_POLL_EVERY_SECS}`,
+  };
+
   return async (request: Request) => {
     const asked = readQuery(new URL(request.url));
     if (asked === null) return Response.json({ settled: false }, { status: 400 });
@@ -191,12 +204,12 @@ export function bankVerifyEndpoint(
 
     const since = unixNow() - (config.lookBackSecs ?? DEFAULT_LOOK_BACK_SECS);
     const landed = (await config.statement(since)).some((credit) => pays(credit, asked));
-    if (!landed) return Response.json({ settled: false });
+    if (!landed) return Response.json({ settled: false }, { headers: paced });
 
-    return Response.json({
-      settled: true,
-      preimage: await hmacHex(config.secret, `preimage|${subject}`),
-    });
+    return Response.json(
+      { settled: true, preimage: await hmacHex(config.secret, `preimage|${subject}`) },
+      { headers: paced },
+    );
   };
 }
 

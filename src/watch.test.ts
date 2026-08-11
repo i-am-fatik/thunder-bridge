@@ -14,6 +14,7 @@ import {
 	spend,
 	tick,
 	unixNow,
+	type Budget,
 	type Watcher,
 } from "./watch.ts";
 
@@ -72,6 +73,10 @@ function counting(answer: (url: string) => Response): { peak: () => number; rest
 	return { peak: () => peak, restore: () => void (globalThis.fetch = real) };
 }
 
+function paced(perSecond = 1000): Budget {
+	return { perSecond, perTick: 100, nextAt: new Map(), pace: new Map() };
+}
+
 function payment(overrides: Partial<Payment> = {}): Payment {
 	return {
 		id: "aa".repeat(32),
@@ -107,7 +112,7 @@ function queueing(work: Payment[], settle: (id: string, preimage: string) => Set
 		},
 	} as unknown as Store;
 
-	return { parked, handed, watcher: { store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() }, webhookKey: GATEWAY_KEY } satisfies Watcher };
+	return { parked, handed, watcher: { store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY } satisfies Watcher };
 }
 
 function owing(work: Delivery[]) {
@@ -128,7 +133,7 @@ function owing(work: Delivery[]) {
 	return {
 		done,
 		failed,
-		watcher: { store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() }, webhookKey: GATEWAY_KEY } satisfies Watcher,
+		watcher: { store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY } satisfies Watcher,
 	};
 }
 
@@ -345,7 +350,7 @@ test("a poll and a webhook owed in the same tick go out together, not one after 
 	} as unknown as Store;
 
 	try {
-		await tick({ store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() }, webhookKey: GATEWAY_KEY });
+		await tick({ store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY });
 
 		expect(wire.peak()).toBe(2);
 	} finally {
@@ -375,7 +380,7 @@ test("the signature is an hmac a receiver can recompute", async () => {
 });
 
 test("one busy wallet host does not slow the polls aimed at another", async () => {
-	const budget = { perSecond: 5, nextAt: new Map<string, number>() };
+	const budget = paced(5);
 	await spend(budget, "coinos.io");
 
 	const started = Date.now();
@@ -384,6 +389,38 @@ test("one busy wallet host does not slow the polls aimed at another", async () =
 
 	await spend(budget, "coinos.io");
 	expect(Date.now() - started).toBeGreaterThanOrEqual(150);
+});
+
+test("an endpoint that asks for a pace is polled at it, and one that does not keeps the old rule", async () => {
+	const wire = intercepting(() =>
+		Response.json({ settled: false }, { headers: { "cache-control": "public, max-age=60" } }),
+	);
+	const { parked, watcher } = queueing([payment(), payment({ id: "bb".repeat(32) })], settlesAs(true));
+
+	try {
+		await tick(watcher);
+
+		expect(watcher.budget.pace.get("coinos.io")).toBe(60);
+		expect(parked[0]?.dueAt).toBe(unixNow() + 60);
+		expect(parked[1]?.dueAt).toBe(unixNow() + 60);
+	} finally {
+		wire.restore();
+	}
+});
+
+test("a pace nobody could have meant is clamped rather than obeyed", async () => {
+	const wire = intercepting(() =>
+		Response.json({ settled: false }, { headers: { "cache-control": "max-age=999999" } }),
+	);
+	const { watcher } = queueing([payment()], settlesAs(true));
+
+	try {
+		await tick(watcher);
+
+		expect(watcher.budget.pace.get("coinos.io")).toBe(3600);
+	} finally {
+		wire.restore();
+	}
 });
 
 test("a payment is never left staler than a tenth of its own age", () => {
@@ -413,7 +450,7 @@ test("a delivery with no retries left is reported at error level, not as one mor
 		await tick({
 			store: abandoning,
 			eagerDelayMs: 5,
-			budget: { perSecond: 1000, nextAt: new Map() },
+			budget: paced(),
 			webhookKey: GATEWAY_KEY,
 		});
 

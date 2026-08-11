@@ -16,7 +16,13 @@ export type Sent = {
 	deadline?: AbortSignal;
 };
 
-export type Answer = { status: number; ok: boolean; body: string; truncated: boolean };
+export type Answer = {
+	status: number;
+	ok: boolean;
+	body: string;
+	truncated: boolean;
+	headers: Headers;
+};
 
 export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
 	const capped = AbortSignal.timeout(HTTP_TIMEOUT_MS);
@@ -68,21 +74,21 @@ async function refuseUnlessPublic(url: string): Promise<void> {
 }
 
 async function answerOf(response: Response): Promise<Answer> {
-	const { status, ok } = response;
+	const { status, ok, headers } = response;
 	const reader = response.body?.getReader();
-	if (!reader) return { status, ok, body: "", truncated: false };
+	if (!reader) return { status, ok, body: "", truncated: false, headers };
 
 	const read: Uint8Array[] = [];
 	let bytes = 0;
 	while (bytes <= BODY_LIMIT_BYTES) {
 		const { done, value } = await reader.read();
-		if (done) return { status, ok, body: text(read), truncated: false };
+		if (done) return { status, ok, body: text(read), truncated: false, headers };
 		read.push(value);
 		bytes += value.length;
 	}
 	await reader.cancel();
 
-	return { status, ok, body: text(read), truncated: true };
+	return { status, ok, body: text(read), truncated: true, headers };
 }
 
 function withoutBody(sent: Sent): Sent {

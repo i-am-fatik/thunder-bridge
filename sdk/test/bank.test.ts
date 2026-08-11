@@ -218,6 +218,25 @@ describe("bankVerifyEndpoint", () => {
     expect(await answer.json()).toEqual({ settled: false });
   });
 
+  it("names the pace it wants to be polled at, so the gateway does not pick one", async () => {
+    const transfer = await asked();
+    const answer = await verified(statementOf(), transfer.verifyUrl);
+
+    expect(answer.headers.get("cache-control")).toBe("max-age=30");
+  });
+
+  it("takes a pace of your own, because a bank that moves hourly should say so", async () => {
+    const transfer = await asked();
+    const url = new URL(transfer.verifyUrl);
+    const handler = bankVerifyEndpoint({
+      secret: SECRET,
+      statement: statementOf(),
+      pollEverySecs: 900,
+    });
+
+    expect((await handler(new Request(url))).headers.get("cache-control")).toBe("max-age=900");
+  });
+
   it("releases a preimage that hashes to what the gateway was given", async () => {
     const transfer = await asked();
     const answer = await verified(statementOf(credit()), transfer.verifyUrl);
@@ -295,14 +314,19 @@ describe("a bank transfer against the gateway's own settlement check", () => {
     const transfer = await asked();
     mounted({ secret: SECRET, statement: statementOf(credit()) });
 
-    expect(await checkSettled(transfer.verifyUrl, transfer.paymentHash)).toMatch(/^[0-9a-f]{64}$/);
+    expect((await checkSettled(transfer.verifyUrl, transfer.paymentHash)).preimage).toMatch(
+      /^[0-9a-f]{64}$/,
+    );
   });
 
-  it("stays unsettled while nothing has landed", async () => {
+  it("stays unsettled while nothing has landed, and says how soon to ask again", async () => {
     const transfer = await asked();
     mounted({ secret: SECRET, statement: statementOf() });
 
-    expect(await checkSettled(transfer.verifyUrl, transfer.paymentHash)).toBeNull();
+    expect(await checkSettled(transfer.verifyUrl, transfer.paymentHash)).toEqual({
+      preimage: null,
+      pace: 30,
+    });
   });
 
   it("cannot be settled by a server holding a different secret", async () => {

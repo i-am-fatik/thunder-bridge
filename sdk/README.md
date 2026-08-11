@@ -248,6 +248,19 @@ already in the account:
 Neither has been seen with Fio, which forwards the message untouched. Check it
 against the banks your payers actually use before you promise them a rail.
 
+### How often the gateway asks
+
+Your endpoint decides, not the gateway. `bankVerifyEndpoint` answers with
+`Cache-Control: max-age=30`, and the gateway uses that as the interval for every
+payment on your host. Set `pollEverySecs` to whatever your bank's own refresh makes
+sensible: reading a statement that moves once an hour every five seconds only burns
+your rate limit.
+
+The gateway also asks the URL once, before it accepts the watch, and refuses with
+`424` if it does not answer this shape. So deploy the endpoint first and register
+second. That is what stops anyone pointing a gateway at a server that never asked to
+be polled for three days.
+
 ## What is still trusted
 
 - **The gateway chooses which of your addresses gets paid.** Nothing here can

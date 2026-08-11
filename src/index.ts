@@ -16,7 +16,7 @@ import { mint as mintTicket, read as readTicket, type Subject } from "../core/ti
 import { Cluster } from "./cluster.ts";
 import { bearer, positive, secret, secrets, whole } from "./env.ts";
 import { Ledger, paymentId } from "./ledger.ts";
-import { quote, resolve, RESOLVE_TIMEOUT_MS } from "../core/lnurl.ts";
+import { quote, resolve, RESOLVE_TIMEOUT_MS, speaksVerify } from "../core/lnurl.ts";
 import type { Payment } from "./payment.ts";
 import {
 	ALREADY_WATCHED,
@@ -28,6 +28,7 @@ import {
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
 	statusForWallets,
+	VERIFY_UNCONFIRMED,
 	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
 import { Store } from "./store.ts";
@@ -106,6 +107,7 @@ export type Options = {
 	port: number;
 	eagerDelayMs: number;
 	pollsPerSecond: number;
+	workPerTick: number;
 	tickStallMs: number;
 	drainTimeoutMs: number;
 	token: string | null;
@@ -125,7 +127,12 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	const watcher: Watcher = {
 		store,
 		eagerDelayMs: options.eagerDelayMs,
-		budget: { perSecond: options.pollsPerSecond, nextAt: new Map() },
+		budget: {
+			perSecond: options.pollsPerSecond,
+			perTick: options.workPerTick,
+			nextAt: new Map(),
+			pace: new Map(),
+		},
 		webhookKey,
 	};
 
@@ -572,6 +579,9 @@ async function watchOnly(
 	if (known && !isThisWatch(known, asked)) {
 		return conflict(ALREADY_WATCHED, "This payment hash is already being watched here");
 	}
+	if (!(await speaksVerify(asked.verifyUrl))) {
+		return unconfirmedVerify(asked.verifyUrl);
+	}
 	if (asked.webhook && !(await confirmWebhook(asked.webhook, webhookKey))) {
 		return unconfirmedWebhook(asked.webhook.url);
 	}
@@ -716,6 +726,14 @@ function publishedWebhookKey(key: SigningKey): Response {
 	return json({ algorithm: "ed25519", public_key: key.publicKeyHex });
 }
 
+function unconfirmedVerify(url: string): Response {
+	return problem(424, {
+		type: VERIFY_UNCONFIRMED,
+		title: "The verify URL does not answer like a verify endpoint",
+		detail: `${url} has to answer a JSON body carrying a boolean settled, the shape LUD-21 defines, before this gateway will poll it for days on your word`,
+	});
+}
+
 function unconfirmedWebhook(url: string): Response {
 	return problem(424, {
 		type: WEBHOOK_UNCONFIRMED,
@@ -757,6 +775,7 @@ if (import.meta.main) {
 		{
 			port: whole("PORT", 3000),
 			eagerDelayMs: positive("POLL_INTERVAL_SECS", 5) * 1000,
+			workPerTick: positive("WORK_PER_TICK", 50),
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,

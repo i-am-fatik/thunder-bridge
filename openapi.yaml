@@ -409,6 +409,18 @@ paths:
         Nothing here is verified on your behalf, because there is nothing to verify against:
         you resolved the address, so the origin proof is yours to have run already.
 
+        The URL is asked once before anything is watched, and has to answer a JSON body
+        carrying a boolean `settled`, the shape LUD-21 defines. Otherwise the request is
+        refused `424` and nothing is scheduled, because a URL that does not speak this
+        protocol was never asking to be polled for days and this gateway will not be pointed
+        at a stranger's server on a caller's word.
+
+        That first answer is also where the endpoint sets its own pace: a
+        `Cache-Control: max-age` on it, or on any later poll, is the interval this gateway
+        will use for that host, clamped between one second and one hour. Say so rather than
+        being asked on whatever schedule the operator configured. An endpoint that names
+        nothing keeps the gateway's own widening interval, which is what every wallet does.
+
         It does not have to be an invoice. All this endpoint requires is a hash and a URL that
         will one day answer with something hashing to it, so anything able to release a secret
         on settlement can be watched here. The SDK's `bankTransfer` uses that to put a bank
@@ -448,7 +460,7 @@ paths:
         "413":
           $ref: "#/components/responses/body_too_large"
         "424":
-          $ref: "#/components/responses/webhook_unconfirmed"
+          $ref: "#/components/responses/nothing_confirmed"
         "503":
           $ref: "#/components/responses/at_capacity"
 
@@ -1160,6 +1172,24 @@ components:
                     enum:
                       - "urn:problem-type:thunder-bridge:request-in-flight"
                       - "urn:problem-type:thunder-bridge:idempotency-key-reused"
+
+    nothing_confirmed:
+      description: |
+        A URL this watch names did not answer, so nothing is being watched.
+        `verify-unconfirmed` means the `verify_url` served no JSON body with a boolean
+        `settled`, `webhook-unconfirmed` means the hook did not answer the challenge. Both
+        say the same thing: stand the endpoint up first and register it second.
+      content:
+        application/problem+json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/problem"
+              - type: object
+                properties:
+                  type:
+                    enum:
+                      - "urn:problem-type:thunder-bridge:verify-unconfirmed"
+                      - "urn:problem-type:thunder-bridge:webhook-unconfirmed"
 
     webhook_unconfirmed:
       description: |

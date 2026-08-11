@@ -96,6 +96,12 @@ if it does not answer, so this gateway never sends an unsolicited request to an
 address a caller merely named. Your endpoint has to be serving first, and the
 client's `answerWebhookChallengeRequest` is the whole of that side.
 
+A `verify_url` handed to `POST /watched-payments` is checked the same way, once,
+before anything is watched: it has to answer the LUD-21 shape or the request is
+refused. That endpoint also sets its own polling pace with
+`Cache-Control: max-age`, so a bank that moves once a minute says so rather than
+being asked every few seconds on a schedule this gateway picked.
+
 Failures are RFC 9457 problem documents served as `application/problem+json`.
 Branch on `type`, never on prose. Six types are minted, and the spec enumerates
 what each refusal reason means and what to do about it.
@@ -113,10 +119,11 @@ standard's camelCase, and there is no authorization server.
 | `PORT` | `3000` | listen port, Railway sets this for you |
 | `LEDGER` | `./data/ledger.db` | the SQLite file, everything lives here |
 | `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/ready`, `/openapi.yaml`, `/docs` and `/webhook-key`. Blank counts as none, so a variable someone emptied leaves the gateway public rather than private and open to everyone |
-| `POLL_INTERVAL_SECS` | `5` | how often a payment under five minutes old polls `verify` |
+| `POLL_INTERVAL_SECS` | `5` | how often a payment under five minutes old polls `verify`, used only where the endpoint names no pace of its own with `Cache-Control: max-age` |
+| `WORK_PER_TICK` | `50` | polls and webhook deliveries a tick takes on, which is the throughput ceiling, not the politeness one |
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
-| `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per wallet host, and the batch each tick takes |
+| `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per host, so one wallet everybody uses is never hit harder than this however many payments point at it |
 | `MAX_PENDING` | `5000` | payments the cluster watches before a create or a watch answers 503, never a limit on what an instance knows |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, each one that far further off than the last, retried for as long as the payment has left and never under an hour |
