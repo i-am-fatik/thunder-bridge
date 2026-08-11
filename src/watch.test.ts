@@ -5,7 +5,17 @@ import { expect, test, vi } from "vitest";
 import { signingKeyFromSeed, verifyHex } from "../core/ed25519.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
-import { nextDue, pollDelayMs, sign, spend, tick, unixNow, type Watcher } from "./watch.ts";
+import {
+	CHALLENGE,
+	confirmWebhook,
+	nextDue,
+	pollDelayMs,
+	sign,
+	spend,
+	tick,
+	unixNow,
+	type Watcher,
+} from "./watch.ts";
 
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
 
@@ -23,7 +33,10 @@ const NEVER_OVERLAPPED_MS = 2000;
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: string };
 
-function intercepting(answer: (call: Call) => Response): { calls: Call[]; restore: () => void } {
+function intercepting(answer: (call: Call) => Response | Promise<Response>): {
+	calls: Call[];
+	restore: () => void;
+} {
 	const real = globalThis.fetch;
 	const calls: Call[] = [];
 	globalThis.fetch = ((target: string | URL | Request, options?: RequestInit) => {
@@ -380,4 +393,105 @@ test("a payment is never left staler than a tenth of its own age", () => {
 	expect(pollDelayMs(3600, 5000)).toBe(360_000);
 	expect(pollDelayMs(86_400, 5000)).toBe(8_640_000);
 	expect(pollDelayMs(259_199, 5000)).toBe(25_919_900);
+});
+
+test("a delivery with no retries left is reported at error level, not as one more warning", async () => {
+	const said: string[] = [];
+	const loud = console.error;
+	const quiet = console.warn;
+	console.error = (line: string) => void said.push(line);
+	console.warn = () => {};
+	const abandoning = {
+		duePolls: () => [],
+		dueDeliveries: () => [owed()],
+		delivered: () => {},
+		undelivered: () => "abandoned",
+	} as unknown as Store;
+	const wire = intercepting(() => new Response("nope", { status: 500 }));
+
+	try {
+		await tick({
+			store: abandoning,
+			eagerDelayMs: 5,
+			budget: { perSecond: 1000, nextAt: new Map() },
+			webhookKey: GATEWAY_KEY,
+		});
+
+		expect(said.filter((line) => line.includes("abandoned"))).toHaveLength(1);
+	} finally {
+		wire.restore();
+		console.error = loud;
+		console.warn = quiet;
+	}
+});
+
+async function echoing(call: Call, secret: string | null): Promise<Response> {
+	const nonce = (JSON.parse(call.body) as { nonce: string }).nonce;
+	if (!secret) return Response.json({ nonce });
+
+	return Response.json({ nonce, signature: `sha256=${await sign(secret, nonce)}` });
+}
+
+test("a challenge is signed the way a delivery is, so a receiver can tell who is asking", async () => {
+	const wire = intercepting((call) => echoing(call, "hunter2"));
+	try {
+		expect(await confirmWebhook({ url: HOOK_URL, secret: "hunter2" }, GATEWAY_KEY)).toBe(true);
+
+		const sent = wire.calls[0]!;
+		expect(sent.url).toBe(HOOK_URL);
+		expect(sent.method).toBe("POST");
+
+		const asked = JSON.parse(sent.body) as { type: string; nonce: string };
+		expect(asked.type).toBe(CHALLENGE);
+		expect(asked.nonce).toMatch(/^[0-9a-f]{64}$/);
+		expect(sent.headers["x-signature"]).toBe(
+			`sha256=${await sign("hunter2", `${sent.headers["x-timestamp"]}.${sent.body}`)}`,
+		);
+	} finally {
+		wire.restore();
+	}
+});
+
+test("a webhook that handed over no secret is challenged under the gateway's own key", async () => {
+	const wire = intercepting((call) => echoing(call, null));
+	try {
+		expect(await confirmWebhook({ url: HOOK_URL, secret: null }, GATEWAY_KEY)).toBe(true);
+
+		const sent = wire.calls[0]!;
+		const signature = sent.headers["x-signature"] ?? "";
+		expect(signature).toMatch(/^ed25519=[0-9a-f]{128}$/);
+
+		const payload = new TextEncoder().encode(`${sent.headers["x-timestamp"]}.${sent.body}`);
+		expect(
+			await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
+		).toBe(true);
+	} finally {
+		wire.restore();
+	}
+});
+
+test("a challenge answered wrongly leaves the webhook unconfirmed, whichever way it is wrong", async () => {
+	const quiet = console.warn;
+	console.warn = () => {};
+	const refusing = intercepting(() => new Response("no thanks", { status: 500 }));
+	const silent = () => Response.json({});
+	const inventing = () => Response.json({ nonce: "f".repeat(64) });
+	const unsigned = (call: Call) => echoing(call, null);
+
+	try {
+		expect(await confirmWebhook({ url: HOOK_URL, secret: null }, GATEWAY_KEY)).toBe(false);
+		refusing.restore();
+
+		for (const answering of [silent, inventing]) {
+			const wire = intercepting(answering);
+			expect(await confirmWebhook({ url: HOOK_URL, secret: null }, GATEWAY_KEY)).toBe(false);
+			wire.restore();
+		}
+
+		const wire = intercepting(unsigned);
+		expect(await confirmWebhook({ url: HOOK_URL, secret: "hunter2" }, GATEWAY_KEY)).toBe(false);
+		wire.restore();
+	} finally {
+		console.warn = quiet;
+	}
 });

@@ -5,6 +5,7 @@ import { connect } from "node:net";
 import { expect, test, vi } from "vitest";
 
 import { start, type Service } from "./index.ts";
+import { paymentId } from "./ledger.ts";
 import type { UnsavedPayment } from "./payment.ts";
 import {
 	ALREADY_WATCHED,
@@ -12,9 +13,11 @@ import {
 	KEY_REUSED,
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
+	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
 import type { Store } from "./store.ts";
 import { CLUSTER_KEY, openStore, until } from "./testing.ts";
+import { sign } from "./watch.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
 
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
@@ -216,6 +219,27 @@ function walletServing(seen: string[]): () => void {
 	return () => {
 		globalThis.fetch = real;
 	};
+}
+
+function hookAnswering(secret: string | null, nonceShift = ""): () => void {
+	const real = globalThis.fetch;
+	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
+		const target = String(args[0]);
+		if (target.includes("127.0.0.1")) return real(...args);
+
+		const asked = JSON.parse(String(args[1]?.body ?? "{}")) as { nonce?: string };
+		return answerChallenge(`${asked.nonce ?? ""}${nonceShift}`, secret);
+	}) as typeof fetch;
+
+	return () => {
+		globalThis.fetch = real;
+	};
+}
+
+async function answerChallenge(nonce: string, secret: string | null): Promise<Response> {
+	if (!secret) return Response.json({ nonce });
+
+	return Response.json({ nonce, signature: `sha256=${await sign(secret, nonce)}` });
 }
 
 function postQuote(app: App, body: unknown): Promise<Response> {
@@ -645,6 +669,7 @@ test("what the gateway stores about a blind watch names no recipient and no amou
 
 test("a watched payment can be owed a webhook, which is the bank rail's only way to be told", async () => {
 	const app = await running();
+	const restore = hookAnswering("s".repeat(32));
 
 	const created = (await (
 		await postWatch(app, {
@@ -653,6 +678,7 @@ test("a watched payment can be owed a webhook, which is the bank rail's only way
 			webhook: { url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
 		})
 	).json()) as Problem;
+	restore();
 	const stored = app.store.get(String(created["id"]));
 
 	expect(stored?.webhooks).toEqual([
@@ -671,12 +697,14 @@ test("a watched payment can be owed a webhook, which is the bank rail's only way
 test("re-registering the same watch with another webhook owes both, because webhooks are a set", async () => {
 	const app = await running();
 	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
+	const restore = hookAnswering(null);
 
 	await postWatch(app, { ...watchable, webhook: { url: "https://shop.example/hooks/one" } });
 	const again = await postWatch(app, {
 		...watchable,
 		webhook: { url: "https://shop.example/hooks/two" },
 	});
+	restore();
 
 	expect(again.status).toBe(201);
 
@@ -685,6 +713,56 @@ test("re-registering the same watch with another webhook owes both, because webh
 		"https://shop.example/hooks/one",
 		"https://shop.example/hooks/two",
 	]);
+
+	app.stop();
+});
+
+test("a webhook that will not answer the challenge is refused, and nothing is watched", async () => {
+	const app = await running();
+	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
+
+	const refused = await postWatch(app, {
+		...watchable,
+		webhook: { url: "https://shop.example/hooks/gone" },
+	});
+
+	expect(refused.status).toBe(424);
+	expect(((await refused.json()) as Problem)["type"]).toBe(WEBHOOK_UNCONFIRMED);
+	expect(app.store.get(paymentId(CLUSTER_KEY, PAYMENT_HASH))).toBeNull();
+
+	app.stop();
+});
+
+test("a webhook whose answer the registered secret does not sign is refused", async () => {
+	const app = await running();
+	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
+	const answeringForItself = hookAnswering("someone-elses-secret");
+
+	const refused = await postWatch(app, {
+		...watchable,
+		webhook: { url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
+	});
+	answeringForItself();
+
+	expect(refused.status).toBe(424);
+	expect(((await refused.json()) as Problem)["type"]).toBe(WEBHOOK_UNCONFIRMED);
+
+	app.stop();
+});
+
+test("a webhook that answers with a nonce of its own is refused", async () => {
+	const app = await running();
+	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
+	const answeringSomethingElse = hookAnswering(null, "-and-a-bit-more");
+
+	const refused = await postWatch(app, {
+		...watchable,
+		webhook: { url: "https://shop.example/hooks/one" },
+	});
+	answeringSomethingElse();
+
+	expect(refused.status).toBe(424);
+	expect(((await refused.json()) as Problem)["type"]).toBe(WEBHOOK_UNCONFIRMED);
 
 	app.stop();
 });
@@ -917,6 +995,7 @@ test("readiness says only that it is ready until a bearer proves the instance is
 		peers: 0,
 		pending: 0,
 		max_pending: 5000,
+		parked_deliveries: 0,
 		watching: "scheduled",
 		sync: {
 			state: "alone",

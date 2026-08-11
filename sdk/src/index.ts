@@ -37,6 +37,8 @@ export {
 export type { QrOptions } from "./qr.js";
 export { toLnurl } from "../../core/lnurl.js";
 export {
+  answerWebhookChallenge,
+  answerWebhookChallengeRequest,
   parseWatchedWebhook,
   parseWatchedWebhookRequest,
   parseWebhook,

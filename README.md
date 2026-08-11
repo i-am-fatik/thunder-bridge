@@ -91,8 +91,13 @@ your URL, signed and timestamped, retried from a durable outbox that survives a
 restart. Delivery is at-least-once, so deduplicate on `id`. The shape and the
 signature scheme are under `webhooks` in the spec.
 
+The URL is challenged before the payment is taken on, and the create is refused
+if it does not answer, so this gateway never sends an unsolicited request to an
+address a caller merely named. Your endpoint has to be serving first, and the
+client's `answerWebhookChallengeRequest` is the whole of that side.
+
 Failures are RFC 9457 problem documents served as `application/problem+json`.
-Branch on `type`, never on prose. Five types are minted, and the spec enumerates
+Branch on `type`, never on prose. Six types are minted, and the spec enumerates
 what each refusal reason means and what to do about it.
 
 The resource model follows Open Payments 1.3.3, pinned under
@@ -114,7 +119,7 @@ standard's camelCase, and there is no authorization server.
 | `POLLS_PER_SEC` | `5` | ceiling on outbound `verify` polls per wallet host, and the batch each tick takes |
 | `MAX_PENDING` | `5000` | payments the cluster watches before a create or a watch answers 503, never a limit on what an instance knows |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
-| `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, six attempts then it parks |
+| `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, each one that far further off than the last, retried for as long as the payment has left and never under an hour |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`. At `info` a line names every payment paid and every webhook delivered, so a shop's order flow is in your logs until you turn it down |
 | `SWARM` | on | `0` turns off Hyperswarm DHT discovery |
 | `REPLICATE_LISTEN` | none | also accept direct TCP replication on this port |

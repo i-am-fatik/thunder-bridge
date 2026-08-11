@@ -28,9 +28,10 @@ import {
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
 	statusForWallets,
+	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
 import { Store } from "./store.ts";
-import { tick, unixNow, WATCH_HORIZON_SECS, type Watcher } from "./watch.ts";
+import { confirmWebhook, tick, unixNow, WATCH_HORIZON_SECS, type Watcher } from "./watch.ts";
 import {
 	fingerprint,
 	paymentToWire,
@@ -120,11 +121,12 @@ type Vitals = "serving" | "stalled" | "draining";
 
 export async function start(options: Options, store: Store): Promise<Service> {
 	const token = options.token === "" ? null : options.token;
+	const webhookKey = await webhookSigningKey(options.key);
 	const watcher: Watcher = {
 		store,
 		eagerDelayMs: options.eagerDelayMs,
 		budget: { perSecond: options.pollsPerSecond, nextAt: new Map() },
-		webhookKey: await webhookSigningKey(options.key),
+		webhookKey,
 	};
 
 	let draining = false;
@@ -135,7 +137,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	const followers = new Map<WebSocket, Follower>();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
-		void respond(incoming, store, token, options.key, vitals()).then((answer) =>
+		void respond(incoming, store, token, options.key, webhookKey, vitals()).then((answer) =>
 			reply(answer, outgoing),
 		);
 	});
@@ -313,13 +315,16 @@ async function respond(
 	store: Store,
 	token: string | null,
 	key: Uint8Array,
+	webhookKey: SigningKey,
 	vitals: Vitals,
 ): Promise<Response> {
 	if (incoming.method === "OPTIONS") return new Response(null, { status: 204, headers: OPEN });
 
 	const answer =
 		refused(incoming, token) ??
-		(await route(incoming, store, token, key, vitals).catch(oversized).catch(unhandled));
+		(await route(incoming, store, token, key, webhookKey, vitals)
+			.catch(oversized)
+			.catch(unhandled));
 	for (const [header, value] of Object.entries(OPEN)) answer.headers.set(header, value);
 
 	return answer;
@@ -362,6 +367,7 @@ function readiness(
 		peers: info.peers,
 		pending: info.pending,
 		max_pending: info.maxPending,
+		parked_deliveries: info.parked,
 		watching: vitals === "stalled" ? "stalled" : "scheduled",
 		sync: {
 			state: info.convergedAt !== null ? "converged" : info.peers > 0 ? "catching-up" : "alone",
@@ -383,6 +389,7 @@ async function route(
 	store: Store,
 	token: string | null,
 	key: Uint8Array,
+	webhookKey: SigningKey,
 	vitals: Vitals,
 ): Promise<Response> {
 	const path = pathOf(incoming);
@@ -390,7 +397,7 @@ async function route(
 	if (path === "/ready") return readiness(incoming, store, token, vitals);
 	if (path === "/openapi.yaml") return spec();
 	if (path === "/docs") return rendered();
-	if (path === "/webhook-key") return await publishedWebhookKey(key);
+	if (path === "/webhook-key") return publishedWebhookKey(webhookKey);
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
@@ -401,13 +408,13 @@ async function route(
 		return token === null ? notFound() : listed(incoming, store);
 	}
 	if (path === "/incoming-payments" && incoming.method === "POST") {
-		return await create(await asRequest(incoming), store);
+		return await create(await asRequest(incoming), store, webhookKey);
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
 		return await quoted(await asRequest(incoming));
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
-		return await watchOnly(await asRequest(incoming), store, key);
+		return await watchOnly(await asRequest(incoming), store, key, webhookKey);
 	}
 	if (path === "/ws-tickets" && incoming.method === "POST") {
 		return await ticketed(await asRequest(incoming), store, key);
@@ -416,7 +423,11 @@ async function route(
 	return notFound();
 }
 
-async function create(request: Request, store: Store): Promise<Response> {
+async function create(
+	request: Request,
+	store: Store,
+	webhookKey: SigningKey,
+): Promise<Response> {
 	let asked: CreateRequest;
 	try {
 		asked = readCreateRequest(await request.json());
@@ -426,6 +437,9 @@ async function create(request: Request, store: Store): Promise<Response> {
 
 	if (store.full()) {
 		return unavailable(AT_CAPACITY);
+	}
+	if (asked.webhook && !(await confirmWebhook(asked.webhook, webhookKey))) {
+		return unconfirmedWebhook(asked.webhook.url);
 	}
 
 	const key = request.headers.get("idempotency-key");
@@ -528,7 +542,12 @@ function listed(incoming: IncomingMessage, store: Store): Response {
 	});
 }
 
-async function watchOnly(request: Request, store: Store, key: Uint8Array): Promise<Response> {
+async function watchOnly(
+	request: Request,
+	store: Store,
+	key: Uint8Array,
+	webhookKey: SigningKey,
+): Promise<Response> {
 	let asked: WatchRequest;
 	try {
 		asked = readWatchRequest(await request.json());
@@ -552,6 +571,9 @@ async function watchOnly(request: Request, store: Store, key: Uint8Array): Promi
 	const known = store.get(paymentId(key, asked.paymentHash));
 	if (known && !isThisWatch(known, asked)) {
 		return conflict(ALREADY_WATCHED, "This payment hash is already being watched here");
+	}
+	if (asked.webhook && !(await confirmWebhook(asked.webhook, webhookKey))) {
+		return unconfirmedWebhook(asked.webhook.url);
 	}
 
 	const watched = store.insert({
@@ -690,10 +712,16 @@ async function webhookSigningKey(clusterKey: Uint8Array): Promise<SigningKey> {
 	return await signingKeyFromSeed(hexToBytes(await hmacHex(clusterKey, WEBHOOK_SIGNING_LABEL)));
 }
 
-async function publishedWebhookKey(clusterKey: Uint8Array): Promise<Response> {
-	const key = await webhookSigningKey(clusterKey);
-
+function publishedWebhookKey(key: SigningKey): Response {
 	return json({ algorithm: "ed25519", public_key: key.publicKeyHex });
+}
+
+function unconfirmedWebhook(url: string): Response {
+	return problem(424, {
+		type: WEBHOOK_UNCONFIRMED,
+		title: "The webhook did not answer the challenge",
+		detail: `${url} has to answer the challenge with the nonce it was given, signed with the secret registered alongside it, before this gateway will send anything to it`,
+	});
 }
 
 function unhandled(error: unknown): Response {

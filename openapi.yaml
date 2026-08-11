@@ -46,7 +46,9 @@ tags:
   - name: docs
     description: This specification, and a page that renders it.
   - name: webhooks
-    description: What the gateway POSTs once a payment settles, and the key that proves it sent it.
+    description: |
+      What the gateway POSTs once a payment settles, the challenge it sends before it will
+      watch anything, and the key that proves both came from it.
 
 paths:
   /health:
@@ -116,6 +118,11 @@ paths:
                   max_pending:
                     type: integer
                     description: Where `MAX_PENDING` stops taking new ones.
+                  parked_deliveries:
+                    type: integer
+                    description: |
+                      Webhooks this instance gave up on, each one a settlement whose receiver
+                      was never told. Anything above zero wants a person, not a restart.
                   watching:
                     type: string
                     enum: [scheduled, stalled]
@@ -323,6 +330,8 @@ paths:
           $ref: "#/components/responses/body_too_large"
         "422":
           $ref: "#/components/responses/unprovable"
+        "424":
+          $ref: "#/components/responses/webhook_unconfirmed"
         "502":
           $ref: "#/components/responses/upstream_unreachable"
         "503":
@@ -438,6 +447,8 @@ paths:
           $ref: "#/components/responses/watch_taken"
         "413":
           $ref: "#/components/responses/body_too_large"
+        "424":
+          $ref: "#/components/responses/webhook_unconfirmed"
         "503":
           $ref: "#/components/responses/at_capacity"
 
@@ -606,11 +617,13 @@ webhooks:
         The body is the same `incoming_payment` you would read back by id, so the preimage
         arrives with it and nothing has to be fetched to act on this.
 
-        Delivery is at-least-once and any 2xx retires it. Anything else is retried six times
-        on a widening delay, `WEBHOOK_BACKOFF_SECS` seconds further apart each attempt, and
-        then dropped. A payment settled on one instance is delivered by whichever instance in
-        the cluster gets there first, so a duplicate is normal and the receiver must be
-        idempotent.
+        Delivery is at-least-once and any 2xx retires it. Anything else is retried on a
+        widening delay, `WEBHOOK_BACKOFF_SECS` seconds further apart each attempt, for as long
+        as the payment itself has left to run and never for less than an hour. Only then is it
+        abandoned, which the gateway logs at error level and counts on `/ready`, because a
+        settlement nobody was told about is not a thing to find out by reading a database. A
+        payment settled on one instance is delivered by whichever instance in the cluster gets
+        there first, so a duplicate is normal and the receiver must be idempotent.
 
         Verify before you act. The SDK's `parseWebhookRequest` does both halves in one call,
         and refuses a body whose signature or timestamp does not hold up. Hand it your secret
@@ -648,6 +661,68 @@ webhooks:
       responses:
         "200":
           description: Taken. Any 2xx stops the retries.
+
+  webhook_challenge:
+    post:
+      tags: [webhooks]
+      operationId: webhookChallenge
+      summary: What the gateway POSTs to your webhook URL before it will watch anything
+      description: |
+        Sent once, while the create or watch request that registered the webhook is still
+        open, and the payment is refused with `webhook-unconfirmed` unless this is answered.
+        The gateway will not send an unsolicited request to an address a caller merely named,
+        so a URL that never answers a challenge never hears from it again either.
+
+        Answer 200 with `{"nonce": "<the nonce you were sent>"}`, and add
+        `"signature": "sha256=<hmac>"` over that nonce alone, keyed with the `webhook.secret`
+        you registered, when you registered one. Echoing proves you hold the URL, signing
+        proves you are the party whose secret it is. The SDK's
+        `answerWebhookChallengeRequest` does both and hands back the response to return,
+        or null when the delivery was not a challenge.
+
+        The challenge is signed the way every delivery is, so verify it before answering.
+        The nonce is single use and is not stored, so nothing here is worth replaying.
+      parameters:
+        - name: x-timestamp
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: x-signature
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: "^(sha256=[0-9a-f]{64}|ed25519=[0-9a-f]{128})$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [webhook-challenge]
+                nonce:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+              required: [type, nonce]
+      responses:
+        "200":
+          description: The nonce, echoed, and signed when a secret was registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nonce:
+                    type: string
+                    pattern: "^[0-9a-f]{64}$"
+                  signature:
+                    type: string
+                    pattern: "^sha256=[0-9a-f]{64}$"
+                required: [nonce]
 
 components:
   parameters:
@@ -754,6 +829,10 @@ components:
         Where to POST the payment once it is paid. Nothing is sent for an invoice that
         expires, and delivery is at-least-once, so the receiver must tolerate duplicates.
         The shape is under `webhooks` in this document.
+
+        This URL is challenged before the payment is taken on, so it has to be serving
+        already and the request answers `webhook-unconfirmed` if it is not. That is what
+        keeps a caller from pointing this gateway at somebody else's server.
       properties:
         url:
           type: string
@@ -1081,6 +1160,23 @@ components:
                     enum:
                       - "urn:problem-type:thunder-bridge:request-in-flight"
                       - "urn:problem-type:thunder-bridge:idempotency-key-reused"
+
+    webhook_unconfirmed:
+      description: |
+        The `webhook.url` did not answer the challenge, so nothing was watched. Either it is
+        not serving yet, it answered without the nonce it was given, or it signed with
+        something other than the `webhook.secret` registered alongside it. Stand the endpoint
+        up and register again: the gateway will not take on a payment whose settlement it
+        already knows it cannot report.
+      content:
+        application/problem+json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/problem"
+              - type: object
+                properties:
+                  type:
+                    const: "urn:problem-type:thunder-bridge:webhook-unconfirmed"
 
     watch_taken:
       description: |

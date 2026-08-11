@@ -5,6 +5,7 @@ import {
 	type Claim,
 	type Facts,
 	type Ledger,
+	type Retry,
 	type Source,
 	type Watermarks,
 } from "./ledger.ts";
@@ -15,6 +16,7 @@ export type Info = {
 	peers: number;
 	pending: number;
 	maxPending: number;
+	parked: number;
 	convergedAt: number | null;
 	origins: number;
 	marks: Record<Source, number>;
@@ -64,6 +66,7 @@ export class Store {
 			peers: this.gossip.peers.size,
 			pending: this.ledger.count(),
 			maxPending: this.maxPending,
+			parked: this.ledger.parkedDeliveries(),
 			convergedAt: this.convergedAt,
 			origins: origins.size,
 			marks: sequenceTotals(marks),
@@ -137,8 +140,8 @@ export class Store {
 		announce(this.gossip, { facts: this.ledger.delivered(owed), more: false });
 	}
 
-	undelivered(owed: Delivery): void {
-		this.ledger.undelivered(owed);
+	undelivered(owed: Delivery): Retry {
+		return this.ledger.undelivered(owed);
 	}
 
 	claim(key: string, fingerprint: string, leaseSecs: number): Claim {

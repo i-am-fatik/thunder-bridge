@@ -1,15 +1,20 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { bytesToHex } from "../core/bytes.ts";
 import type { SigningKey } from "../core/ed25519.ts";
+import { equalInConstantTime } from "../core/hmac.ts";
 import { checkSettled } from "../core/lnurl.ts";
 import { ask } from "../core/outbound.ts";
 import * as log from "./log.ts";
-import type { Delivery, Payment } from "./payment.ts";
+import type { Delivery, Payment, Webhook } from "./payment.ts";
 import type { Store } from "./store.ts";
 
 const EAGER_WINDOW_SECS = 300;
 const STALENESS = 0.1;
 const LEASE_SECS = 30;
+const NONCE_BYTES = 32;
+
+export const CHALLENGE = "webhook-challenge";
 
 export const WATCH_HORIZON_SECS = 259_200;
 
@@ -68,7 +73,9 @@ async function deliverDue(watcher: Watcher): Promise<void> {
 
 async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {
 	if (!(await notify(owed, watcher.webhookKey))) {
-		watcher.store.undelivered(owed);
+		if (watcher.store.undelivered(owed) === "abandoned") {
+			log.error(`webhook for ${owed.id} abandoned, its payment ran out of time to retry in`);
+		}
 		return;
 	}
 
@@ -77,24 +84,80 @@ async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {
 }
 
 async function notify(owed: Delivery, gatewayKey: SigningKey): Promise<boolean> {
-	const stamped = String(unixNow());
-	const signed = `${stamped}.${owed.body}`;
-	const headers: Record<string, string> = {
-		"content-type": "application/json",
-		"x-timestamp": stamped,
-		"x-signature": owed.secret
-			? `sha256=${await sign(owed.secret, signed)}`
-			: `ed25519=${await gatewayKey.sign(new TextEncoder().encode(signed))}`,
-	};
-
 	try {
-		const answer = await ask(owed.url, { method: "POST", headers, body: owed.body });
+		const answer = await ask(owed.url, {
+			method: "POST",
+			headers: await signedHeaders(owed.body, owed.secret, gatewayKey),
+			body: owed.body,
+		});
 		if (!answer.ok) log.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
 		return answer.ok;
 	} catch (error: unknown) {
 		log.warn(`webhook for ${owed.id} failed: ${String(error)}`);
 		return false;
 	}
+}
+
+export async function confirmWebhook(hook: Webhook, gatewayKey: SigningKey): Promise<boolean> {
+	const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
+	const body = JSON.stringify({ type: CHALLENGE, nonce });
+
+	try {
+		const answer = await ask(hook.url, {
+			method: "POST",
+			headers: await signedHeaders(body, hook.secret, gatewayKey),
+			body,
+		});
+		if (!answer.ok) {
+			log.warn(`webhook ${hook.url} answered the challenge with ${answer.status}`);
+			return false;
+		}
+
+		return await proves(answer.body, nonce, hook.secret);
+	} catch (error: unknown) {
+		log.warn(`webhook ${hook.url} could not be challenged: ${String(error)}`);
+		return false;
+	}
+}
+
+async function proves(body: string, nonce: string, secret: string | null): Promise<boolean> {
+	const answered = asJson(body);
+	if (answered["nonce"] !== nonce) {
+		log.warn("a webhook answered a challenge without the nonce it was given");
+		return false;
+	}
+	if (!secret) return true;
+
+	const expected = `sha256=${await sign(secret, nonce)}`;
+	const signed = equalInConstantTime(String(answered["signature"] ?? ""), expected);
+	if (!signed) log.warn("a webhook answered a challenge the registered secret does not sign");
+
+	return signed;
+}
+
+function asJson(body: string): Record<string, unknown> {
+	try {
+		return JSON.parse(body) as Record<string, unknown>;
+	} catch {
+		return {};
+	}
+}
+
+async function signedHeaders(
+	body: string,
+	secret: string | null,
+	gatewayKey: SigningKey,
+): Promise<Record<string, string>> {
+	const stamped = String(unixNow());
+	const signed = `${stamped}.${body}`;
+
+	return {
+		"content-type": "application/json",
+		"x-timestamp": stamped,
+		"x-signature": secret
+			? `sha256=${await sign(secret, signed)}`
+			: `ed25519=${await gatewayKey.sign(new TextEncoder().encode(signed))}`,
+	};
 }
 
 export function nextDue(payment: Payment, eagerMs: number): number | null {

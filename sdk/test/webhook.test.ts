@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { signingKeyFromSeed } from "../../core/ed25519.js";
 import type { Payment } from "../src/types";
 import {
+  answerWebhookChallenge,
+  answerWebhookChallengeRequest,
   parseWatchedWebhook,
   parseWatchedWebhookRequest,
   parseWebhook,
@@ -350,5 +352,81 @@ describe("a delivery the gateway signed with its own key", () => {
     await expect(
       verifyWebhookSignature(BODY, await signedByGateway(BODY, stamp), SECRET, stamp),
     ).resolves.toBe(false);
+  });
+});
+
+describe("answerWebhookChallenge", () => {
+  const NONCE = "a".repeat(64);
+  const CHALLENGE_BODY = JSON.stringify({ type: "webhook-challenge", nonce: NONCE });
+
+  it("echoes the nonce and signs it with the registered secret", async () => {
+    const stamp = now();
+    const answer = await answerWebhookChallenge(
+      CHALLENGE_BODY,
+      header(CHALLENGE_BODY, SECRET, stamp),
+      SECRET,
+      stamp,
+    );
+
+    expect(JSON.parse(String(answer))).toEqual({
+      nonce: NONCE,
+      signature: `sha256=${createHmac("sha256", SECRET).update(NONCE, "utf8").digest("hex")}`,
+    });
+  });
+
+  it("echoes the nonce alone when the gateway holds no secret of yours", async () => {
+    const stamp = now();
+    const key = await signingKeyFromSeed(new Uint8Array(32).fill(9));
+    const signed = `ed25519=${await key.sign(new TextEncoder().encode(`${stamp}.${CHALLENGE_BODY}`))}`;
+
+    const answer = await answerWebhookChallenge(
+      CHALLENGE_BODY,
+      signed,
+      {
+        publicKey: key.publicKeyHex,
+      },
+      stamp,
+    );
+
+    expect(JSON.parse(String(answer))).toEqual({ nonce: NONCE });
+  });
+
+  it("answers nothing to a challenge the secret does not sign", async () => {
+    const stamp = now();
+
+    await expect(
+      answerWebhookChallenge(
+        CHALLENGE_BODY,
+        header(CHALLENGE_BODY, OTHER_SECRET, stamp),
+        SECRET,
+        stamp,
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it("leaves a real settlement to the parsers, and hands the body on unread", async () => {
+    const stamp = now();
+    const request = new Request("https://shop.example/hooks/paid", {
+      method: "POST",
+      headers: { "x-signature": header(BODY, SECRET, stamp), "x-timestamp": stamp },
+      body: BODY,
+    });
+
+    expect(await answerWebhookChallengeRequest(request, SECRET)).toBeNull();
+    expect((await parseWebhookRequest(request, SECRET))?.id).toBe(PAYMENT.id);
+  });
+
+  it("answers a challenge that arrives as a Request with a JSON body", async () => {
+    const stamp = now();
+    const request = new Request("https://shop.example/hooks/paid", {
+      method: "POST",
+      headers: { "x-signature": header(CHALLENGE_BODY, SECRET, stamp), "x-timestamp": stamp },
+      body: CHALLENGE_BODY,
+    });
+
+    const answer = await answerWebhookChallengeRequest(request, SECRET);
+
+    expect(answer?.headers.get("content-type")).toBe("application/json");
+    expect(((await answer?.json()) as { nonce: string }).nonce).toBe(NONCE);
   });
 });

@@ -105,7 +105,7 @@ const SCHEMA = `
 
 const SCHEMA_VERSION = 2;
 
-const DELIVERY_ATTEMPTS = 6;
+const RETRY_FLOOR_SECS = 3600;
 const TAKEOVER_SPREAD = 8;
 const REQUEST_TTL_SECS = 86_400;
 const GAP_BATCH = 500;
@@ -166,6 +166,8 @@ export type Watermarks = Record<Source, Record<string, number>>;
 
 export type Tuning = { takeoverAfterSecs: number; deliveryBackoffSecs: number };
 
+export type Retry = "scheduled" | "abandoned";
+
 const COLUMNS: Record<Source, string> = {
 	accepted: "origin, seq, id, payment, acceptedAt, expiresAt, mac",
 	paid: "origin, seq, id, payment, settledAt, mac",
@@ -180,6 +182,8 @@ type AcceptedRow = Row & { id: string };
 type Missing = { id: string; url: string; secret: string | null };
 
 type Held = { fingerprint: string; paymentId: string | null; leaseUntil: number };
+
+type Attempted = { attempts: number; owedAt: number };
 
 type Statements = {
 	read: StatementSync;
@@ -205,7 +209,10 @@ type Statements = {
 	insertOutbox: StatementSync;
 	insertDelivered: StatementSync;
 	dueDeliveries: StatementSync;
+	attempted: StatementSync;
 	undelivered: StatementSync;
+	parkedDeliveries: StatementSync;
+	deliveryDeadline: StatementSync;
 	pruneOutbox: StatementSync;
 	prunePaid: StatementSync;
 	pruneDelivered: StatementSync;
@@ -312,10 +319,23 @@ export class Ledger {
 					ORDER BY dueAt LIMIT ?
 				) RETURNING origin, seq, id, url, secret, body`,
 			),
-			undelivered: this.db.prepare(
-				"UPDATE outbox SET attempts = attempts + 1, dueAt = CASE WHEN attempts + 1 >= ? THEN NULL ELSE ? + ? * (attempts + 1) END WHERE origin = ? AND seq = ?",
+			attempted: this.db.prepare(
+				"SELECT attempts, owedAt FROM outbox WHERE origin = ? AND seq = ?",
 			),
-			pruneOutbox: this.db.prepare("DELETE FROM outbox WHERE owedAt <= ?"),
+			undelivered: this.db.prepare(
+				"UPDATE outbox SET attempts = ?, dueAt = ? WHERE origin = ? AND seq = ?",
+			),
+			parkedDeliveries: this.db.prepare(
+				`SELECT COUNT(*) AS n FROM outbox WHERE dueAt IS NULL
+					AND NOT EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url)`,
+			),
+			deliveryDeadline: this.db.prepare(
+				"SELECT MAX(expiresAt) AS deadline FROM accepted WHERE id = ?",
+			),
+			pruneOutbox: this.db.prepare(
+				`DELETE FROM outbox WHERE owedAt <= ? AND (dueAt IS NULL
+					OR EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url))`,
+			),
 			prunePaid: this.db.prepare("DELETE FROM paid WHERE settledAt <= ?"),
 			pruneDelivered: this.db.prepare("DELETE FROM delivered WHERE deliveredAt <= ?"),
 			heldRequest: this.db.prepare(
@@ -537,14 +557,26 @@ export class Ledger {
 		});
 	}
 
-	undelivered(owed: Delivery): void {
-		this.statements.undelivered.run(
-			DELIVERY_ATTEMPTS,
-			unixNow(),
-			this.tuning.deliveryBackoffSecs,
-			owed.origin,
-			owed.seq,
-		);
+	undelivered(owed: Delivery): Retry {
+		const tried = this.statements.attempted.get(owed.origin, owed.seq) as Attempted | undefined;
+		if (!tried) return "abandoned";
+
+		const attempts = tried.attempts + 1;
+		const nextAt = unixNow() + this.tuning.deliveryBackoffSecs * attempts;
+		const abandoned = nextAt > this.retryUntil(owed.id, tried.owedAt);
+		this.statements.undelivered.run(attempts, abandoned ? null : nextAt, owed.origin, owed.seq);
+
+		return abandoned ? "abandoned" : "scheduled";
+	}
+
+	parkedDeliveries(): number {
+		return (this.statements.parkedDeliveries.get() as { n: number }).n;
+	}
+
+	private retryUntil(id: string, owedAt: number): number {
+		const found = this.statements.deliveryDeadline.get(id) as { deadline: number | null };
+
+		return Math.max(owedAt + RETRY_FLOOR_SECS, found.deadline ?? 0);
 	}
 
 	claimKey(key: string, fingerprint: string, leaseSecs: number): Claim {

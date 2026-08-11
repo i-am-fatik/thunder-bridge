@@ -1,4 +1,5 @@
 import {
+  answerWebhookChallengeRequest,
   type CreatePaymentParams,
   parseWebhookRequest,
   proveSettlement,
@@ -34,8 +35,14 @@ if (LN_ADDRESSES.length === 0) {
 if (!Deno.env.get("WATCH_SECRET")) {
   console.log(`WATCH_SECRET=${WATCH_SECRET} generated, set it to keep it across restarts`);
 }
+if (!PUBLIC_URL) {
+  console.log("PUBLIC_URL is unset, so no webhook is registered and nothing will unlock content");
+}
 
 const askedFor: CreatePaymentParams = { lnAddresses: LN_ADDRESSES, amountMsat: PRICE_MSAT };
+const tellsUs: Partial<CreatePaymentParams> = PUBLIC_URL
+  ? { webhookUrl: `${PUBLIC_URL}/hooks/paid`, webhookSecret: WEBHOOK_SECRET }
+  : {};
 const gateway = new ThunderBridge(GATEWAY_URL);
 const kv = await Deno.openKv();
 
@@ -49,11 +56,9 @@ const serveAddress = lnurlPayEndpoint({
 });
 
 async function sellOne(origin: string): Promise<Response> {
-  const payment = await gateway.createPayment({
-    ...askedFor,
-    webhookUrl: `${origin}/hooks/paid`,
-    webhookSecret: WEBHOOK_SECRET,
-  }, { trigger: WATCH_SECRET });
+  const payment = await gateway.createPayment({ ...askedFor, ...tellsUs }, {
+    trigger: WATCH_SECRET,
+  });
 
   return Response.json({
     id: payment.id,
@@ -64,6 +69,9 @@ async function sellOne(origin: string): Promise<Response> {
 }
 
 async function unlockOnSettlement(request: Request): Promise<Response> {
+  const challenge = await answerWebhookChallengeRequest(request, WEBHOOK_SECRET);
+  if (challenge) return challenge;
+
   const payment = await parseWebhookRequest(request, WEBHOOK_SECRET);
   if (!payment) return new Response("bad signature", { status: 401 });
 

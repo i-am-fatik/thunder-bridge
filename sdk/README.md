@@ -167,7 +167,8 @@ const tipJar = lnurlToSvg("https://agora.gripe/tip");
 
 **Webhooks** - [`src/webhook.ts`](src/webhook.ts): `parseWebhookRequest`,
 `parseWebhook`, `parseWatchedWebhookRequest`, `parseWatchedWebhook`,
-`verifyWebhookSignature`. See [Webhooks](#webhooks).
+`verifyWebhookSignature`, `answerWebhookChallengeRequest`,
+`answerWebhookChallenge`. See [Webhooks](#webhooks).
 
 **Errors** - [`src/errors.ts`](src/errors.ts): `ProblemError`,
 `NoWalletAvailableError`, `GatewayCheatError`, `UnverifiedRecipientError`,
@@ -343,15 +344,30 @@ so the body is a `Payment`. Every delivery carries `x-timestamp` and an
 `x-signature` over `<timestamp>.<body>` rather than the body alone, so a captured
 delivery cannot be replayed at you later. With a secret set it is
 `sha256=<hmac>` keyed with that secret, and without one it is `ed25519=<signature>`
-from the gateway's own key, which is the better default and is below. Six attempts on
-a widening backoff, then it parks. An invoice that expires fires nothing.
+from the gateway's own key, which is the better default and is below. Retries widen
+until the payment itself runs out, never sooner than an hour. An invoice that expires
+fires nothing.
 
 Delivery is at-least-once, so deduplicate on `id`.
 
+Your handler answers one challenge before any of that. The gateway POSTs
+`{"type":"webhook-challenge","nonce":"..."}` to the URL while the create is still open
+and refuses the payment with a 424 unless the nonce comes back, so the endpoint has to
+be deployed before you register it. `answerWebhookChallengeRequest` verifies that
+challenge and hands you the response to return, or `null` when the delivery was a real
+settlement, and it leaves the body unread either way.
+
 ```ts
-import { parseWebhookRequest, proveSettlement } from "thunder-bridge";
+import {
+  answerWebhookChallengeRequest,
+  parseWebhookRequest,
+  proveSettlement,
+} from "thunder-bridge";
 
 app.post("/hooks/paid", async (context) => {
+  const challenge = await answerWebhookChallengeRequest(context.req.raw, secret);
+  if (challenge) return challenge;
+
   const payment = await parseWebhookRequest(context.req.raw, secret);
   if (payment === null) return context.text("bad signature", 401);
 
@@ -400,11 +416,17 @@ and pass it as `{ publicKey }` wherever a secret would go.
 const publicKey = await gateway.webhookKey();
 
 app.post("/hooks/paid", async (context) => {
+  const challenge = await answerWebhookChallengeRequest(context.req.raw, { publicKey });
+  if (challenge) return challenge;
+
   const payment = await parseWebhookRequest(context.req.raw, { publicKey });
   if (payment === null) return context.text("bad signature", 401);
   ...
 });
 ```
+
+Answering echoes the nonce and nothing else here, because there is no secret to sign it
+with. Holding the URL the gateway challenged is the whole proof in that case.
 
 The key is derived from the gateway's `CLUSTER_KEY`, so every instance in one cluster
 signs alike and an operator rotating that key changes this one too. Neither

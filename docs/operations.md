@@ -136,6 +136,23 @@ it used to have, a name lookup, is bounded now.
 every webhook delivered. That is a client's order flow sitting in your log
 aggregator. `warn` keeps the failures and drops the flow.
 
+## A settlement nobody was told about
+
+`parked_deliveries` on `/ready` counts webhooks this instance gave up on, and every one
+of them is a payment that settled while its receiver heard nothing. Above zero it wants
+a person. The gateway also says so once per delivery at error level, `webhook for <id>
+abandoned`, which is the line worth alerting on because every earlier attempt is only a
+warning.
+
+Giving up takes a while on purpose. A rejected delivery is retried `WEBHOOK_BACKOFF_SECS`
+further off each time, for as long as the payment itself had left to run and never for
+less than an hour, so a receiver down for an afternoon still gets told. What parks is a
+receiver that was down longer than the payment lasted.
+
+There is no redelivery command. The payment is readable by id and on the trigger socket,
+so the answer is for the client to reconcile against `GET /incoming-payments/{id}`, which
+is what a client should be able to do anyway.
+
 ## A client who would rather not hand you a webhook secret
 
 They register the webhook with no `secret`, and the gateway signs the delivery
@@ -148,6 +165,10 @@ Prefer it, and say so when someone asks. A secret they give you is kept in the
 ledger and replicated to every peer, because any instance may be the one that
 delivers, so it is one more thing of theirs you are holding. Rotating `CLUSTER_KEY`
 changes this key too, so a receiver caching it has to fetch it again.
+
+Either way their endpoint answers the challenge before the payment is taken on, so a
+client who registers a webhook against a server that is not up yet gets a 424 and no
+payment. Tell them to deploy the handler first and register second.
 
 ## The instance is under abuse
 

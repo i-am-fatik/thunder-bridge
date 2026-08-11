@@ -12,6 +12,7 @@ export const NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge:no-wallet-av
 export const REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge:request-in-flight";
 export const KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reused";
 export const ALREADY_WATCHED = "urn:problem-type:thunder-bridge:payment-already-watched";
+export const WEBHOOK_UNCONFIRMED = "urn:problem-type:thunder-bridge:webhook-unconfirmed";
 
 const STATUS: Record<WalletReason, number> = {
 	"address-unusable": 400,

@@ -6,6 +6,7 @@ import { expect, test } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
 import { openStore } from "./testing.ts";
+import { unixNow } from "./watch.ts";
 
 const HOOK = "https://example.com/hook";
 
@@ -188,19 +189,35 @@ test("a delivered webhook is gone for good and a rejected one waits", () => {
 	}
 });
 
-test("a webhook the merchant keeps rejecting is given up on and parked", () => {
-	const { store, stop } = openStore({ deliveryBackoffSecs: 0 });
+test("a webhook the merchant keeps rejecting is retried for as long as the payment lasts", () => {
+	const { store, stop } = openStore({ deliveryBackoffSecs: 600 });
 	try {
 		const one = store.insert(payment(4));
 		store.paid(one.id, preimage(4));
 
-		for (let attempt = 0; attempt < 6; attempt += 1) {
-			const owed = store.dueDeliveries(10, 0);
-			expect(owed).toHaveLength(1);
-			store.undelivered(owed[0]!);
+		const owed = store.dueDeliveries(10, 0);
+		expect(owed).toHaveLength(1);
+		for (let attempt = 0; attempt < 10; attempt += 1) {
+			expect(store.undelivered(owed[0]!)).toBe("scheduled");
 		}
 
+		expect(store.info().parked).toBe(0);
+	} finally {
+		stop();
+	}
+});
+
+test("a delivery is abandoned once its payment has no time left to retry in", () => {
+	const { store, stop } = openStore({ deliveryBackoffSecs: 7200 });
+	try {
+		const expiring = store.insert({ ...payment(5), expiresAt: unixNow() + 5 });
+		store.paid(expiring.id, preimage(5));
+
+		const owed = store.dueDeliveries(10, 0);
+		expect(store.undelivered(owed[0]!)).toBe("abandoned");
+
 		expect(store.dueDeliveries(10, 0)).toEqual([]);
+		expect(store.info().parked).toBe(1);
 	} finally {
 		stop();
 	}
