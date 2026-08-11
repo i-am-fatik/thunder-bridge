@@ -1,6 +1,9 @@
 /** Where a payment stands, `paid` is the only status that carries a preimage */
 export type PaymentStatus = "pending" | "paid" | "expired";
 
+/** Whether the gateway resolved the address and got the invoice, or was handed one to watch */
+export type PaymentKind = "minted" | "watched";
+
 /** A payment as the gateway reports it, every field is checkable against the recipient */
 export interface Payment {
   id: string;
@@ -58,6 +61,7 @@ export interface Quote {
  */
 export interface TriggerEvent {
   id: string;
+  kind: PaymentKind;
   paymentHash: string;
   verifyUrl: string;
   status: PaymentStatus;

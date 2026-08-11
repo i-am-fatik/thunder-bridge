@@ -58,6 +58,16 @@ test("every field leaves as snake_case, and the amount as a string with its scal
 	expect(wire.created_at).toBe("2023-11-14T22:13:20.000Z");
 });
 
+test("a reader is told which of the two shapes it holds, rather than guessing from what is missing", () => {
+	expect(paymentToWire(payment()).kind).toBe("minted");
+
+	const watched = paymentToWire({ ...payment(), lnAddress: null, amountMsat: null, bolt11: null });
+	expect(watched.kind).toBe("watched");
+	expect(watched.ln_address).toBe(undefined);
+	expect(watched.incoming_amount).toBe(undefined);
+	expect(watched.bolt11).toBe(undefined);
+});
+
 test("an amount is read back to the millisatoshi it came from", () => {
 	expect(readCreateRequest(asked()).amountMsat).toBe(21_000);
 });

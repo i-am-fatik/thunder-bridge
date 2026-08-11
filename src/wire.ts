@@ -16,6 +16,7 @@ export type Amount = { value: string; asset_code: string; asset_scale: number };
 
 export type IncomingPayment = {
 	id: string;
+	kind: "minted" | "watched";
 	ln_address?: string;
 	incoming_amount?: Amount;
 	status: Status;
@@ -66,6 +67,7 @@ export type TicketRequest =
 export function paymentToWire(payment: PublicPayment): IncomingPayment {
 	return {
 		id: payment.id,
+		kind: payment.lnAddress === null ? "watched" : "minted",
 		...(payment.lnAddress === null ? {} : { ln_address: payment.lnAddress }),
 		...(payment.amountMsat === null ? {} : { incoming_amount: toAmount(payment.amountMsat) }),
 		status: payment.status,

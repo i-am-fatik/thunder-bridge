@@ -339,10 +339,12 @@ try {
 
 Pass `webhookUrl` and optionally `webhookSecret` when you create a payment, or on
 any rail. Once it reaches `paid` the gateway POSTs the same JSON the API returns,
-so the body is a `Payment`. Every delivery carries `x-timestamp`, and with a secret set
-`x-signature: sha256=<hmac>` over `<timestamp>.<body>` rather than the body alone,
-so a captured delivery cannot be replayed at you later. Six attempts on a widening
-backoff, then it parks. An invoice that expires fires nothing.
+so the body is a `Payment`. Every delivery carries `x-timestamp` and an
+`x-signature` over `<timestamp>.<body>` rather than the body alone, so a captured
+delivery cannot be replayed at you later. With a secret set it is
+`sha256=<hmac>` keyed with that secret, and without one it is `ed25519=<signature>`
+from the gateway's own key, which is the better default and is below. Six attempts on
+a widening backoff, then it parks. An invoice that expires fires nothing.
 
 Delivery is at-least-once, so deduplicate on `id`.
 
@@ -382,7 +384,32 @@ app.post("/hooks/bank", async (context) => {
 ```
 
 Give each rail its own path, as above, and neither endpoint has to guess which body
-it was handed.
+it was handed. Both events also carry `kind`, `"minted"` or `"watched"`, so a single
+path serving a trigger that both rails settle on can branch on the field instead of
+on which fields are missing.
+
+### Or hand the gateway no secret at all
+
+A secret you give the gateway is kept in its ledger and replicated to its peers,
+because any instance may be the one that delivers. Leave `webhookSecret` out and the
+delivery is signed with the gateway's own key instead, `x-signature:
+ed25519=<signature>` over the same `<timestamp>.<body>`. Fetch the public half once
+and pass it as `{ publicKey }` wherever a secret would go.
+
+```ts
+const publicKey = await gateway.webhookKey();
+
+app.post("/hooks/paid", async (context) => {
+  const payment = await parseWebhookRequest(context.req.raw, { publicKey });
+  if (payment === null) return context.text("bad signature", 401);
+  ...
+});
+```
+
+The key is derived from the gateway's `CLUSTER_KEY`, so every instance in one cluster
+signs alike and an operator rotating that key changes this one too. Neither
+credential is ever accepted for the other's scheme, so a secret cannot check an
+`ed25519=` delivery and a public key cannot check a `sha256=` one.
 
 `parseWebhookRequest` refuses anything more than five minutes out of date,
 adjustable with `toleranceSecs`. The signature proves the body came from someone

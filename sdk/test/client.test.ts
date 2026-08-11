@@ -649,6 +649,26 @@ describe("createQuote", () => {
   });
 });
 
+describe("webhookKey", () => {
+  it("reads the published key, so a receiver can check a hook it gave no secret for", async () => {
+    const key = "ab".repeat(32);
+    stubFetch({
+      [`${GATEWAY}/webhook-key`]: () => jsonResponse({ algorithm: "ed25519", public_key: key }),
+    });
+
+    await expect(new ThunderBridge(GATEWAY).webhookKey()).resolves.toBe(key);
+  });
+
+  it("refuses an answer that names another algorithm, rather than trusting the bytes", async () => {
+    stubFetch({
+      [`${GATEWAY}/webhook-key`]: () =>
+        jsonResponse({ algorithm: "rsa", public_key: "ab".repeat(32) }),
+    });
+
+    await expect(new ThunderBridge(GATEWAY).webhookKey()).rejects.toThrow("no ed25519 webhook key");
+  });
+});
+
 describe("getPayment", () => {
   it("reads the payment back from the payment path with the id escaped", async () => {
     const calls = stubFetch({
@@ -1543,6 +1563,20 @@ describe("watchPayment", () => {
     });
   });
 
+  it("sends a webhook with no secret key at all, since the gateway refuses a null one", async () => {
+    const calls = stubFetch(gatewayWatches());
+
+    await new ThunderBridge(GATEWAY).watchPayment(
+      watchable({ webhookUrl: "https://shop.example.org/hooks/bank" }),
+    );
+
+    const body = JSON.parse(String(calls[0].init?.body)) as {
+      webhook: Record<string, unknown>;
+    };
+    expect(body.webhook).toEqual({ url: "https://shop.example.org/hooks/bank" });
+    expect("secret" in body.webhook).toBe(false);
+  });
+
   it("sends the trigger as a hash, so the watch secret never reaches the gateway", async () => {
     const calls = stubFetch(gatewayWatches());
 
@@ -1576,6 +1610,7 @@ describe("watchPayment", () => {
 
     expect(watched).toEqual({
       id: "watch_0001",
+      kind: "watched",
       paymentHash: WATCH_HASH,
       verifyUrl: WATCH_VERIFY,
       status: "pending",

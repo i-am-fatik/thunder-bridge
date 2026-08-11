@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { expect, test, vi } from "vitest";
 
+import { signingKeyFromSeed, verifyHex } from "../core/ed25519.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
 import { nextDue, pollDelayMs, sign, spend, tick, unixNow, type Watcher } from "./watch.ts";
@@ -11,6 +12,8 @@ vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
 async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
 	return [{ address: "203.0.113.1", family: 4 }];
 }
+
+const GATEWAY_KEY = await signingKeyFromSeed(new Uint8Array(32).fill(3));
 
 const PREIMAGE = "0".repeat(64);
 const PAYMENT_HASH = "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925";
@@ -91,7 +94,7 @@ function queueing(work: Payment[], settle: (id: string, preimage: string) => Set
 		},
 	} as unknown as Store;
 
-	return { parked, handed, watcher: { store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() } } satisfies Watcher };
+	return { parked, handed, watcher: { store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() }, webhookKey: GATEWAY_KEY } satisfies Watcher };
 }
 
 function owing(work: Delivery[]) {
@@ -112,7 +115,7 @@ function owing(work: Delivery[]) {
 	return {
 		done,
 		failed,
-		watcher: { store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() } } satisfies Watcher,
+		watcher: { store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() }, webhookKey: GATEWAY_KEY } satisfies Watcher,
 	};
 }
 
@@ -213,28 +216,46 @@ test("a webhook the merchant rejects goes back on the outbox", async () => {
 	}
 });
 
-test("the webhook posts the stored body and signs it only where a secret was given", async () => {
+test("the webhook posts the stored body, signed with the merchant's secret where there is one", async () => {
 	const wire = intercepting(() => new Response("", { status: 200 }));
-	const { watcher } = owing([
-		owed(),
-		owed({ url: "https://other.example/hook", secret: null }),
-	]);
+	const { watcher } = owing([owed()]);
 
 	try {
 		await tick(watcher);
 
 		const signed = wire.calls.find((call) => call.url === HOOK_URL);
-		const unsigned = wire.calls.find((call) => call.url === "https://other.example/hook");
 
 		expect(signed?.method).toBe("POST");
 		expect(signed?.body).toBe(owed().body);
 		expect(signed?.headers["x-signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
-		expect(unsigned?.headers["x-signature"]).toBeUndefined();
-		expect(unsigned?.headers["x-timestamp"]).toMatch(/^\d{10}$/);
 
 		const stamp = signed?.headers["x-timestamp"] ?? "";
 		expect(`sha256=${await sign("hunter2", `${stamp}.${owed().body}`)}`).toBe(
 			signed?.headers["x-signature"] ?? "",
+		);
+	} finally {
+		wire.restore();
+	}
+});
+
+test("a webhook that handed over no secret is signed with the gateway's own key instead", async () => {
+	const wire = intercepting(() => new Response("", { status: 200 }));
+	const url = "https://other.example/hook";
+	const { watcher } = owing([owed({ url, secret: null })]);
+
+	try {
+		await tick(watcher);
+
+		const sent = wire.calls.find((call) => call.url === url);
+		const signature = sent?.headers["x-signature"] ?? "";
+		const stamp = sent?.headers["x-timestamp"] ?? "";
+
+		expect(signature).toMatch(/^ed25519=[0-9a-f]{128}$/);
+		expect(stamp).toMatch(/^\d{10}$/);
+
+		const payload = new TextEncoder().encode(`${stamp}.${owed().body}`);
+		expect(await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload)).toBe(
+			true,
 		);
 	} finally {
 		wire.restore();
@@ -311,7 +332,7 @@ test("a poll and a webhook owed in the same tick go out together, not one after 
 	} as unknown as Store;
 
 	try {
-		await tick({ store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() } });
+		await tick({ store, eagerDelayMs: 5, budget: { perSecond: 1000, nextAt: new Map() }, webhookKey: GATEWAY_KEY });
 
 		expect(wire.peak()).toBe(2);
 	} finally {

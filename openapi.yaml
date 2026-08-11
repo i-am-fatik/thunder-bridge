@@ -45,6 +45,8 @@ tags:
     description: Whether this instance is alive, and separately whether to send it work.
   - name: docs
     description: This specification, and a page that renders it.
+  - name: webhooks
+    description: What the gateway POSTs once a payment settles, and the key that proves it sent it.
 
 paths:
   /health:
@@ -176,6 +178,36 @@ paths:
             application/yaml:
               schema:
                 type: string
+
+  /webhook-key:
+    get:
+      tags: [webhooks]
+      operationId: getWebhookKey
+      summary: The public key this gateway signs webhooks with when you gave it no secret
+      description: |
+        Served without a bearer, because a receiver has to be able to fetch it before it
+        trusts anything. The key is derived from the instance's `CLUSTER_KEY`, so every
+        instance in one cluster publishes the same one and a delivery from any of them
+        verifies against it. It changes only if that key changes.
+
+        Fetch it once and keep it. A webhook registered with no `secret` arrives as
+        `x-signature: ed25519=<signature>` over `<x-timestamp>.<raw body>`, and this is the
+        key that checks it, so the gateway never holds a secret of yours.
+      responses:
+        "200":
+          description: The public half, hex encoded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  algorithm:
+                    type: string
+                    enum: [ed25519]
+                  public_key:
+                    type: string
+                    pattern: "^[0-9a-f]{64}$"
+                required: [algorithm, public_key]
 
   /docs:
     get:
@@ -354,10 +386,16 @@ paths:
         Hand over an invoice you obtained yourself and the gateway will poll its LUD-21
         `verify_url` until a preimage appears, exactly as it does for one it minted.
 
-        It is told a payment hash, a URL to poll and an expiry, and nothing else. So it cannot
-        tell who the recipient is beyond the domain in that URL, and cannot tell the amount at
-        all. Anything the watcher needs goes in `sealed`, which the gateway stores and hands
-        back untouched without being able to read it.
+        It is told a payment hash, a URL to poll and an expiry. There is no address field and
+        no amount field, so it cannot tell who the recipient is beyond the domain in that URL.
+
+        What it does see is the URL itself, which it stores in its ledger and replicates to its
+        peers, so whatever you put in that path or query the operator can read. The bank rail's
+        own client puts the order reference, the amount in minor units and the currency there,
+        because the endpoint being polled needs them, and on that rail the gateway therefore
+        does learn the amount. Keep out of the URL anything that should stay unseen and put it
+        in `sealed`, which the gateway stores and hands back untouched without being able to
+        read it.
 
         Nothing here is verified on your behalf, because there is nothing to verify against:
         you resolved the address, so the origin proof is yours to have run already.
@@ -575,7 +613,8 @@ webhooks:
         idempotent.
 
         Verify before you act. The SDK's `parseWebhookRequest` does both halves in one call,
-        and refuses a body whose signature or timestamp does not hold up.
+        and refuses a body whose signature or timestamp does not hold up. Hand it your secret
+        or, if you registered without one, the key from `/webhook-key`.
       parameters:
         - name: x-timestamp
           in: header
@@ -588,14 +627,18 @@ webhooks:
             type: string
         - name: x-signature
           in: header
-          required: false
+          required: true
           description: |
-            `sha256=<hmac>` over `<x-timestamp>.<raw body>`, keyed with the `webhook.secret`
-            given at create time. Absent when no secret was given, and then nothing about
-            the body is provable, which is why a secret is the only sane way to run this.
+            The scheme prefix says which key signed, and both cover the same
+            `<x-timestamp>.<raw body>`.
+
+            `sha256=<hmac>` when a `webhook.secret` was given at create time, keyed with that
+            secret. `ed25519=<signature>` when none was, signed with the key this gateway
+            publishes at `/webhook-key`, which is the way to take deliveries without handing
+            the gateway a secret of yours at all. Parse the prefix rather than assuming one.
           schema:
             type: string
-            pattern: "^sha256=[0-9a-f]{64}$"
+            pattern: "^(sha256=[0-9a-f]{64}|ed25519=[0-9a-f]{128})$"
       requestBody:
         required: true
         content:
@@ -721,8 +764,13 @@ components:
           writeOnly: true
           maxLength: 256
           description: |
-            Signs the body as `x-signature: sha256=<hmac>`. Never read back, on any
-            endpoint.
+            Signs the body as `x-signature: sha256=<hmac>`. Never read back, on any endpoint.
+
+            Optional, and leaving it out is the stronger choice. The gateway keeps a secret you
+            give it in its ledger and replicates it to its peers, because any instance may be
+            the one that delivers. Omit it and the body is signed `ed25519=<signature>` with
+            the key at `/webhook-key` instead, which proves the same thing while the gateway
+            holds nothing of yours.
       required: [url]
 
     trigger:
@@ -752,9 +800,10 @@ components:
     incoming_payment:
       type: object
       description: |
-        A payment incoming to the recipient named by `ln_address`. Their wallet issued the
-        invoice, they will hold the funds, and they publish the proof. The gateway's whole
-        role is to have picked the address and to be watching.
+        A payment the gateway is watching. A `minted` one names the recipient in
+        `ln_address`, whose wallet issued the invoice and will hold the funds, and carries the
+        `incoming_amount` that was asked for. A `watched` one carries neither, because the
+        gateway was never told them. Branch on `kind`, never on which fields are absent.
 
         There is no `received_amount`. One invoice settles against one preimage, so the
         received amount is always either zero or `incoming_amount`, and `status` already
@@ -767,6 +816,14 @@ components:
             A keyed hash of `payment_hash`, so posting the same invoice again returns the
             same payment from any instance. It cannot be derived from the invoice alone, and
             holding it is the read capability for this payment.
+        kind:
+          type: string
+          enum: [minted, watched]
+          description: |
+            `minted` if this gateway resolved an address and got the invoice itself, so
+            `ln_address`, `incoming_amount` and `bolt11` are present. `watched` if an invoice
+            was handed to it through `/watched-payments`, so all three are absent. The same
+            object shape is used for both, and this is the only field that tells them apart.
         ln_address:
           $ref: "#/components/schemas/ln_address"
         incoming_amount:
@@ -804,6 +861,7 @@ components:
           $ref: "#/components/schemas/sealed"
       required:
         - id
+        - kind
         - status
         - payment_hash
         - verify_url

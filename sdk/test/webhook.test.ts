@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { signingKeyFromSeed } from "../../core/ed25519.js";
 import type { Payment } from "../src/types";
 import {
   parseWatchedWebhook,
@@ -239,6 +240,22 @@ describe("a bank transfer's webhook, which names no address, amount or invoice",
     ).resolves.toBeNull();
   });
 
+  it("says which shape it is, whether the gateway sent a kind or is old enough not to", async () => {
+    const stamped = now();
+    const said = JSON.stringify({ ...JSON.parse(WATCHED), kind: "watched" });
+
+    const inferred = await parseWatchedWebhook(
+      WATCHED,
+      header(WATCHED, SECRET, stamped),
+      SECRET,
+      stamped,
+    );
+    const told = await parseWatchedWebhook(said, header(said, SECRET, stamped), SECRET, stamped);
+
+    expect(inferred?.kind).toBe("watched");
+    expect(told?.kind).toBe("watched");
+  });
+
   it("reads the same body off a Request", async () => {
     const stamped = now();
     const request = new Request("https://shop.example.org/hooks/bank", {
@@ -265,5 +282,73 @@ describe("a correctly signed body that is not a payment", () => {
     await expect(
       parseWebhook(body, header(body, SECRET, stamp), SECRET, stamp),
     ).resolves.toBeNull();
+  });
+});
+
+describe("a delivery the gateway signed with its own key", () => {
+  const KEY = signingKeyFromSeed(new Uint8Array(32).fill(9));
+
+  async function signedByGateway(body: string, timestamp: string): Promise<string> {
+    const key = await KEY;
+    return `ed25519=${await key.sign(new TextEncoder().encode(`${timestamp}.${body}`))}`;
+  }
+
+  async function published(): Promise<{ publicKey: string }> {
+    return { publicKey: (await KEY).publicKeyHex };
+  }
+
+  it("verifies against the key the gateway publishes, with no secret anywhere", async () => {
+    const stamp = now();
+
+    await expect(
+      verifyWebhookSignature(BODY, await signedByGateway(BODY, stamp), await published(), stamp),
+    ).resolves.toBe(true);
+  });
+
+  it("parses into a payment the same way a shared secret does", async () => {
+    const stamp = now();
+
+    await expect(
+      parseWebhook(BODY, await signedByGateway(BODY, stamp), await published(), stamp),
+    ).resolves.toMatchObject({ id: PAYMENT.id, preimage: PAYMENT.preimage });
+  });
+
+  it("refuses a body changed after it was signed", async () => {
+    const stamp = now();
+    const signature = await signedByGateway(BODY, stamp);
+    const tampered = BODY.replace(String(PAYMENT.preimage), "ff".repeat(32));
+
+    await expect(
+      verifyWebhookSignature(tampered, signature, await published(), stamp),
+    ).resolves.toBe(false);
+  });
+
+  it("refuses a signature made with another gateway's key", async () => {
+    const stamp = now();
+    const other = await signingKeyFromSeed(new Uint8Array(32).fill(1));
+    const theirs = `ed25519=${await other.sign(new TextEncoder().encode(`${stamp}.${BODY}`))}`;
+
+    await expect(verifyWebhookSignature(BODY, theirs, await published(), stamp)).resolves.toBe(
+      false,
+    );
+  });
+
+  it("refuses a stale delivery, because the timestamp is inside what was signed", async () => {
+    const old = String(Math.floor(Date.now() / 1000) - 3600);
+
+    await expect(
+      verifyWebhookSignature(BODY, await signedByGateway(BODY, old), await published(), old),
+    ).resolves.toBe(false);
+  });
+
+  it("never lets one scheme be checked with the other's credential", async () => {
+    const stamp = now();
+
+    await expect(
+      verifyWebhookSignature(BODY, header(BODY, SECRET, stamp), await published(), stamp),
+    ).resolves.toBe(false);
+    await expect(
+      verifyWebhookSignature(BODY, await signedByGateway(BODY, stamp), SECRET, stamp),
+    ).resolves.toBe(false);
   });
 });

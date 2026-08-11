@@ -43,7 +43,7 @@ export {
   parseWebhookRequest,
   verifyWebhookSignature,
 } from "./webhook.js";
-export type { WebhookOptions } from "./webhook.js";
+export type { WebhookCredential, WebhookOptions } from "./webhook.js";
 export {
   GatewayCheatError,
   IdempotencyConflictError,
@@ -63,6 +63,7 @@ export type {
   CreatePaymentParams,
   CreateQuoteParams,
   Payment,
+  PaymentKind,
   PaymentStatus,
   Quote,
   TriggerEvent,

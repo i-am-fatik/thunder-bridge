@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
+import type { SigningKey } from "../core/ed25519.ts";
 import { checkSettled } from "../core/lnurl.ts";
 import { ask } from "../core/outbound.ts";
 import * as log from "./log.ts";
@@ -18,6 +19,7 @@ export type Watcher = {
 	store: Store;
 	eagerDelayMs: number;
 	budget: Budget;
+	webhookKey: SigningKey;
 };
 
 export async function tick(watcher: Watcher): Promise<void> {
@@ -65,7 +67,7 @@ async function deliverDue(watcher: Watcher): Promise<void> {
 }
 
 async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {
-	if (!(await notify(owed))) {
+	if (!(await notify(owed, watcher.webhookKey))) {
 		watcher.store.undelivered(owed);
 		return;
 	}
@@ -74,15 +76,16 @@ async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {
 	watcher.store.delivered(owed);
 }
 
-async function notify(owed: Delivery): Promise<boolean> {
+async function notify(owed: Delivery, gatewayKey: SigningKey): Promise<boolean> {
 	const stamped = String(unixNow());
+	const signed = `${stamped}.${owed.body}`;
 	const headers: Record<string, string> = {
 		"content-type": "application/json",
 		"x-timestamp": stamped,
+		"x-signature": owed.secret
+			? `sha256=${await sign(owed.secret, signed)}`
+			: `ed25519=${await gatewayKey.sign(new TextEncoder().encode(signed))}`,
 	};
-	if (owed.secret) {
-		headers["x-signature"] = `sha256=${await sign(owed.secret, `${stamped}.${owed.body}`)}`;
-	}
 
 	try {
 		const answer = await ask(owed.url, { method: "POST", headers, body: owed.body });

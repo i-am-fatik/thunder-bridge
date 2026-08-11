@@ -222,6 +222,29 @@ export class ThunderBridge {
   }
 
   /** Read a payment back, null when the gateway has never heard of it */
+  /**
+   * The key this gateway signs webhooks with when you registered none of your own,
+   * ready to hand to `parseWebhookRequest` as `{ publicKey }`. Fetch it once and
+   * keep it: it is the same for every instance in the cluster
+   */
+  async webhookKey(): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/webhook-key`);
+    if (!response.ok) throw await problemFrom(response);
+
+    const body = (await response.json().catch(() => null)) as {
+      algorithm?: unknown;
+      public_key?: unknown;
+    } | null;
+    if (body?.algorithm !== "ed25519" || typeof body.public_key !== "string") {
+      throw new ProblemError({
+        status: response.status,
+        title: "The gateway published no ed25519 webhook key",
+      });
+    }
+
+    return body.public_key;
+  }
+
   async getPayment(id: string): Promise<Payment | null> {
     const response = await fetch(`${this.baseUrl}/incoming-payments/${encodeURIComponent(id)}`, {
       headers: this.reading(),

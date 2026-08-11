@@ -2,6 +2,7 @@ import type {
   CreatePaymentParams,
   CreateQuoteParams,
   Payment,
+  PaymentKind,
   PaymentStatus,
   Quote,
   TriggerEvent,
@@ -130,6 +131,7 @@ export function triggerEventFromWire(body: unknown): TriggerEvent | null {
 
   return {
     id,
+    kind: kindOf(wire),
     paymentHash,
     verifyUrl,
     status,
@@ -140,6 +142,13 @@ export function triggerEventFromWire(body: unknown): TriggerEvent | null {
     lnAddress: text(wire["ln_address"]),
     amountMsat: wire["incoming_amount"] === undefined ? null : msatFrom(wire["incoming_amount"], 1),
   };
+}
+
+function kindOf(wire: Record<string, unknown>): PaymentKind {
+  const said = wire["kind"];
+  if (said === "minted" || said === "watched") return said;
+
+  return text(wire["ln_address"]) === null ? "watched" : "minted";
 }
 
 function toAmount(msat: number): Record<string, unknown> {

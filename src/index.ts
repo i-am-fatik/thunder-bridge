@@ -9,7 +9,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import * as log from "./log.ts";
 
-import { equalInConstantTime } from "../core/hmac.ts";
+import { hexToBytes } from "../core/bytes.ts";
+import { signingKeyFromSeed, type SigningKey } from "../core/ed25519.ts";
+import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
 import { bearer, positive, secret, whole } from "./env.ts";
@@ -64,7 +66,8 @@ const MAX_PAGE = 500;
 const MAX_INBOUND_BYTES = 64 * 1024;
 const BEARER = "Bearer ";
 const TICKET_TTL_SECS = 60;
-const UNGATED = new Set(["/health", "/ready", "/openapi.yaml", "/docs"]);
+const UNGATED = new Set(["/health", "/ready", "/openapi.yaml", "/docs", "/webhook-key"]);
+const WEBHOOK_SIGNING_LABEL = "webhook-signing-v1";
 const STALLED = "the watch loop has stopped being scheduled, so this instance needs replacing";
 const LEAVING = "this instance is shutting down and is not taking new work";
 const AT_CAPACITY = "this instance is watching as many payments as it can";
@@ -121,6 +124,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		store,
 		eagerDelayMs: options.eagerDelayMs,
 		budget: { perSecond: options.pollsPerSecond, nextAt: new Map() },
+		webhookKey: await webhookSigningKey(options.key),
 	};
 
 	let draining = false;
@@ -386,6 +390,7 @@ async function route(
 	if (path === "/ready") return readiness(incoming, store, token, vitals);
 	if (path === "/openapi.yaml") return spec();
 	if (path === "/docs") return rendered();
+	if (path === "/webhook-key") return await publishedWebhookKey(key);
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
@@ -679,6 +684,16 @@ function oversized(error: unknown): Response {
 		title: "The request body is larger than this gateway will read",
 		detail: `the ceiling is ${MAX_INBOUND_BYTES} bytes, far above any request this API defines`,
 	});
+}
+
+async function webhookSigningKey(clusterKey: Uint8Array): Promise<SigningKey> {
+	return await signingKeyFromSeed(hexToBytes(await hmacHex(clusterKey, WEBHOOK_SIGNING_LABEL)));
+}
+
+async function publishedWebhookKey(clusterKey: Uint8Array): Promise<Response> {
+	const key = await webhookSigningKey(clusterKey);
+
+	return json({ algorithm: "ed25519", public_key: key.publicKeyHex });
 }
 
 function unhandled(error: unknown): Response {

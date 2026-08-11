@@ -928,6 +928,23 @@ test("readiness says only that it is ready until a bearer proves the instance is
 	mine.stop();
 });
 
+test("the key a merchant needs to check a webhook they handed no secret for is public", async () => {
+	const app = await running("only-mine");
+	try {
+		const answer = await fetch(`http://127.0.0.1:${app.service.port}/webhook-key`);
+		expect(answer.status).toBe(200);
+
+		const body = (await answer.json()) as { algorithm: string; public_key: string };
+		expect(body.algorithm).toBe("ed25519");
+		expect(body.public_key).toMatch(/^[0-9a-f]{64}$/);
+
+		const again = await fetch(`http://127.0.0.1:${app.service.port}/webhook-key`);
+		expect(((await again.json()) as { public_key: string }).public_key).toBe(body.public_key);
+	} finally {
+		app.stop();
+	}
+});
+
 test("a blank token leaves the gateway public, not private and open to everyone", async () => {
 	const blank = await running("");
 	try {

@@ -117,6 +117,19 @@ it used to have, a name lookup, is bounded now.
 every webhook delivered. That is a client's order flow sitting in your log
 aggregator. `warn` keeps the failures and drops the flow.
 
+## A client who would rather not hand you a webhook secret
+
+They register the webhook with no `secret`, and the gateway signs the delivery
+`ed25519=<signature>` with a key derived from `CLUSTER_KEY` instead. They fetch the
+public half from `/webhook-key`, which answers without a bearer, and verify against
+it. Every instance in one cluster publishes the same key, so a delivery from any of
+them checks out.
+
+Prefer it, and say so when someone asks. A secret they give you is kept in the
+ledger and replicated to every peer, because any instance may be the one that
+delivers, so it is one more thing of theirs you are holding. Rotating `CLUSTER_KEY`
+changes this key too, so a receiver caching it has to fetch it again.
+
 ## The instance is under abuse
 
 There is no per-caller quota and no rate limit on creation. `MAX_PENDING` is one
