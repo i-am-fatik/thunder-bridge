@@ -151,6 +151,24 @@ host. So a client's own endpoint sets the rate it wants to be asked at, and a wa
 that says nothing keeps the widening interval. Nothing here is per payment: the pace,
 like the ceiling, belongs to the host being asked.
 
+## A gateway that talks to nobody but its clients
+
+Worth knowing when someone asks whether this thing calls out to strangers. By default
+it does, on one path only: a payment it minted is polled at the recipient's own wallet,
+because that is where the LUD-21 endpoint lives. `POLLS_PER_SEC` exists for exactly
+that, and it is politeness to a third party rather than protection of this process.
+
+A client who does not want that can have the other arrangement today, without any
+change here. They register through `POST /watched-payments` only, resolving the
+address in their own service, and serve the verify endpoint themselves: the SDK's
+`lightningVerifyEndpoint` asks the wallet on our behalf and `bankVerifyEndpoint`
+already did the same for a bank. Then every host this gateway polls belongs to that
+client, every one of them names its own pace, and the per-host ceiling never binds.
+
+Both arrangements run on the same gateway with the same code, which is the point. What
+is not on the table is making the second one the only one, because it costs the client a
+service that has to stay up for days and a browser cannot provide that.
+
 ## A settlement nobody was told about
 
 `parked_deliveries` on `/ready` counts webhooks this instance gave up on, and every one

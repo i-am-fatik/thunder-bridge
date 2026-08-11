@@ -112,6 +112,8 @@ them and this table does not repeat them.
 | `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway that serves strangers |
 | `bankVerifyEndpoint(config)` | the other half, the LUD-21 shape backed by your own statement |
 | `fioStatement(config)` | a `Statement` reading a Fio account, several tokens used strictly in turn |
+| `lightningVerifyEndpoint(config)` | the same shape for Lightning, asking the wallet on the gateway's behalf. From `thunder-bridge/server` |
+| `relayedVerifyUrl(mount, wallet, secret)` | the URL to hand the gateway instead of the wallet's, with the wallet's sealed inside |
 
 What your service answers once those handlers are mounted is written out in
 [`openapi.yaml`](openapi.yaml), shipped with this package.
@@ -247,6 +249,40 @@ already in the account:
 
 Neither has been seen with Fio, which forwards the message untouched. Check it
 against the banks your payers actually use before you promise them a rail.
+
+## Making the gateway poll nobody but you
+
+By default a Lightning watch hands the gateway the wallet's own verify URL, so the
+gateway polls `blink.sv` or `coinos.io` directly and its logs, its ledger and its
+peers all carry that domain. If you would rather it never touched a third party and
+never learned which provider your recipient uses, put your own endpoint in between.
+
+```ts
+import { blindLightningRail, lightningVerifyEndpoint } from "thunder-bridge/server";
+
+app.get("/verify/lightning", (context) =>
+  lightningVerifyEndpoint({ secret: RELAY_SECRET, pollEverySecs: 5 })(context.req.raw),
+);
+
+const rail = blindLightningRail({
+  gateway,
+  lnAddresses: ["you@blink.sv"],
+  amountMsat: (order) => order.amountMinor * 40,
+  relayVerifyThrough: { endpoint: "https://shop.example/verify/lightning", secret: RELAY_SECRET },
+});
+```
+
+The wallet's URL is sealed into the query with your secret, so what the gateway
+stores and replicates is a blob it cannot read. It polls you, you ask the wallet,
+and the preimage still comes from the recipient's own server and still has to hash
+to the payment hash, so standing in the middle buys privacy and pacing without
+making you something anyone has to trust. A wallet you cannot reach answers `502`
+rather than "not settled", because those are different claims.
+
+Both rails then run through endpoints of yours, on a pace you set, and the gateway
+is only ever talking to servers that asked to be talked to. It costs you a service
+that has to stay up: a browser-only integration cannot do this, and should keep
+letting the gateway poll the wallet.
 
 ### How often the gateway asks
 

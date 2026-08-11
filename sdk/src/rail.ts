@@ -4,6 +4,7 @@ import { bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
 import { encodeForQr } from "./qr.js";
+import { relayedVerifyUrl } from "./relay.js";
 
 const BANK = "bank";
 const LIGHTNING = "lightning";
@@ -130,6 +131,14 @@ export interface BlindLightningRailConfig {
 
   webhookSecret?: string;
 
+  /**
+   * Where your own `lightningVerifyEndpoint` is mounted, and the secret it
+   * unseals with. Set both and the gateway is handed your URL rather than the
+   * wallet's, so it polls you, never a third party, and learns nothing about
+   * which provider the recipient uses. Leave them out and it polls the wallet
+   */
+  relayVerifyThrough?: { endpoint: string; secret: string };
+
   /** What `Leg.rail` reads, for a shop running more than one wallet */
   name?: string;
 }
@@ -207,9 +216,16 @@ export function lightningRail(config: LightningRailConfig): Rail {
 export function blindLightningRail(config: BlindLightningRailConfig): Rail {
   return async (order) => {
     const resolved = await invoiceFrom(config.lnAddresses, await config.amountMsat(order));
+    const relay = config.relayVerifyThrough;
     const watched = await config.gateway.watchPayment({
       paymentHash: resolved.paymentHash,
-      verifyUrl: resolved.verifyUrl,
+      verifyUrl: relay
+        ? await relayedVerifyUrl(
+            relay.endpoint,
+            { url: resolved.verifyUrl, hash: resolved.paymentHash },
+            relay.secret,
+          )
+        : resolved.verifyUrl,
       expiresAt: resolved.expiresAt,
       trigger: config.trigger,
       sealed: await config.sealed?.(order),
