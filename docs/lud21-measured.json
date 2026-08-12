@@ -1,0 +1,1202 @@
+{
+	"surveyedAt": "2026-08-12",
+	"addresses": 505,
+	"domains": {
+		"acorn.safebox.dev": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "trbouma@acorn.safebox.dev",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"alex71btc.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "zap@alex71btc.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"alohak.ai": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "kai@alohak.ai",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"arkzap.me": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "ark1pu6h30w3zqqplk5cnn4u9rl7ezmqcdyqjqxdkhn7q5acku3ctq48r7qzmgmxt6z3zqyps6f5kemv7aest5ekedtpmcl34n32vuagr4ufwdlw8ywzeagq7e4qqdv976@arkzap.me",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"asyncmind.xyz": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "asyncmind@asyncmind.xyz",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"atitlan.io": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "avi@atitlan.io",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"azzamo.online": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "zapme@azzamo.online",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"basspistol.org": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "setto@basspistol.org",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"bencousens.com": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "ben@bencousens.com",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"bitcoincoin.ch": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "eluc@bitcoincoin.ch",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"bitcointxoko.org": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "aitor@bitcointxoko.org",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "rasputin@bitcointxoko.org",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"bits.my-ns.me": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "anton@bits.my-ns.me",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"blink.sv": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "zksr_ofs@blink.sv",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				},
+				{
+					"address": "bitcoinlighthouse@blink.sv",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"blitzwalletapp.com": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "myrtieraven16@blitzwalletapp.com",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"blogstr.net": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "yutaro@blogstr.net",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"breez.fun": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "greendeer1059@breez.fun",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"breez.tips": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "evan@breez.tips",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				},
+				{
+					"address": "wildburro@breez.tips",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"btcmap.org": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "zaps@btcmap.org",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"btcpay.fiattolightning.de": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "wahl@btcpay.fiattolightning.de",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"btip.nl": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "kevinrav@btip.nl",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"cake.cash": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "mattutxo@cake.cash",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				},
+				{
+					"address": "pigeondev@cake.cash",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"cash.app": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "lokobtc@cash.app",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"chilitum.com": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "cyberchili@chilitum.com",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"cluborange.org": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "harlembitcoin@cluborange.org",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"coinos.io": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "uppercasedaniel@coinos.io",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				},
+				{
+					"address": "nikolat@coinos.io",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"coinos.pro": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "unauthorized@coinos.pro",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"cyberguy.fyi": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "danny@cyberguy.fyi",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"day.ag": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "zaps@day.ag",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"fountain.fm": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "user27411594@fountain.fm",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "user32042367@fountain.fm",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"gamestr.io": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "zaps@gamestr.io",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"getalby.app": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "virshawn@getalby.app",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"getalby.com": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "king21@getalby.com",
+					"verdict": "unreachable",
+					"note": "callback issued no invoice"
+				},
+				{
+					"address": "llmops@getalby.com",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"geyser.fund": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "bearbullbitcoinpredictionmarket@geyser.fund",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"hanshan.io": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "hanshan@hanshan.io",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"hodl.camp": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "mutatrum@hodl.camp",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"janx.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "satwise@janx.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"kehiy.net": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "me@kehiy.net",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"kgs67g0fl7hrg554m6slvw3nf5ypg8vlddcakr64ef46mg279f2s.ledger.bitcoindeposits.net": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "16d88b2b3879e939ed44d8e614696067@kgs67g0fl7hrg554m6slvw3nf5ypg8vlddcakr64ef46mg279f2s.ledger.bitcoindeposits.net",
+					"verdict": "unreachable",
+					"note": "callback issued no invoice"
+				}
+			]
+		},
+		"learntheropes.xyz": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "giovanni@learntheropes.xyz",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"lightning.btcforplebs.com": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "logen@lightning.btcforplebs.com",
+					"verdict": "unreachable",
+					"note": "callback issued no invoice"
+				}
+			]
+		},
+		"linky.fit": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "npub13ey6yg80kfach5ap8qht06zgtdaexs7yrl5caaezxlqsptecmyyqvyz3rh@linky.fit",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "npub1rjtfxleq6ujtqwtqxan9vp8ld2r8hnalcdxcn0yls3szgvrphhtqzt7q5m@linky.fit",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"ln.nostrfeed.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "premium@ln.nostrfeed.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"ln.rogue.earth": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "cloud@ln.rogue.earth",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"lnaddress.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "x@lnaddress.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"lnaddress.me": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "thedankseer@lnaddress.me",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"lnbits.plebprojects.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "radio@lnbits.plebprojects.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"lnbits.wolfcoil.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "tanakei@lnbits.wolfcoil.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"lnd.sebastix.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "sebastian@lnd.sebastix.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"mannawallet.com": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "ricko@mannawallet.com",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"matthewmccarty.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "pay@matthewmccarty.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"minibits.cash": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "suresite537@minibits.cash",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				},
+				{
+					"address": "liketrench852@minibits.cash",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"mwaters.net": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "mark@mwaters.net",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"nakamotones.com": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "nonce-vox@nakamotones.com",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				},
+				{
+					"address": "merkle-lead@nakamotones.com",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				},
+				{
+					"address": "satoshi-clock@nakamotones.com",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				},
+				{
+					"address": "dj-hash@nakamotones.com",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				},
+				{
+					"address": "utxo-bassline@nakamotones.com",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"nextblock.city": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "ian.888888@nextblock.city",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "mandana.888888@nextblock.city",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"niceaction.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "offgridsteve@niceaction.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"noahwallet.io": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "fourhorsemen@noahwallet.io",
+					"verdict": "unreachable",
+					"note": "callback issued no invoice"
+				}
+			]
+		},
+		"nostr.fan": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "bitcrazy@nostr.fan",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"nostr.ph": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "siggy47@nostr.ph",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"nostrcheck.me": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "maleficent@nostrcheck.me",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"nostrdvm.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "_@nostrdvm.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"nostrplebs.com": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "7bluerabbits@nostrplebs.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "dikaios1517@nostrplebs.com",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"npub.cash": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "npub19twqxyg2fxcx5982axhanwfhyddhl48pdj7yp8d750l2hmxgjxvsc3mxcz@npub.cash",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "npub1k6efdjuus69ygpd7e2edzqnyf8wau6lyc6avl23zu32rexdhvxcqh70p04@npub.cash",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"npub1papgk9h30yuerv4fesw6ndp3c7h7zx00cwml3mdryx5xsf07rmns88gjnp.zap.land": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "npub1papgk9h30yuerv4fesw6ndp3c7h7zx00cwml3mdryx5xsf07rmns88gjnp@npub1papgk9h30yuerv4fesw6ndp3c7h7zx00cwml3mdryx5xsf07rmns88gjnp.zap.land",
+					"verdict": "unreachable",
+					"note": "callback issued no invoice"
+				}
+			]
+		},
+		"npubx.cash": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "npub1qnupw7eqdn36wsyzlvz5lztwun7l4jryfc0jl4uts9t9egln0v2qlaeg0u@npubx.cash",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "manykeys@npubx.cash",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				},
+				{
+					"address": "npub10k6p079eejxsx4te7lgqwntznummqpst4nyj04qtzlwyaqzj6pwqqk5agp@npubx.cash",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "npub14xw6mvmjnu5dumlew9japl7yxkz8hnz6tf3kjsvsr3gs5m4vtcxqg5ts6h@npubx.cash",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "u7xo@npubx.cash",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "npub19ulp0mk2yqphy2s9nsfyeum5hggmct6dpt8pwnfppdcaydj8k50sj9n72z@npubx.cash",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"onyxcatpottery.com": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "defauxking@onyxcatpottery.com",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"orangem.art": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "orangemart@orangem.art",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"orangepillapp.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "floze@orangepillapp.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"pay.aerarium.money": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "stupleb@pay.aerarium.money",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"pay.bbw.sv": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "garcia_btc@pay.bbw.sv",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"pay.blink.sv": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "nakadaimon@pay.blink.sv",
+					"verdict": "unreachable",
+					"note": "callback issued no invoice"
+				}
+			]
+		},
+		"pay.sdbitcoiners.com": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "corey@pay.sdbitcoiners.com",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"phoenixwallet.me": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "luckygoal77@phoenixwallet.me",
+					"verdict": "unreachable",
+					"note": "no payRequest"
+				}
+			]
+		},
+		"play-asia.com": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "zap@play-asia.com",
+					"verdict": "unreachable",
+					"note": "callback issued no invoice"
+				}
+			]
+		},
+		"primal.net": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "jollyemu30@primal.net",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "tanearwig5@primal.net",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"pubcastr.puhcho.me": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "cocktus@pubcastr.puhcho.me",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"radar.cash": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "nostronaut@radar.cash",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"radvladdy.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "rad@radvladdy.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"rizful.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "jdm@rizful.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "inexpensive-manatee-53@rizful.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"rodbishop.nz": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "rb@rodbishop.nz",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"satpay.no": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "gusto@satpay.no",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"satpicks.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "darkj@satpicks.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"sats.mobi": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "mithrilsecurity@sats.mobi",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"sats.zap.cooking": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "seth@sats.zap.cooking",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"sendsats.lol": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "jb55@sendsats.lol",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"sidecar.top": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "daniel@sidecar.top",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"sovbit.host": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "enki@sovbit.host",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"speed.app": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "resolvr@speed.app",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"stacked.cash": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "rob@stacked.cash",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"strike.me": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "janjao@strike.me",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "vcavallo@strike.me",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"tyiu.xyz": {
+			"verdict": "unsettled",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "tyiu@tyiu.xyz",
+					"verdict": "unreachable",
+					"note": "callback issued no invoice"
+				}
+			]
+		},
+		"vitorpamplona.com": {
+			"verdict": "usable",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "vitor@vitorpamplona.com",
+					"verdict": "usable",
+					"note": "verify answers settled and preimage"
+				}
+			]
+		},
+		"wallet.yakihonne.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "sedd56@wallet.yakihonne.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "chef@wallet.yakihonne.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"walletofsatoshi.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "demonicmind54@walletofsatoshi.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "garbledmine86@walletofsatoshi.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"westernbtc.com": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "josh@westernbtc.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				},
+				{
+					"address": "n@westernbtc.com",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"zbd.gg": {
+			"verdict": "no-verify",
+			"denylisted": false,
+			"measured": [
+				{
+					"address": "studio314@zbd.gg",
+					"verdict": "no-verify",
+					"note": "invoice carries no verify URL"
+				}
+			]
+		},
+		"zeuspay.com": {
+			"verdict": "verify-without-preimage",
+			"denylisted": true,
+			"measured": [
+				{
+					"address": "spartanbear63@zeuspay.com",
+					"verdict": "verify-without-preimage",
+					"note": "verify answered pr,settled,status"
+				},
+				{
+					"address": "hilariouswood51@zeuspay.com",
+					"verdict": "verify-without-preimage",
+					"note": "verify answered pr,settled,status"
+				}
+			]
+		}
+	}
+}

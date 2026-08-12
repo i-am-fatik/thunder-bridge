@@ -178,7 +178,8 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   stacker.news, Minibits and the Spark-hosted wallets do. Wallet of Satoshi,
   Strike, Cash App, ZBD and Primal do not, and their users are refused at
   creation. Measured coverage is in
-  [docs/lud21-coverage.md](docs/lud21-coverage.md).
+  [docs/lud21-coverage.md](docs/lud21-coverage.md), re-measured against live
+  wallets on the first of each month rather than read off anyone's changelog.
 - **No fee, and no privacy layer.** Nothing flows through this service, and the
   payer sees the recipient's real invoice and node.
 - **No BOLT12.** Fetching an invoice from an offer needs a node.

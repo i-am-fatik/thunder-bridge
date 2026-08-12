@@ -5,15 +5,36 @@ URL **and** releases the preimage through it. Everything below was measured, not
 read: docs are useless here, only two pages on the whole web name any
 implementer.
 
-Surveyed 2026-08-01. Method: harvest ~100 real lightning addresses from nostr
-`lud16` fields, call each LNURL callback, keep the ones carrying `verify`, then
-GET every one of those URLs and check the real `{status, settled, preimage, pr}`
-shape.
+Surveyed 2026-08-01. Method: harvest real lightning addresses from nostr `lud16`
+fields, call each LNURL callback, keep the ones carrying `verify`, then GET every
+one of those URLs and check the real `{status, settled, preimage, pr}` shape.
+
+That method is now [`tools/lud21-harvest.ts`](../tools/lud21-harvest.ts) rather
+than prose, and `.github/workflows/lud21.yml` runs it on the first of each month.
+`tools/lud21-report.ts` prints the overview and fails the run on the only two
+changes that cost anybody: a domain these lists promise that no longer releases a
+preimage, and a domain the denylist refuses that now answers like LUD-21. The
+machine-written snapshot is [`lud21-measured.json`](lud21-measured.json), and the
+prose below is the reading of it.
 
 **Read every list below as of its date, not as of today.** A wallet that shipped
 LUD-21 last month is still refused here, and the refusal comes from this snapshot
-rather than from anything measured. Re-run the harvest above before a release,
-because the denylist is the one part of it that costs a real recipient.
+rather than from anything measured. The denylist is the one part of it that costs a
+real recipient.
+
+## Re-surveyed 2026-08-12, by the tool rather than by hand
+
+505 addresses across 96 domains: 31 usable, 44 answering no `verify` at all, 20 whose
+every sampled account was broken, and one answering `verify` without a preimage. The
+first run of the committed harvest, and it agrees with the hand-made ones. Every
+domain the lists below promise measured usable again, every domain they clear of
+`verify` answered the same way, and `zeuspay.com` still answers `pr,settled,status`
+with no `preimage` key, so the denylist entry that refuses it is still right.
+`zeusnuts.com` and `ecash.love` drew no address again and stay unrefuted.
+
+Usable and not named below: `basspistol.org`, `chilitum.com`, `learntheropes.xyz`,
+`nostr.fan`. Absent from the sample this time rather than changed: `enesis.md` and
+`stacker.news`.
 
 ## Re-surveyed 2026-08-10
 

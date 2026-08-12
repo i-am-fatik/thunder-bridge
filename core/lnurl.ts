@@ -4,7 +4,7 @@ import { sha256Hex } from "./sha256.ts";
 import { publicHttps } from "./url.ts";
 import { NoWalletAvailable, WalletRefused, type WalletFailure } from "./refusal.ts";
 
-const VERIFY_WITHOUT_PREIMAGE = ["zeuspay.com", "zeusnuts.com", "ecash.love"];
+export const VERIFY_WITHOUT_PREIMAGE = ["zeuspay.com", "zeusnuts.com", "ecash.love"];
 const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const BECH32_GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 const CHECKSUM_SLOTS = [0, 1, 2, 3, 4, 5];
