@@ -867,6 +867,13 @@ components:
         lives. A retry after that mints a second invoice, so a key is a retry window and
         not a permanent handle. If the payment a key names has already been pruned, the
         replay answers 410 rather than inventing a second one.
+
+        Send a random key, because on an instance that strangers share the key is a
+        capability. The replay hands back the whole payment, `bolt11` and `verify_url`
+        included, to anyone presenting that key with the same body, and a guessable
+        `order-42` is therefore guessable by somebody else. Nothing here can scope a key
+        to the caller who made it: `GATEWAY_TOKEN` is one bearer for the whole instance,
+        so it says a caller is allowed in and never says which caller they are.
       schema:
         type: string
 
@@ -908,6 +915,11 @@ components:
       description: |
         Addresses in priority order. The first one that clears every check wins, the rest
         are the fallback. Order is the whole point, so it is preserved exactly.
+
+        At most three may name the same domain, and a fourth is refused `400`. A list this
+        gateway walks is a list of requests it makes at somebody's server, so sixteen
+        accounts at one host is a fan-out rather than a fallback, and a real priority list
+        names different providers anyway.
       items:
         $ref: "#/components/schemas/ln_address"
       minItems: 1

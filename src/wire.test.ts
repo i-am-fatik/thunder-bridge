@@ -118,3 +118,25 @@ test("every field that is kept has a length, so nothing unbounded is stored or s
 		refusal(asked({ webhook: { url: "https://example.com/hook", secret: long } })),
 	).toContain("256 characters");
 });
+
+test("a list may not stack one domain, because that is a fan-out at somebody's server", () => {
+	const four = ["a@wallet.example", "b@wallet.example", "c@wallet.example", "d@wallet.example"];
+
+	expect(refusal(asked({ ln_addresses: four }))).toContain("wallet.example more than 3 times");
+	expect(refusal(asked({ ln_addresses: [...four.slice(0, 3), "e@WALLET.example"] }))).toContain(
+		"more than 3 times",
+	);
+});
+
+test("a priority list of different providers is what it was always for", () => {
+	const providers = [
+		"me@coinos.io",
+		"me@blink.sv",
+		"me@getalby.com",
+		"a@wallet.example",
+		"b@wallet.example",
+		"c@wallet.example",
+	];
+
+	expect(readCreateRequest(asked({ ln_addresses: providers })).addresses).toEqual(providers);
+});

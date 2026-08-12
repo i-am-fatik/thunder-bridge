@@ -201,15 +201,27 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   than taking on a watch it will drop. A wallet's 30-day invoice stays payable
   after day three, it just is not being watched here.
 - **Every outbound URL must be public https.** A webhook to a private address is
-  refused along with everything else on the local network.
+  refused along with everything else on the local network. The name is resolved once
+  and the connection is pinned to exactly the addresses that check passed, so a name
+  that answers publicly and then rebinds to `127.0.0.1` never gets connected to, and
+  the certificate is still checked against the name rather than the address. A name
+  nothing answers for is refused here rather than left to the connection.
 - **Without `GATEWAY_TOKEN` every write is anonymous, and nothing here rate limits
   one.** That is what a public instance is for, but it means one caller can take all
   `MAX_PENDING` slots with watches nobody will ever pay, and every later create or
   watch answers 503 until those expire. `POST /quotes` is the same shape pointed
   outward: it makes this service fetch a host the caller names, which is why it may
-  only name a public https one. An instance meant to be reachable by strangers wants
-  a rate limit in front of it. Reads are not the exposure here: listing is refused
-  outright without a token, and a payment id is an HMAC nobody can guess.
+  only name a public https one, at most three addresses per domain, and never more
+  than the addresses it resolved and verified itself. An instance meant to be
+  reachable by strangers wants a rate limit in front of it.
+- **An `Idempotency-Key` is a capability on a shared instance.** Listing is refused
+  without a token and a payment id is an HMAC nobody can guess, but a replay needs
+  neither: present the same key with the same body and the original payment comes
+  back, `bolt11` and `verify_url` included. That is what makes a retry safe, and on
+  an instance strangers share it also means a guessable key hands your invoice to
+  whoever guesses it. Use a random one. There is no per-caller identity to scope it
+  by, because `GATEWAY_TOKEN` is one bearer for the whole instance rather than one
+  per caller.
 
 ## More
 

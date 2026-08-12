@@ -8,6 +8,7 @@ import { MalformedRequest, type WalletFailure } from "./problem.ts";
 const ASSET_CODE = "BTC";
 const ASSET_SCALE = 11;
 const MAX_ADDRESSES = 16;
+const MAX_PER_DOMAIN = 3;
 const MAX_ADDRESS_CHARS = 320;
 const MAX_SEALED_CHARS = 4096;
 const MAX_SECRET_CHARS = 256;
@@ -186,7 +187,27 @@ function readAddresses(value: unknown): string[] {
 	if (addresses.some((one) => one.length > MAX_ADDRESS_CHARS)) {
 		throw new MalformedRequest(`a lightning address is at most ${MAX_ADDRESS_CHARS} characters`);
 	}
+	const crowded = domainAskedTooOften(addresses);
+	if (crowded !== null) {
+		throw new MalformedRequest(
+			`ln_addresses names ${crowded} more than ${MAX_PER_DOMAIN} times, and a priority list is meant to name different providers`,
+		);
+	}
 	return addresses;
+}
+
+function domainAskedTooOften(addresses: string[]): string | null {
+	const asked = new Map<string, number>();
+	for (const address of addresses) {
+		const at = address.lastIndexOf("@");
+		if (at < 0) continue;
+		const domain = address.slice(at + 1).toLowerCase();
+		const seen = (asked.get(domain) ?? 0) + 1;
+		if (seen > MAX_PER_DOMAIN) return domain;
+		asked.set(domain, seen);
+	}
+
+	return null;
 }
 
 function readAmount(value: unknown, field: string): number {
