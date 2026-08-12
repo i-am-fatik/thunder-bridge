@@ -2,7 +2,7 @@ import type { LookupAllOptions } from "node:dns";
 
 import { expect, test, vi } from "vitest";
 
-import { ask, resolvesNothingPrivate } from "./outbound.ts";
+import { addressesToReach, ask, resolvesNothingPrivate } from "./outbound.ts";
 
 vi.mock("node:dns/promises", async (importOriginal) => {
 	const dns = await importOriginal<typeof import("node:dns/promises")>();
@@ -193,6 +193,16 @@ test("a name that resolves to a private address is not one we reach", async () =
 	expect(await resolvesNothingPrivate("https://10.11.12.13/")).toBe(false);
 });
 
-test("a name nothing answers for is left to the connection to refuse", async () => {
-	expect(await resolvesNothingPrivate("https://nothing.example/")).toBe(true);
+test("a name nothing answers for is refused here, not left to the connection", async () => {
+	expect(await resolvesNothingPrivate("https://nothing.example/")).toBe(false);
+	await expect(addressesToReach("https://nothing.example/")).rejects.toThrow(
+		"resolves to an address we do not reach",
+	);
+});
+
+test("what is verified is handed on, so nothing resolves the name a second time", async () => {
+	const at = await addressesToReach("https://example.com/");
+
+	expect(at.length).toBeGreaterThan(0);
+	expect(at.every((one) => typeof one.address === "string" && one.family > 0)).toBe(true);
 });

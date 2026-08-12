@@ -24,6 +24,30 @@ export type Answer = {
 	headers: Headers;
 };
 
+export type Verified = { address: string; family: number };
+
+export type Send = (
+	url: string,
+	sent: Sent,
+	signal: AbortSignal,
+	at: readonly Verified[],
+) => Promise<Response>;
+
+const throughFetch: Send = (url, sent, signal) =>
+	fetch(url, {
+		method: sent.method ?? "GET",
+		headers: sent.headers ?? {},
+		body: sent.body,
+		redirect: "manual",
+		signal,
+	});
+
+let send: Send = throughFetch;
+
+export function sendThrough(transport: Send): void {
+	send = transport;
+}
+
 export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
 	const capped = AbortSignal.timeout(HTTP_TIMEOUT_MS);
 	const signal = sent.deadline ? AbortSignal.any([sent.deadline, capped]) : capped;
@@ -31,14 +55,8 @@ export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
 	let target = url;
 	let carried = sent;
 	for (let hop = 0; hop <= HOPS_FOLLOWED; hop += 1) {
-		await refuseUnlessPublic(target);
-		const response = await fetch(target, {
-			method: carried.method ?? "GET",
-			headers: carried.headers ?? {},
-			body: carried.body,
-			redirect: "manual",
-			signal,
-		});
+		const at = await addressesToReach(target);
+		const response = await send(target, carried, signal, at);
 		if (!REDIRECTS.includes(response.status)) return await answerOf(response);
 
 		const location = response.headers.get("location");
@@ -57,6 +75,22 @@ export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
 }
 
 export async function resolvesNothingPrivate(url: string): Promise<boolean> {
+	const found = await resolved(url);
+
+	return found.length > 0 && found.every((one) => publicAddress(one.address));
+}
+
+export async function addressesToReach(url: string): Promise<Verified[]> {
+	if (!publicHttps(url)) throw new Error(`${url} is not a public https URL`);
+	const found = await resolved(url);
+	if (found.length === 0 || !found.every((one) => publicAddress(one.address))) {
+		throw new Error(`${url} resolves to an address we do not reach`);
+	}
+
+	return found;
+}
+
+async function resolved(url: string): Promise<Verified[]> {
 	const { lookup } = await import("node:dns/promises");
 	const { setTimeout: sleep } = await import("node:timers/promises");
 	const host = new URL(url).hostname.replace(/^\[|]$/g, "");
@@ -65,12 +99,7 @@ export async function resolvesNothingPrivate(url: string): Promise<boolean> {
 		sleep(LOOKUP_TIMEOUT_MS, null, { ref: false }),
 	]);
 
-	return found !== null && found.every((one) => publicAddress(one.address));
-}
-
-async function refuseUnlessPublic(url: string): Promise<void> {
-	if (!publicHttps(url)) throw new Error(`${url} is not a public https URL`);
-	if (!(await resolvesNothingPrivate(url))) throw new Error(`${url} resolves to an address we do not reach`);
+	return found ?? [];
 }
 
 async function answerOf(response: Response): Promise<Answer> {

@@ -16,7 +16,9 @@ import { mint as mintTicket, read as readTicket, type Subject } from "../core/ti
 import { Cluster } from "./cluster.ts";
 import { bearer, hosts, positive, secret, secrets, whole } from "./env.ts";
 import { Ledger, paymentId } from "./ledger.ts";
+import { pinnedToTheAddressWeVerified } from "./pinned.ts";
 import { quote, resolve, RESOLVE_TIMEOUT_MS, speaksVerify } from "../core/lnurl.ts";
+import { sendThrough } from "../core/outbound.ts";
 import type { Payment } from "./payment.ts";
 import {
 	ALREADY_WATCHED,
@@ -801,6 +803,8 @@ function unhandled(error: unknown): Response {
 }
 
 if (import.meta.main) {
+	sendThrough(pinnedToTheAddressWeVerified);
+
 	const path = process.env["LEDGER"] ?? "./data/ledger.db";
 	mkdirSync(dirname(path), { recursive: true });
 
