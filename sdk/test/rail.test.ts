@@ -19,6 +19,10 @@ import {
 import { bolt11 } from "./encode";
 import { jsonResponse, type Routes, stubFetch } from "./harness";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: async () => [{ address: "203.0.113.1", family: 4 }],
+}));
+
 const GATEWAY = "https://gateway.example.net";
 const LN_ADDRESS = "alice@example.com";
 const PAY_REQUEST = "https://example.com/.well-known/lnurlp/alice";

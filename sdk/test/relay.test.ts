@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkSettled } from "../../core/lnurl.js";
 import { lightningVerifyEndpoint, relayedVerifyUrl } from "../src/relay";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: async () => [{ address: "203.0.113.1", family: 4 }],
+}));
+
 const SECRET = "relay_2f0c8a4e7b1d9c05e3a71486bf20";
 const MOUNT = "https://shop.example/verify/lightning";
 const WALLET = "https://lnurl.blink.sv/verify/f0e1d2c3";

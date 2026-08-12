@@ -13,6 +13,10 @@ import { ThunderBridge } from "../src/client";
 import { fioStatement } from "../src/fio";
 import { type FetchCall, jsonResponse } from "./harness";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: async () => [{ address: "203.0.113.1", family: 4 }],
+}));
+
 const SECRET = "keep-me-server-side";
 const REFERENCE = "ORDER-2026-77";
 const AMOUNT_MINOR = 48_055;
