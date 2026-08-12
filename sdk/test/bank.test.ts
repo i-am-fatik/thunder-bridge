@@ -218,6 +218,30 @@ describe("bankVerifyEndpoint", () => {
     expect(await answer.json()).toEqual({ settled: false });
   });
 
+  it("agrees to be polled, so the gateway does not take a caller's word for it", async () => {
+    const transfer = await asked();
+    const handler = bankVerifyEndpoint({ secret: SECRET, statement: statementOf() });
+    const answer = await handler(
+      new Request(transfer.verifyUrl, {
+        method: "POST",
+        body: JSON.stringify({ type: "verify-challenge", nonce: "a1b2c3" }),
+      }),
+    );
+
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ nonce: "a1b2c3" });
+  });
+
+  it("reads a payment as before when the POST is not a challenge", async () => {
+    const transfer = await asked();
+    const handler = bankVerifyEndpoint({ secret: SECRET, statement: statementOf() });
+    const answer = await handler(
+      new Request(transfer.verifyUrl, { method: "POST", body: JSON.stringify({ type: "other" }) }),
+    );
+
+    expect(await answer.json()).toEqual({ settled: false });
+  });
+
   it("names the pace it wants to be polled at, so the gateway does not pick one", async () => {
     const transfer = await asked();
     const answer = await verified(statementOf(), transfer.verifyUrl);

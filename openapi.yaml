@@ -417,6 +417,16 @@ paths:
         protocol was never asking to be polled for days and this gateway will not be pointed
         at a stranger's server on a caller's word.
 
+        Then it is challenged, under `webhooks` as `verify_challenge`, and has to echo the
+        nonce it is given or the watch is refused `424` `verify-unconsented`. Answering the
+        LUD-21 shape says a host speaks the protocol, which every real wallet does, and says
+        nothing about whether it wanted this gateway's traffic. So the last hop belongs on your
+        side: hand over your own endpoint, which asks the wallet, and an abuser's own host is
+        then the one a wallet throttles rather than this instance's address, which every other
+        client here shares. `bankVerifyEndpoint` and `lightningVerifyEndpoint` answer the
+        challenge for you. A verify URL this gateway found itself when minting is never
+        challenged, because there the caller named nothing.
+
         That first answer is also where the endpoint sets its own pace: a
         `Cache-Control: max-age` on it, or on any later poll, is the interval this gateway
         will use for that host, clamped between one second and one hour. Say so rather than
@@ -746,6 +756,70 @@ webhooks:
                   signature:
                     type: string
                     pattern: "^sha256=[0-9a-f]{64}$"
+                required: [nonce]
+
+  verify_challenge:
+    post:
+      tags: [webhooks]
+      operationId: verifyChallenge
+      summary: What the gateway POSTs to a verify URL you named before it will poll it
+      description: |
+        Sent once to the `verify_url` of a `POST /watched-payments`, after the pre-flight and
+        while the request is still open, and the watch is refused with `verify-unconsented`
+        unless this is answered. It is not sent to a `verify_url` this gateway found itself in
+        a wallet's callback, because there the caller named nothing.
+
+        Answer 200 with `{"nonce": "<the nonce you were sent>"}`. There is no signature to
+        add and no secret involved: what this proves is that the host agreed to receive the
+        traffic, not who it is. Echoing a nonce to whoever asked grants them nothing.
+
+        Why it exists: the gateway polls a URL for up to three days on a caller's word, and a
+        caller who names somebody else's wallet spends that host's patience on this gateway's
+        address, which then costs every other client of this instance. Naming your own
+        endpoint moves that cost onto you, where it belongs.
+
+        The client's verify endpoints answer this themselves, so `bankVerifyEndpoint` and
+        `lightningVerifyEndpoint` need no wiring. A hand-rolled endpoint can use
+        `answerVerifyChallengeRequest`, which hands back the response to return or null when
+        the request was not a challenge. An operator whose callers are all known can turn the
+        challenge off with `VERIFY_CHALLENGE=0`.
+      parameters:
+        - name: x-timestamp
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: x-signature
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: "^ed25519=[0-9a-f]{128}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [verify-challenge]
+                nonce:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+              required: [type, nonce]
+      responses:
+        "200":
+          description: The nonce, echoed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nonce:
+                    type: string
+                    pattern: "^[0-9a-f]{64}$"
                 required: [nonce]
 
 components:
@@ -1206,8 +1280,10 @@ components:
       description: |
         A URL this watch names did not answer, so nothing is being watched.
         `verify-unconfirmed` means the `verify_url` served no JSON body with a boolean
-        `settled`, `webhook-unconfirmed` means the hook did not answer the challenge. Both
-        say the same thing: stand the endpoint up first and register it second.
+        `settled`, `verify-unconsented` means it answered like a verify endpoint but would
+        not answer the challenge, and `webhook-unconfirmed` means the hook did not answer
+        its own. All three say the same thing: stand the endpoint up first and register it
+        second.
       content:
         application/problem+json:
           schema:
@@ -1218,6 +1294,7 @@ components:
                   type:
                     enum:
                       - "urn:problem-type:thunder-bridge:verify-unconfirmed"
+                      - "urn:problem-type:thunder-bridge:verify-unconsented"
                       - "urn:problem-type:thunder-bridge:webhook-unconfirmed"
 
     webhook_unconfirmed:

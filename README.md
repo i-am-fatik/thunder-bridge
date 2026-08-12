@@ -96,11 +96,20 @@ if it does not answer, so this gateway never sends an unsolicited request to an
 address a caller merely named. Your endpoint has to be serving first, and the
 client's `answerWebhookChallengeRequest` is the whole of that side.
 
-A `verify_url` handed to `POST /watched-payments` is checked the same way, once,
-before anything is watched: it has to answer the LUD-21 shape or the request is
-refused. That endpoint also sets its own polling pace with
-`Cache-Control: max-age`, so a bank that moves once a minute says so rather than
-being asked every few seconds on a schedule this gateway picked.
+A `verify_url` handed to `POST /watched-payments` is checked the same way, twice,
+before anything is watched: it has to answer the LUD-21 shape, and then it has to
+answer a challenge of its own. Speaking the protocol is what every real wallet
+does and says nothing about wanting this gateway's traffic, so the last hop
+belongs on your side. Serve
+[`lightningVerifyEndpoint`](sdk) or `bankVerifyEndpoint`, which answer the
+challenge for you and ask the wallet themselves, and a wallet then throttles the
+abuser's own host rather than this instance's address, which its every other
+client shares. A `verify_url` the gateway found itself while minting is never
+challenged, because there the caller named nothing.
+
+That endpoint also sets its own polling pace with `Cache-Control: max-age`, so a
+bank that moves once a minute says so rather than being asked every few seconds on
+a schedule this gateway picked.
 
 Failures are RFC 9457 problem documents served as `application/problem+json`.
 Branch on `type`, never on prose. Six types are minted, and the spec enumerates
@@ -121,6 +130,7 @@ standard's camelCase, and there is no authorization server.
 | `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/ready`, `/openapi.yaml`, `/docs` and `/webhook-key`. Blank counts as none, so a variable someone emptied leaves the gateway public rather than private and open to everyone |
 | `POLL_INTERVAL_SECS` | `5` | how often a payment under five minutes old polls `verify`, used only where the endpoint names no pace of its own with `Cache-Control: max-age` |
 | `WORK_PER_TICK` | `50` | polls and webhook deliveries a tick takes on, which is the throughput ceiling, not the politeness one |
+| `VERIFY_CHALLENGE` | on | `0` stops challenging a `verify_url` a caller named, so any host that speaks LUD-21 can be pointed at. Only for an instance whose callers are all known, because it is what stops one caller spending a wallet's patience on an address every other client here shares |
 | `VERIFY_HOSTS` | none | comma-separated hostnames this instance may poll. Set it and the gateway talks to nobody else: a watch naming another host is refused 403, and minting is refused outright because an invoice it mints is always verified on a wallet's host. Leave it unset and any public https verify URL is allowed |
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |

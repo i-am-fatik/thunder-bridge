@@ -30,10 +30,18 @@ import {
 	statusForWallets,
 	VERIFY_HOST_REFUSED,
 	VERIFY_UNCONFIRMED,
+	VERIFY_UNCONSENTED,
 	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
 import { Store } from "./store.ts";
-import { confirmWebhook, tick, unixNow, WATCH_HORIZON_SECS, type Watcher } from "./watch.ts";
+import {
+	confirmVerify,
+	confirmWebhook,
+	tick,
+	unixNow,
+	WATCH_HORIZON_SECS,
+	type Watcher,
+} from "./watch.ts";
 import {
 	fingerprint,
 	paymentToWire,
@@ -110,6 +118,7 @@ export type Options = {
 	pollsPerSecond: number;
 	workPerTick: number;
 	verifyHosts: Set<string> | null;
+	verifyChallenge: boolean;
 	tickStallMs: number;
 	drainTimeoutMs: number;
 	token: string | null;
@@ -128,6 +137,7 @@ type Serving = {
 	key: Uint8Array;
 	webhookKey: SigningKey;
 	verifyHosts: Set<string> | null;
+	verifyChallenge: boolean;
 };
 
 export async function start(options: Options, store: Store): Promise<Service> {
@@ -137,6 +147,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		key: options.key,
 		webhookKey: await webhookSigningKey(options.key),
 		verifyHosts: options.verifyHosts,
+		verifyChallenge: options.verifyChallenge,
 	};
 	const watcher: Watcher = {
 		store,
@@ -592,6 +603,9 @@ async function watchOnly(request: Request, store: Store, serving: Serving): Prom
 	if (!(await speaksVerify(asked.verifyUrl))) {
 		return unconfirmedVerify(asked.verifyUrl);
 	}
+	if (serving.verifyChallenge && !(await confirmVerify(asked.verifyUrl, webhookKey))) {
+		return unconsentedVerify(asked.verifyUrl);
+	}
 	if (asked.webhook && !(await confirmWebhook(asked.webhook, webhookKey))) {
 		return unconfirmedWebhook(asked.webhook.url);
 	}
@@ -765,6 +779,14 @@ function unconfirmedVerify(url: string): Response {
 	});
 }
 
+function unconsentedVerify(url: string): Response {
+	return problem(424, {
+		type: VERIFY_UNCONSENTED,
+		title: "The verify URL did not agree to be polled",
+		detail: `${url} has to answer the challenge with the nonce it was given before this gateway will poll it, so a caller cannot aim it at a host that never asked for the traffic. Serve it with the client's own verify endpoint, or run the gateway with VERIFY_CHALLENGE=0 if every host its callers name is one you know`,
+	});
+}
+
 function unconfirmedWebhook(url: string): Response {
 	return problem(424, {
 		type: WEBHOOK_UNCONFIRMED,
@@ -808,6 +830,7 @@ if (import.meta.main) {
 			eagerDelayMs: positive("POLL_INTERVAL_SECS", 5) * 1000,
 			workPerTick: positive("WORK_PER_TICK", 50),
 			verifyHosts: hosts("VERIFY_HOSTS"),
+			verifyChallenge: process.env["VERIFY_CHALLENGE"] !== "0",
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,

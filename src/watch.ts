@@ -15,6 +15,7 @@ const LEASE_SECS = 30;
 const NONCE_BYTES = 32;
 
 export const CHALLENGE = "webhook-challenge";
+export const VERIFY_CHALLENGE = "verify-challenge";
 
 export const WATCH_HORIZON_SECS = 259_200;
 
@@ -115,23 +116,36 @@ async function notify(owed: Delivery, gatewayKey: SigningKey): Promise<boolean> 
 }
 
 export async function confirmWebhook(hook: Webhook, gatewayKey: SigningKey): Promise<boolean> {
+	return await consents(hook.url, CHALLENGE, hook.secret, gatewayKey);
+}
+
+export async function confirmVerify(url: string, gatewayKey: SigningKey): Promise<boolean> {
+	return await consents(url, VERIFY_CHALLENGE, null, gatewayKey);
+}
+
+async function consents(
+	url: string,
+	type: string,
+	secret: string | null,
+	gatewayKey: SigningKey,
+): Promise<boolean> {
 	const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
-	const body = JSON.stringify({ type: CHALLENGE, nonce });
+	const body = JSON.stringify({ type, nonce });
 
 	try {
-		const answer = await ask(hook.url, {
+		const answer = await ask(url, {
 			method: "POST",
-			headers: await signedHeaders(body, hook.secret, gatewayKey),
+			headers: await signedHeaders(body, secret, gatewayKey),
 			body,
 		});
 		if (!answer.ok) {
-			log.warn(`webhook ${hook.url} answered the challenge with ${answer.status}`);
+			log.warn(`${url} answered a ${type} with ${answer.status}`);
 			return false;
 		}
 
-		return await proves(answer.body, nonce, hook.secret);
+		return await proves(answer.body, nonce, secret);
 	} catch (error: unknown) {
-		log.warn(`webhook ${hook.url} could not be challenged: ${String(error)}`);
+		log.warn(`${url} could not be sent a ${type}: ${String(error)}`);
 		return false;
 	}
 }

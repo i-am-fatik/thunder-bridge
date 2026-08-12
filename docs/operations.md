@@ -167,16 +167,25 @@ it does, on one path only: a payment it minted is polled at the recipient's own 
 because that is where the LUD-21 endpoint lives. `POLLS_PER_SEC` exists for exactly
 that, and it is politeness to a third party rather than protection of this process.
 
-A client who does not want that can have the other arrangement today, without any
-change here. They register through `POST /watched-payments` only, resolving the
-address in their own service, and serve the verify endpoint themselves: the SDK's
-`lightningVerifyEndpoint` asks the wallet on our behalf and `bankVerifyEndpoint`
-already did the same for a bank. Then every host this gateway polls belongs to that
-client, every one of them names its own pace, and the per-host ceiling never binds.
+A client who does not want that has the other arrangement. They register through
+`POST /watched-payments` only, resolving the address in their own service, and serve the
+verify endpoint themselves: the SDK's `lightningVerifyEndpoint` asks the wallet on our
+behalf and `bankVerifyEndpoint` already did the same for a bank. Then every host this
+gateway polls belongs to that client, every one of them names its own pace, and the
+per-host ceiling never binds.
 
-Both arrangements run on the same gateway with the same code, which is the point. What
-is not on the table is making the second one the only one, because it costs the client a
-service that has to stay up for days and a browser cannot provide that.
+On the watched path that arrangement is now the only one, and `VERIFY_CHALLENGE` is why.
+A `verify_url` a caller named is challenged before anything is polled and has to echo the
+nonce, which no wallet will do. The reason is not politeness. This gateway polls a URL
+for three days on a caller's word, and one caller pointing it at a big wallet gets that
+wallet's rate limit applied to this instance's address, which every other client here
+shares. Moving the last hop to the caller's own endpoint moves that cost onto the caller.
+An instance whose callers are all known can set `VERIFY_CHALLENGE=0` and go back to
+taking their word for it.
+
+Minting is untouched by that, because there the caller named no URL: the gateway found it
+in the wallet's own callback. So a browser-only integration, which cannot serve anything
+for days, still works exactly as before.
 
 `VERIFY_HOSTS` turns the second arrangement from something the client chooses into
 something the instance enforces. List the client's own hostnames and this gateway polls

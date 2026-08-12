@@ -1,5 +1,6 @@
 import { checkSettled } from "../../core/lnurl.js";
 import { seal, unseal } from "../../core/sealed.js";
+import { answerVerifyChallengeRequest } from "./webhook.js";
 
 const DEFAULT_POLL_EVERY_SECS = 5;
 const WALLET = "w";
@@ -47,6 +48,9 @@ export function lightningVerifyEndpoint(
   };
 
   return async (request: Request) => {
+    const consented = await answerVerifyChallengeRequest(request);
+    if (consented !== null) return consented;
+
     const sealed = new URL(request.url).searchParams.get(WALLET);
     if (sealed === null) return Response.json({ settled: false }, { status: 400 });
 

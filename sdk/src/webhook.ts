@@ -9,6 +9,7 @@ const SHARED_SECRET_PREFIX = "sha256=";
 const GATEWAY_KEY_PREFIX = "ed25519=";
 const DEFAULT_TOLERANCE_SECS = 300;
 const CHALLENGE = "webhook-challenge";
+const VERIFY_CHALLENGE = "verify-challenge";
 
 /** How far the gateway's clock may drift from yours before a webhook is refused */
 export type WebhookOptions = { toleranceSecs?: number };
@@ -164,14 +165,44 @@ export async function answerWebhookChallengeRequest(
 }
 
 function challenged(text: string): string | null {
+  return nonceOf(text, CHALLENGE);
+}
+
+function nonceOf(text: string, type: string): string | null {
   try {
     const said = JSON.parse(text) as Record<string, unknown>;
-    if (said["type"] !== CHALLENGE || typeof said["nonce"] !== "string") return null;
+    if (said["type"] !== type || typeof said["nonce"] !== "string") return null;
 
     return said["nonce"];
   } catch {
     return null;
   }
+}
+
+/**
+ * Answer the challenge the gateway sends a verify URL before it will poll it,
+ * which is how a caller shows the endpoint agreed to the traffic rather than
+ * merely being named. Returns null for anything that is not a challenge, so a
+ * verify endpoint hands the request on to its own reading of a payment.
+ *
+ * The nonce is echoed to whoever asked, which grants them nothing, so there is
+ * no signature to check here and no secret to hold
+ */
+export function answerVerifyChallenge(body: string): string | null {
+  const nonce = nonceOf(body, VERIFY_CHALLENGE);
+
+  return nonce === null ? null : JSON.stringify({ nonce });
+}
+
+/** {@link answerVerifyChallenge} against a `Request`, leaving its body unread */
+export async function answerVerifyChallengeRequest(request: Request): Promise<Response | null> {
+  if (request.method !== "POST") return null;
+
+  const answer = answerVerifyChallenge(await request.clone().text());
+
+  return answer === null
+    ? null
+    : new Response(answer, { headers: { "content-type": "application/json" } });
 }
 
 function recent(timestamp: string, toleranceSecs: number): boolean {

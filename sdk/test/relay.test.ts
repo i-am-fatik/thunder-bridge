@@ -38,6 +38,19 @@ describe("lightningVerifyEndpoint", () => {
     expect(url).not.toContain(HASH);
   });
 
+  it("agrees to be polled without ever asking the wallet about it", async () => {
+    const asked = walletSaying({ settled: false });
+    const answer = await lightningVerifyEndpoint({ secret: SECRET })(
+      new Request(await relayed(), {
+        method: "POST",
+        body: JSON.stringify({ type: "verify-challenge", nonce: "d4e5f6" }),
+      }),
+    );
+
+    expect(await answer.json()).toEqual({ nonce: "d4e5f6" });
+    expect(asked).toEqual([]);
+  });
+
   it("asks the wallet and relays what it said, without deciding anything", async () => {
     const asked = walletSaying({ settled: true, preimage: PREIMAGE });
     const answer = await lightningVerifyEndpoint({ secret: SECRET })(new Request(await relayed()));

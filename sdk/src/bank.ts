@@ -3,6 +3,7 @@ import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
 import { sha256 } from "../../core/sha256.js";
 import type { ThunderBridge } from "./client.js";
 import { minorScaleOf, minorUnitsOf } from "./currency.js";
+import { answerVerifyChallengeRequest } from "./webhook.js";
 
 const DEFAULT_CURRENCY = "CZK";
 const DEFAULT_LOOK_BACK_SECS = 7 * 24 * 60 * 60;
@@ -193,6 +194,9 @@ export function bankVerifyEndpoint(
   };
 
   return async (request: Request) => {
+    const consented = await answerVerifyChallengeRequest(request);
+    if (consented !== null) return consented;
+
     const asked = readQuery(new URL(request.url));
     if (asked === null) return Response.json({ settled: false }, { status: 400 });
 

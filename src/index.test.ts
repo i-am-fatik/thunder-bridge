@@ -15,11 +15,12 @@ import {
 	REQUEST_IN_FLIGHT,
 	VERIFY_HOST_REFUSED,
 	VERIFY_UNCONFIRMED,
+	VERIFY_UNCONSENTED,
 	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
 import type { Store } from "./store.ts";
 import { CLUSTER_KEY, openStore, until } from "./testing.ts";
-import { sign } from "./watch.ts";
+import { sign, VERIFY_CHALLENGE } from "./watch.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
 
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
@@ -43,9 +44,38 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			pollsPerSecond: 5,
 			workPerTick: 50,
 			verifyHosts: null,
+			verifyChallenge: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs,
 			token,
+			key: CLUSTER_KEY,
+		},
+		opened.store,
+	);
+
+	return {
+		service,
+		store: opened.store,
+		stop: () => {
+			service.stop();
+			opened.stop();
+		},
+	};
+}
+
+async function runningWithoutTheVerifyChallenge(): Promise<App> {
+	const opened = openStore();
+	const service = await start(
+		{
+			port: 0,
+			eagerDelayMs: 3000,
+			pollsPerSecond: 5,
+			workPerTick: 50,
+			verifyHosts: null,
+			verifyChallenge: false,
+			tickStallMs: 30_000,
+			drainTimeoutMs: 10_000,
+			token: null,
 			key: CLUSTER_KEY,
 		},
 		opened.store,
@@ -633,11 +663,23 @@ const WATCHABLE = {
 	expires_at: new Date(Date.now() + 3_600_000).toISOString(),
 };
 
+function nonceOffered(init: RequestInit | undefined): string | null {
+	if (init?.method !== "POST" || typeof init.body !== "string") return null;
+	try {
+		const asked = JSON.parse(init.body) as { type?: unknown; nonce?: unknown };
+		return asked.type === VERIFY_CHALLENGE && typeof asked.nonce === "string" ? asked.nonce : null;
+	} catch {
+		return null;
+	}
+}
+
 async function postWatch(app: App, body: unknown): Promise<Response> {
 	const outer = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
 		if (!target.includes("127.0.0.1") && target.includes("/verify")) {
+			const challenged = nonceOffered(args[1]);
+			if (challenged !== null) return Promise.resolve(Response.json({ nonce: challenged }));
 			return Promise.resolve(Response.json({ settled: false }));
 		}
 
@@ -744,6 +786,7 @@ async function pinnedTo(allowed: string[]): Promise<App> {
 			pollsPerSecond: 5,
 			workPerTick: 50,
 			verifyHosts: new Set(allowed),
+			verifyChallenge: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			token: null,
@@ -819,6 +862,66 @@ test("a verify URL that answers nothing like LUD-21 is refused, so nobody else g
 		expect(app.store.get(paymentId(CLUSTER_KEY, PAYMENT_HASH))).toBeNull();
 	} finally {
 		globalThis.fetch = real;
+		app.stop();
+	}
+});
+
+function verifySpeakingButSilentOnTheChallenge(seen: string[]): () => void {
+	const real = globalThis.fetch;
+	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
+		const target = String(args[0]);
+		if (target.includes("127.0.0.1")) return real(...args);
+
+		seen.push(`${args[1]?.method ?? "GET"} ${target}`);
+		return Promise.resolve(Response.json({ settled: false }));
+	}) as typeof fetch;
+
+	return () => {
+		globalThis.fetch = real;
+	};
+}
+
+test("a wallet cannot be pointed at, because it never agreed to be polled", async () => {
+	const app = await running();
+	const seen: string[] = [];
+	const restore = verifySpeakingButSilentOnTheChallenge(seen);
+
+	try {
+		const refused = await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ ...WATCHABLE, payment_hash: PAYMENT_HASH }),
+		});
+
+		expect(refused.status).toBe(424);
+		expect(((await refused.json()) as Problem)["type"]).toBe(VERIFY_UNCONSENTED);
+		expect(app.store.get(paymentId(CLUSTER_KEY, PAYMENT_HASH))).toBeNull();
+		expect(seen).toEqual([
+			`GET ${WATCHABLE.verify_url}`,
+			`POST ${WATCHABLE.verify_url}`,
+		]);
+	} finally {
+		restore();
+		app.stop();
+	}
+});
+
+test("an instance whose callers are all known can be told to stop asking", async () => {
+	const app = await runningWithoutTheVerifyChallenge();
+	const seen: string[] = [];
+	const restore = verifySpeakingButSilentOnTheChallenge(seen);
+
+	try {
+		const watched = await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ ...WATCHABLE, payment_hash: PAYMENT_HASH }),
+		});
+
+		expect(watched.status).toBe(201);
+		expect(seen).toEqual([`GET ${WATCHABLE.verify_url}`]);
+	} finally {
+		restore();
 		app.stop();
 	}
 });
