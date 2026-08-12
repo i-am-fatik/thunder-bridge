@@ -1,11 +1,11 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:thunder-bridge@0.8.8": "0.8.8"
+    "npm:thunder-bridge@0.8.9": "0.8.9"
   },
   "npm": {
-    "thunder-bridge@0.8.8": {
-      "integrity": "sha512-fLGoLV2wTLiv+WLje5QLnIrTfCdES4iyEH+X53DqPpMJJJuMtcUpPCdYxBaV2p2vyVt+SByt27VQ+uqRyP+KBA==",
+    "thunder-bridge@0.8.9": {
+      "integrity": "sha512-ln7yfAN7m+kT1MrCcmY3ff4Kl9Az0Ja+fKvISH1yDqzRYRBnf+iM1PZ1irFHzoH6ABOqzgMs9SCT8oDU1Ok9JQ==",
       "dependencies": [
         "uqr"
       ]
@@ -16,7 +16,7 @@
   },
   "workspace": {
     "dependencies": [
-      "npm:thunder-bridge@0.8.8"
+      "npm:thunder-bridge@0.8.9"
     ]
   }
 }
