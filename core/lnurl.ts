@@ -56,6 +56,7 @@ export type Settlement = {
 	ceiling: number | null;
 };
 
+const NAMES_ONE_ACCOUNT = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
 const MIN_PACE_SECS = 1;
 const MAX_PACE_SECS = 3600;
 const MIN_PER_SECOND = 0.01;
@@ -314,10 +315,31 @@ function withAmount(callback: string, amountMsat: number): string {
 
 function splitAddress(address: string): [string, string] {
 	const [user, domain, ...rest] = address.split("@");
-	if (!user || !domain || rest.length > 0 || !publicHttps(`https://${domain}/`)) {
+	if (
+		!user ||
+		!domain ||
+		rest.length > 0 ||
+		!NAMES_ONE_ACCOUNT.test(user) ||
+		!isNothingButAHost(domain) ||
+		!publicHttps(`https://${domain}/`)
+	) {
 		throw new WalletRefused("address-unusable", `${address} is not a usable lightning address`);
 	}
 	return [user, domain];
+}
+
+function isNothingButAHost(domain: string): boolean {
+	try {
+		const parsed = new URL(`https://${domain}/`);
+		return (
+			parsed.host === domain.toLowerCase() &&
+			parsed.pathname === "/" &&
+			parsed.search === "" &&
+			parsed.hash === ""
+		);
+	} catch {
+		return false;
+	}
 }
 
 async function fetchJson<T>(url: string, deadline?: AbortSignal): Promise<T> {

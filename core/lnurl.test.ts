@@ -60,6 +60,40 @@ test("a private host in an address is refused before anything is fetched", async
 	]);
 });
 
+test("an address cannot smuggle a path of its own into the well-known URL", async () => {
+	const smuggled = [
+		"a/../../admin@lnurl.example.com",
+		"a/../../../metrics@lnurl.example.com",
+		"x?leak=1@lnurl.example.com",
+		"x#fragment@lnurl.example.com",
+		"..@lnurl.example.com",
+		"someone@lnurl.example.com/evil",
+		"someone@lnurl.example.com?leak=1",
+		"someone@lnurl.example.com#fragment",
+	];
+	const refusal = await refusedBy(smuggled);
+
+	expect(refusal.wallets).toEqual(
+		smuggled.map((address) => ({ address, reason: "address-unusable" })),
+	);
+});
+
+test("the shapes a real lightning address takes are still read", async () => {
+	const seen: string[] = [];
+	const restore = answering(servedBy(), seen);
+	try {
+		await refusedBy(["sats.pay_1-x@coinos.io", "MixedCase@coinos.io", "someone@wallet.io:8443"]);
+	} finally {
+		restore();
+	}
+
+	expect(seen).toEqual([
+		"https://coinos.io/.well-known/lnurlp/sats.pay_1-x",
+		"https://coinos.io/.well-known/lnurlp/MixedCase",
+		"https://wallet.io:8443/.well-known/lnurlp/someone",
+	]);
+});
+
 const WELL_KNOWN = "https://coinos.io/.well-known/lnurlp/charter";
 const CALLBACK = "https://coinos.io/api/lnurl/3c14fd5d-8e25-4bd2-86d6-2dc0965e1ac5";
 const PROOF_URL = "https://coinos.io/api/lnurl/verify/33bb39d0-e170-4207-a24f-047a1663ac62";
