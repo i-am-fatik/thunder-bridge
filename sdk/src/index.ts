@@ -1,4 +1,6 @@
 export { ThunderBridge } from "./client.js";
+export { Gateways } from "./gateways.js";
+export type { GatewaysOptions } from "./gateways.js";
 export type {
   CreateOptions,
   FollowOptions,
