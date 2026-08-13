@@ -35,6 +35,7 @@ function payment(nth: number): UnsavedPayment {
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
 		sealed: null,
+		caller: null,
 		webhooks: [{ url: "https://example.com/hook", secret: "hunter2" }],
 	};
 }

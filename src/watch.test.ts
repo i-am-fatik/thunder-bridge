@@ -91,6 +91,7 @@ function payment(overrides: Partial<Payment> = {}): Payment {
 		verifyUrl: VERIFY_URL,
 		trigger: null,
 		sealed: null,
+		caller: null,
 		webhooks: [{ url: HOOK_URL, secret: "hunter2" }],
 		...overrides,
 	};

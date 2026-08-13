@@ -10,6 +10,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import * as log from "./log.ts";
 
 import { hexToBytes } from "../core/bytes.ts";
+import { callerOf } from "../core/caller.ts";
 import { signingKeyFromSeed, type SigningKey } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
@@ -430,34 +431,64 @@ async function route(
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
-		const payment = store.get(one[1]!);
-		return payment ? json(paymentToWire(payment)) : notFound();
+		return handedTo(one[1]!, store, await callerFor(await asRequest(incoming)));
 	}
 	if (path === "/incoming-payments" && incoming.method === "GET") {
 		return serving.token === null ? notFound() : listed(incoming, store);
 	}
 	if (path === "/incoming-payments" && incoming.method === "POST") {
 		if (serving.verifyHosts) return mintsNothing();
-		return await create(await asRequest(incoming), store, serving.webhookKey);
+		const request = await asRequest(incoming);
+		return await create(request, store, serving.webhookKey, await callerFor(request));
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
 		if (serving.verifyHosts) return mintsNothing();
 		return await quoted(await asRequest(incoming));
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
-		return await watchOnly(await asRequest(incoming), store, serving);
+		const request = await asRequest(incoming);
+		return await watchOnly(request, store, serving, await callerFor(request));
 	}
 	if (path === "/ws-tickets" && incoming.method === "POST") {
-		return await ticketed(await asRequest(incoming), store, serving.key);
+		const request = await asRequest(incoming);
+		return await ticketed(request, store, serving.key, await callerFor(request));
 	}
 
 	return notFound();
+}
+
+/**
+ * A payment is handed to the key that created it and to nobody else. A stranger
+ * holding an id is answered 404 rather than 403, because a 403 would confirm the
+ * payment exists, which is the question they were asking
+ */
+function handedTo(id: string, store: Store, caller: string | null): Response {
+	const payment = store.get(id);
+	if (!payment || !belongsTo(payment, caller)) return notFound();
+
+	return json(paymentToWire(payment));
+}
+
+function belongsTo(payment: Payment, caller: string | null): boolean {
+	return payment.caller === null || payment.caller === caller;
+}
+
+async function callerFor(request: Request): Promise<string | null> {
+	const asked = new URL(request.url);
+
+	return await callerOf(
+		request.headers,
+		request.method,
+		`${asked.pathname}${asked.search}`,
+		await request.clone().text(),
+	);
 }
 
 async function create(
 	request: Request,
 	store: Store,
 	webhookKey: SigningKey,
+	caller: string | null,
 ): Promise<Response> {
 	let asked: CreateRequest;
 	try {
@@ -484,7 +515,7 @@ async function create(
 	}
 
 	try {
-		const payment = await mint(asked, store);
+		const payment = await mint(asked, store, caller);
 		if (key) store.fulfill(key, payment.id);
 
 		return json(paymentToWire(payment), 201);
@@ -500,7 +531,11 @@ async function create(
 	}
 }
 
-async function mint(asked: CreateRequest, store: Store): Promise<Payment> {
+async function mint(
+	asked: CreateRequest,
+	store: Store,
+	caller: string | null,
+): Promise<Payment> {
 	const resolved = await resolve(asked.addresses, asked.amountMsat);
 
 	return store.insert({
@@ -515,6 +550,7 @@ async function mint(asked: CreateRequest, store: Store): Promise<Payment> {
 		verifyUrl: resolved.verifyUrl,
 		trigger: asked.trigger,
 		sealed: null,
+		caller,
 		webhooks: asked.webhook ? [asked.webhook] : [],
 	});
 }
@@ -526,7 +562,12 @@ function replay(store: Store, paymentId: string): Response {
 	return json(paymentToWire(payment), 201);
 }
 
-async function ticketed(request: Request, store: Store, key: Uint8Array): Promise<Response> {
+async function ticketed(
+	request: Request,
+	store: Store,
+	key: Uint8Array,
+	caller: string | null,
+): Promise<Response> {
 	let asked: TicketRequest;
 	try {
 		asked = readTicketRequest(await request.json());
@@ -534,7 +575,10 @@ async function ticketed(request: Request, store: Store, key: Uint8Array): Promis
 		return unreadable(error);
 	}
 
-	if (asked.kind === "payment" && !store.get(asked.paymentId)) return notFound();
+	if (asked.kind === "payment") {
+		const payment = store.get(asked.paymentId);
+		if (!payment || !belongsTo(payment, caller)) return notFound();
+	}
 
 	const subject: Subject =
 		asked.kind === "trigger"
@@ -573,7 +617,12 @@ function listed(incoming: IncomingMessage, store: Store): Response {
 	});
 }
 
-async function watchOnly(request: Request, store: Store, serving: Serving): Promise<Response> {
+async function watchOnly(
+	request: Request,
+	store: Store,
+	serving: Serving,
+	caller: string | null,
+): Promise<Response> {
 	const { key, webhookKey } = serving;
 	let asked: WatchRequest;
 	try {
@@ -596,7 +645,7 @@ async function watchOnly(request: Request, store: Store, serving: Serving): Prom
 	}
 
 	const known = store.get(paymentId(key, asked.paymentHash));
-	if (known && !isThisWatch(known, asked)) {
+	if (known && (!belongsTo(known, caller) || !isThisWatch(known, asked))) {
 		return conflict(ALREADY_WATCHED, "This payment hash is already being watched here");
 	}
 	if (serving.verifyHosts && !serving.verifyHosts.has(hostOf(asked.verifyUrl))) {
@@ -624,6 +673,7 @@ async function watchOnly(request: Request, store: Store, serving: Serving): Prom
 		verifyUrl: asked.verifyUrl,
 		trigger: asked.trigger,
 		sealed: asked.sealed,
+		caller,
 		webhooks: asked.webhook ? [asked.webhook] : [],
 	});
 
@@ -672,10 +722,12 @@ async function asRequest(incoming: IncomingMessage): Promise<Request> {
 		chunks.push(chunk as Buffer);
 	}
 
+	const body = Buffer.concat(chunks);
+
 	return new Request(`http://app${incoming.url ?? "/"}`, {
 		method: incoming.method,
 		headers,
-		body: Buffer.concat(chunks),
+		...(body.length === 0 ? {} : { body }),
 	});
 }
 

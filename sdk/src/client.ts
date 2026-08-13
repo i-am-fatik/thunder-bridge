@@ -19,6 +19,8 @@ import type {
   WatchPaymentParams,
 } from "./types.js";
 import { preimageMatchesHash } from "../../core/bolt11.js";
+import { callerKey, signedAs } from "../../core/caller.js";
+import type { SigningKey } from "../../core/ed25519.js";
 import { sha256Hex } from "../../core/sha256.js";
 import { isProvablyPaid, proveOrigin } from "./verify.js";
 import {
@@ -68,6 +70,14 @@ export interface ThunderBridgeOptions {
    * through a ticket
    */
   token?: string;
+
+  /**
+   * The same long lived server side secret your rail derives its preimages from.
+   * Given here, every call carries a signature the gateway reads as your identity,
+   * so a payment you create is handed back to you and to nobody else. Withheld,
+   * you are anonymous and any holder of an id can read what it names
+   */
+  secret?: string;
 }
 
 export interface WaitOptions {
@@ -136,12 +146,15 @@ export class ThunderBridge {
   private readonly baseUrl: string;
   private readonly verify: boolean;
   private readonly token: string | null;
+  private readonly secret: string | null;
   private strangers: Promise<boolean> | null = null;
+  private speaks: Promise<SigningKey> | null = null;
 
   constructor(baseUrl: string, options?: ThunderBridgeOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.verify = options?.verify ?? true;
     this.token = options?.token ?? null;
+    this.secret = options?.secret ?? null;
   }
 
   /**
@@ -178,16 +191,17 @@ export class ThunderBridge {
    * and `GatewayCheatError` when what comes back is not what you asked for
    */
   async createPayment(params: CreatePaymentParams, options?: CreateOptions): Promise<Payment> {
-    const headers = this.sending();
+    const sent = createRequestBody(
+      params,
+      options?.trigger ? sha256Hex(unguessable(options.trigger)) : null,
+    );
+    const headers = await this.sending("/incoming-payments", sent);
     if (options?.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
 
     const response = await fetch(`${this.baseUrl}/incoming-payments`, {
       method: "POST",
       headers,
-      body: createRequestBody(
-        params,
-        options?.trigger ? sha256Hex(unguessable(options.trigger)) : null,
-      ),
+      body: sent,
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -204,10 +218,11 @@ export class ThunderBridge {
    * it for one, and asking mints it
    */
   async createQuote(params: CreateQuoteParams): Promise<Quote> {
+    const sent = quoteRequestBody(params);
     const response = await fetch(`${this.baseUrl}/quotes`, {
       method: "POST",
-      headers: this.sending(),
-      body: quoteRequestBody(params),
+      headers: await this.sending("/quotes", sent),
+      body: sent,
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -246,8 +261,9 @@ export class ThunderBridge {
   }
 
   async getPayment(id: string): Promise<Payment | null> {
-    const response = await fetch(`${this.baseUrl}/incoming-payments/${encodeURIComponent(id)}`, {
-      headers: this.reading(),
+    const path = `/incoming-payments/${encodeURIComponent(id)}`;
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      headers: await this.reading("GET", path),
     });
     if (response.status === 404) return null;
     if (!response.ok) throw await problemFrom(response);
@@ -260,8 +276,9 @@ export class ThunderBridge {
    * `getPayment` refuses it and this reads the shape both rails share
    */
   async getWatched(id: string): Promise<TriggerEvent | null> {
-    const response = await fetch(`${this.baseUrl}/incoming-payments/${encodeURIComponent(id)}`, {
-      headers: this.reading(),
+    const path = `/incoming-payments/${encodeURIComponent(id)}`;
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      headers: await this.reading("GET", path),
     });
     if (response.status === 404) return null;
     if (!response.ok) throw await problemFrom(response);
@@ -287,9 +304,9 @@ export class ThunderBridge {
    * pretend otherwise
    */
   async listPayments(limit?: number): Promise<{ payments: TriggerEvent[]; scanned: number }> {
-    const query = limit === undefined ? "" : `?limit=${limit}`;
-    const response = await fetch(`${this.baseUrl}/incoming-payments${query}`, {
-      headers: this.reading(),
+    const path = `/incoming-payments${limit === undefined ? "" : `?limit=${limit}`}`;
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      headers: await this.reading("GET", path),
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -487,13 +504,14 @@ export class ThunderBridge {
    * the watcher needs goes in `sealed`, which the gateway cannot read
    */
   async watchPayment(params: WatchPaymentParams): Promise<TriggerEvent> {
+    const sent = watchRequestBody(
+      params,
+      params.trigger ? sha256Hex(unguessable(params.trigger)) : null,
+    );
     const response = await fetch(`${this.baseUrl}/watched-payments`, {
       method: "POST",
-      headers: this.sending(),
-      body: watchRequestBody(
-        params,
-        params.trigger ? sha256Hex(unguessable(params.trigger)) : null,
-      ),
+      headers: await this.sending("/watched-payments", sent),
+      body: sent,
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -570,10 +588,11 @@ export class ThunderBridge {
   }
 
   private async wsTicket(body: Record<string, string>): Promise<string> {
+    const sent = JSON.stringify(body);
     const response = await fetch(`${this.baseUrl}/ws-tickets`, {
       method: "POST",
-      headers: this.sending(),
-      body: JSON.stringify(body),
+      headers: await this.sending("/ws-tickets", sent),
+      body: sent,
     });
     if (!response.ok) throw await problemFrom(response);
 
@@ -587,12 +606,25 @@ export class ThunderBridge {
     return encodeURIComponent(minted.ticket);
   }
 
-  private sending(): Record<string, string> {
-    return { "content-type": "application/json", ...this.reading() };
+  private async sending(path: string, body: string): Promise<Record<string, string>> {
+    return { "content-type": "application/json", ...(await this.reading("POST", path, body)) };
   }
 
-  private reading(): Record<string, string> {
-    return this.token === null ? {} : { authorization: `Bearer ${this.token}` };
+  private async reading(
+    method: string,
+    path: string,
+    body = "",
+  ): Promise<Record<string, string>> {
+    return {
+      ...(this.token === null ? {} : { authorization: `Bearer ${this.token}` }),
+      ...(this.secret === null ? {} : await signedAs(await this.speaking(), method, path, body)),
+    };
+  }
+
+  private async speaking(): Promise<SigningKey> {
+    this.speaks ??= callerKey(this.secret ?? "");
+
+    return await this.speaks;
   }
 
   private proven(settled: TriggerEvent): TriggerEvent {

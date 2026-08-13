@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { callerKey, callerOf } from "../../core/caller.js";
 import { ThunderBridge } from "../src/client";
 import {
   GatewayCheatError,
@@ -1846,5 +1847,71 @@ describe("refusesStrangers", () => {
     await gateway.refusesStrangers();
 
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("a client that names itself", () => {
+  const SECRET = "rail_5c1d9e2f7a0b384c6d5e1f2a";
+
+  function headersOf(call: FetchCall | undefined): Headers {
+    return new Headers((call?.init?.headers ?? {}) as Record<string, string>);
+  }
+
+  it("signs a create the way the gateway reads it, path and body and all", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments`]: () => jsonResponse(wireOf(pendingPayment()), 201),
+    });
+
+    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).createPayment({
+      lnAddresses: [LN_ADDRESS],
+      amountMsat: AMOUNT_MSAT,
+    });
+
+    const call = calls[0];
+    expect(
+      await callerOf(
+        headersOf(call),
+        "POST",
+        "/incoming-payments",
+        String(call?.init?.body ?? ""),
+      ),
+    ).toBe((await callerKey(SECRET)).publicKeyHex);
+  });
+
+  it("signs a read over the path it reads, query string included", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments?limit=10`]: () =>
+        jsonResponse({ payments: [], settled_scanned: 0 }),
+    });
+
+    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).listPayments(10);
+
+    expect(await callerOf(headersOf(calls[0]), "GET", "/incoming-payments?limit=10", "")).toBe(
+      (await callerKey(SECRET)).publicKeyHex,
+    );
+    expect(await callerOf(headersOf(calls[0]), "GET", "/incoming-payments", "")).toBeNull();
+  });
+
+  it("carries the secret nowhere, only what it proves", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments?limit=10`]: () =>
+        jsonResponse({ payments: [], settled_scanned: 0 }),
+    });
+
+    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).listPayments(10);
+
+    for (const [, value] of headersOf(calls[0])) expect(value).not.toContain(SECRET);
+  });
+
+  it("says nothing when no secret was given, so an anonymous client still works", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments?limit=10`]: () =>
+        jsonResponse({ payments: [], settled_scanned: 0 }),
+    });
+
+    await new ThunderBridge(GATEWAY, { verify: false }).listPayments(10);
+
+    expect(headersOf(calls[0]).get("x-signature")).toBeNull();
+    expect(headersOf(calls[0]).get("x-client-key")).toBeNull();
   });
 });

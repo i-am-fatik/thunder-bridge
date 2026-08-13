@@ -4,6 +4,7 @@ import { connect } from "node:net";
 
 import { expect, test, vi } from "vitest";
 
+import { callerKey, signedAs } from "../core/caller.ts";
 import { start, type Service } from "./index.ts";
 import { paymentId } from "./ledger.ts";
 import type { UnsavedPayment } from "./payment.ts";
@@ -104,6 +105,7 @@ function pendingPayment(overrides: Partial<UnsavedPayment> = {}): UnsavedPayment
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
 		sealed: null,
+		caller: null,
 		webhooks: [{ url: "https://example.com/hook", secret: "hunter2" }],
 		...overrides,
 	};
@@ -656,6 +658,8 @@ test("a ticket minted on one instance opens a socket on another sharing the clus
 	opening.stop();
 });
 
+const OWNER = "rail_owner_2f0c8a4e7b1d9c05e3a71486";
+const STRANGER = "rail_stranger_9a8b7c6d5e4f3a2b1c0d";
 const WATCHED_HASH = "cc".repeat(32);
 const WATCHABLE = {
 	payment_hash: WATCHED_HASH,
@@ -673,7 +677,7 @@ function nonceOffered(init: RequestInit | undefined): string | null {
 	}
 }
 
-async function postWatch(app: App, body: unknown): Promise<Response> {
+async function postWatch(app: App, body: unknown, secret: string | null = null): Promise<Response> {
 	const outer = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
@@ -686,16 +690,110 @@ async function postWatch(app: App, body: unknown): Promise<Response> {
 		return outer(...args);
 	}) as typeof fetch;
 
+	const sent = JSON.stringify(body);
 	try {
 		return await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
 			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(body),
+			headers: {
+				"content-type": "application/json",
+				...(secret === null ? {} : await speaking(secret, "POST", "/watched-payments", sent)),
+			},
+			body: sent,
 		});
 	} finally {
 		globalThis.fetch = outer;
 	}
 }
+
+async function speaking(
+	secret: string,
+	method: string,
+	path: string,
+	body: string,
+): Promise<Record<string, string>> {
+	return await signedAs(await callerKey(secret), method, path, body);
+}
+
+async function readAs(app: App, id: string, secret: string | null): Promise<Response> {
+	const path = `/incoming-payments/${id}`;
+
+	return await fetch(`http://127.0.0.1:${app.service.port}${path}`, {
+		headers: secret === null ? {} : await speaking(secret, "GET", path, ""),
+	});
+}
+
+test("a watch that named its caller is handed back to that caller and to nobody else", async () => {
+	const app = await running();
+
+	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const id = String(created["id"]);
+
+	expect((await readAs(app, id, OWNER)).status).toBe(200);
+	expect((await readAs(app, id, STRANGER)).status).toBe(404);
+	expect((await readAs(app, id, null)).status).toBe(404);
+
+	app.stop();
+});
+
+test("a stranger who knows the payment hash cannot join somebody else's watch", async () => {
+	const app = await running();
+	const restore = hookAnswering("s".repeat(32));
+
+	const mine = { ...WATCHABLE, webhook: { url: "https://shop.example/hooks/mine", secret: "s".repeat(32) } };
+	const created = (await (await postWatch(app, mine, OWNER)).json()) as Problem;
+
+	const theirs = await postWatch(app, WATCHABLE, STRANGER);
+	expect(theirs.status).toBe(409);
+	expect(((await theirs.json()) as Problem)["type"]).toBe(ALREADY_WATCHED);
+
+	const stored = app.store.get(String(created["id"]));
+	expect(stored?.webhooks.map((hook) => hook.url)).toEqual(["https://shop.example/hooks/mine"]);
+
+	restore();
+	app.stop();
+});
+
+test("a ticket is not minted for a payment that belongs to somebody else", async () => {
+	const app = await running();
+
+	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const asked = JSON.stringify({ payment_id: created["id"] });
+	const port = app.service.port;
+
+	const theirs = await fetch(`http://127.0.0.1:${port}/ws-tickets`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...(await speaking(STRANGER, "POST", "/ws-tickets", asked)),
+		},
+		body: asked,
+	});
+	expect(theirs.status).toBe(404);
+
+	const ours = await fetch(`http://127.0.0.1:${port}/ws-tickets`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+		},
+		body: asked,
+	});
+	expect(ours.status).toBe(200);
+
+	app.stop();
+});
+
+test("a watch nobody signed for stays readable by anyone, until callers are required", async () => {
+	const app = await running();
+
+	const created = (await (await postWatch(app, WATCHABLE)).json()) as Problem;
+	const id = String(created["id"]);
+
+	expect((await readAs(app, id, null)).status).toBe(200);
+	expect((await readAs(app, id, STRANGER)).status).toBe(200);
+
+	app.stop();
+});
 
 test("an invoice can be watched without telling the gateway who or how much", async () => {
 	const app = await running();

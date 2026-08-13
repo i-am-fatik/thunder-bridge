@@ -24,6 +24,7 @@ export type Payment = {
 	verifyUrl: string;
 	trigger: string | null;
 	sealed: string | null;
+	caller: string | null;
 	webhooks: Webhook[];
 };
 
