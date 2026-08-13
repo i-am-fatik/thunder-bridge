@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import { decodeInvoice } from "../core/bolt11.ts";
+import * as log from "./log.ts";
 import { paymentNamedBy } from "../core/caller.ts";
 
 import {
@@ -266,17 +267,15 @@ export class Ledger {
 	readonly origin: string;
 	private readonly db: DatabaseSync;
 	private readonly key: Uint8Array;
-	private readonly retired: Uint8Array[];
 	private readonly tuning: Tuning;
 	private readonly statements: Statements;
 
-	constructor(path: string, key: Uint8Array, tuning: Tuning, retired: Uint8Array[] = []) {
+	constructor(path: string, key: Uint8Array, tuning: Tuning) {
 		this.db = new DatabaseSync(path);
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec("PRAGMA foreign_keys = ON");
 		this.migrate();
 		this.key = key;
-		this.retired = retired;
 		this.tuning = tuning;
 
 		this.db
@@ -285,6 +284,7 @@ export class Ledger {
 		this.origin = (
 			this.db.prepare("SELECT value FROM meta WHERE key = 'origin'").get() as { value: string }
 		).value;
+		this.resignUnderTheKeyWeHold();
 
 		this.statements = {
 			read: this.db.prepare("SELECT id, payment FROM accepted WHERE id = ? ORDER BY origin, seq"),
@@ -822,6 +822,55 @@ export class Ledger {
 		if (this.db.isOpen) this.db.close();
 	}
 
+	/**
+	 * A rotation is a rotation. The ledger remembers which key signed it, by a
+	 * fingerprint that proves the key without holding it, and a boot under a new key
+	 * re-signs every fact in one transaction. Nothing keeps the old value working
+	 * afterwards, which is the whole difference between rotating a key and merely
+	 * adding one.
+	 *
+	 * The pass is bounded by what a ledger keeps, which is an hour past settlement
+	 * plus the window for sealed blobs, so it is not a migration of history
+	 */
+	private resignUnderTheKeyWeHold(): void {
+		const held = createHmac("sha256", this.key).update("ledger-key").digest("hex");
+		const written = this.db.prepare("SELECT value FROM meta WHERE key = 'ledger-key'").get() as
+			| { value: string }
+			| undefined;
+		if (written?.value === held) return;
+
+		this.transact(() => {
+			if (written !== undefined) this.resignEveryFact();
+			this.db
+				.prepare(
+					"INSERT INTO meta (key, value) VALUES ('ledger-key', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+				)
+				.run(held);
+		});
+	}
+
+	private resignEveryFact(): void {
+		let resigned = 0;
+		for (const source of SOURCES) {
+			const columns = COLUMNS[source].split(", ");
+			const rows = this.db.prepare(`SELECT ${COLUMNS[source]} FROM ${source}`).all() as Record<
+				string,
+				string | number | null
+			>[];
+
+			for (const row of rows) {
+				const fields = columns
+					.filter((column) => column !== "mac")
+					.map((column) => row[column] ?? null);
+				this.db
+					.prepare(`UPDATE ${source} SET mac = ? WHERE origin = ? AND seq = ?`)
+					.run(macWith(this.key, source, fields), String(row["origin"]), Number(row["seq"]));
+				resigned += 1;
+			}
+		}
+		if (resigned > 0) log.info(`re-signed ${resigned} facts under the cluster key now held`);
+	}
+
 	private migrate(): void {
 		const found = this.schemaVersion();
 		if (found > SCHEMA_VERSION) {
@@ -930,15 +979,9 @@ export class Ledger {
 
 	private verify(source: Source, fields: (string | number | null)[], mac: string): void {
 		const got = Buffer.from(mac, "hex");
-		const holds = this.everyKeyHeld().some((key) => {
-			const want = Buffer.from(macWith(key, source, fields), "hex");
-			return want.length === got.length && timingSafeEqual(want, got);
-		});
+		const want = Buffer.from(macWith(this.key, source, fields), "hex");
+		const holds = want.length === got.length && timingSafeEqual(want, got);
 		if (!holds) throw new Error(`a ${source} fact arrived without the cluster key`);
-	}
-
-	private everyKeyHeld(): Uint8Array[] {
-		return [this.key, ...this.retired];
 	}
 
 	/**
@@ -950,7 +993,7 @@ export class Ledger {
 	private namesItsOwnHash(id: string, payment: { caller: string | null; paymentHash: string }): boolean {
 		if (payment.caller !== null) return id === paymentNamedBy(payment.caller, payment.paymentHash);
 
-		return this.everyKeyHeld().some((key) => id === paymentId(key, payment.paymentHash));
+		return id === paymentId(this.key, payment.paymentHash);
 	}
 
 	private provenAccepted(fact: AcceptedFact): void {

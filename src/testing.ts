@@ -26,23 +26,16 @@ export type TestOptions = {
 	takeoverAfterSecs?: number;
 	deliveryBackoffSecs?: number;
 	key?: Uint8Array;
-	retiredKeys?: Uint8Array[];
 };
 
 export function openStore(options: TestOptions = {}): Opened {
 	const path = options.ledger ?? join(mkdtempSync(join(tmpdir(), "tbd-")), "ledger.db");
 	const key = options.key ?? CLUSTER_KEY;
-	const retired = options.retiredKeys ?? [];
-	const ledger = new Ledger(
-		path,
-		key,
-		{
-			takeoverAfterSecs: options.takeoverAfterSecs ?? 600,
-			deliveryBackoffSecs: options.deliveryBackoffSecs ?? 30,
-		},
-		retired,
-	);
-	const store = new Store(ledger, key, options.maxPending ?? 5000, retired);
+	const ledger = new Ledger(path, key, {
+		takeoverAfterSecs: options.takeoverAfterSecs ?? 600,
+		deliveryBackoffSecs: options.deliveryBackoffSecs ?? 30,
+	});
+	const store = new Store(ledger, key, options.maxPending ?? 5000);
 	const cluster = new Cluster(store.gossip, {
 		key,
 		listenPort: options.listenPort ?? 0,

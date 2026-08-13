@@ -1,4 +1,7 @@
 import { createHmac } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { callerKey, paymentNamedBy } from "../core/caller.ts";
 
@@ -359,7 +362,7 @@ test("a payment minted with nobody listening reaches the instance that joins lat
 	}
 });
 
-test("an instance rolled onto a new key still takes the facts its unrolled peers signed", () => {
+test("an instance on a new key refuses the facts the old key signed, which is what rotating means", () => {
 	const NEXT_KEY = Buffer.from("11".repeat(32), "hex");
 	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
 
@@ -368,17 +371,86 @@ test("an instance rolled onto a new key still takes the facts its unrolled peers
 	const { facts } = before.store.gossip.since(nothingSeen);
 	before.stop();
 
-	const rolled = openStore({ key: NEXT_KEY, retiredKeys: [CLUSTER_KEY] });
-	const alone = openStore({ key: NEXT_KEY });
+	const rolled = openStore({ key: NEXT_KEY });
 	try {
-		rolled.store.gossip.onFacts(facts);
-		expect(rolled.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
-
-		expect(() => alone.store.gossip.onFacts(facts)).toThrow("without the cluster key");
-		expect(alone.store.get(taken.id)).toBeNull();
+		expect(() => rolled.store.gossip.onFacts(facts)).toThrow("without the cluster key");
+		expect(rolled.store.get(taken.id)).toBeNull();
 	} finally {
 		rolled.stop();
-		alone.stop();
+	}
+});
+
+test("a ledger rolled onto a new key keeps every payment, because the facts are re-signed", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-rolled-"));
+	const ledger = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("22".repeat(32), "hex");
+
+	const before = openStore({ ledger });
+	const taken = before.store.insert(payment(1));
+	before.store.paid(taken.id, preimage(1));
+	before.stop();
+
+	const after = openStore({ ledger, key: NEXT_KEY });
+	try {
+		expect(after.store.get(taken.id)?.status).toBe("paid");
+
+		const settled = after.store.list(10, 1000);
+		expect(settled.map((one) => one.id)).toEqual([taken.id]);
+	} finally {
+		after.stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a caller's payment replicates across a rotation, and the old key opens nothing", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-resigned-"));
+	const ledger = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("33".repeat(32), "hex");
+	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
+	const owner = (await callerKey("rail_rolled_8c2f5a1d")).publicKeyHex;
+
+	const before = openStore({ ledger });
+	const taken = before.store.insert({ ...payment(2), caller: owner });
+	before.stop();
+
+	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const { facts } = rolled.store.gossip.since(nothingSeen);
+	rolled.stop();
+
+	const peer = openStore({ key: NEXT_KEY });
+	const stale = openStore();
+	try {
+		peer.store.gossip.onFacts(facts);
+		expect(peer.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
+
+		expect(() => stale.store.gossip.onFacts(facts)).toThrow("without the cluster key");
+	} finally {
+		peer.stop();
+		stale.stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a payment nobody signed for stops replicating after a rotation, because the key named it", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-anonymous-"));
+	const ledger = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("44".repeat(32), "hex");
+	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
+
+	const before = openStore({ ledger });
+	const taken = before.store.insert(payment(3));
+	before.stop();
+
+	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const { facts } = rolled.store.gossip.since(nothingSeen);
+	const peer = openStore({ key: NEXT_KEY });
+	try {
+		expect(rolled.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
+		expect(() => peer.store.gossip.onFacts(facts)).toThrow("does not name the invoice");
+	} finally {
+		rolled.stop();
+		peer.stop();
+		rmSync(directory, { recursive: true, force: true });
 	}
 });
 

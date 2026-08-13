@@ -37,14 +37,13 @@ export class Store {
 	private readonly maxPending: number;
 	private convergedAt: number | null = null;
 
-	constructor(ledger: Ledger, key: Uint8Array, maxPending: number, retired: Uint8Array[] = []) {
+	constructor(ledger: Ledger, key: Uint8Array, maxPending: number) {
 		this.ledger = ledger;
 		this.key = key;
 		this.maxPending = maxPending;
 		this.gossip = {
 			self: this.ledger.origin,
 			key: this.key,
-			retired,
 			peers: new Map(),
 			onFacts: (facts) => {
 				for (const settled of this.ledger.absorb(facts)) {

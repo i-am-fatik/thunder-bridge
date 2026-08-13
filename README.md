@@ -124,7 +124,8 @@ standard's camelCase, and there is no authorization server.
 | Variable | Default | Meaning |
 |---|---|---|
 | `CLUSTER_KEY` | required | 32 bytes of hex, the swarm topic and the right to write a fact |
-| `CLUSTER_KEYS_RETIRED` | none | comma-separated 32-byte hex keys still accepted when verifying a peer's facts, so `CLUSTER_KEY` can be rotated without throwing the ledger away |
+| `CLIENT_KEYS` | none | comma-separated client public keys this instance serves, and it serves nobody else. Unset serves everybody |
+| `KEEP_SEALED_DAYS` | `90` | how long a sealed blob outlives the payment it belonged to, after which it goes too |
 | `PORT` | `3000` | listen port, Railway sets this for you |
 | `LEDGER` | `./data/ledger.db` | the SQLite file, everything lives here |
 | `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/ready`, `/openapi.yaml`, `/docs` and `/webhook-key`. Blank counts as none, so a variable someone emptied leaves the gateway public rather than private and open to everyone |

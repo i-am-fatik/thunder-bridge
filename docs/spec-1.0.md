@@ -213,6 +213,13 @@ ledger holds, so the whole reason retired keys existed is gone. Rotation now re-
 the retained log in one transaction at startup under the new key, and the old value is
 worth nothing afterwards. `CLUSTER_KEYS_RETIRED` goes with it.
 
+One thing does not survive, and implementing it is how that turned up. A payment its
+caller signed for is named after that caller, so a rotation carries it across
+untouched. A payment nobody signed for is named by this instance's key, so after a
+rotation it stays readable where it lives and a peer refuses it, because it no longer
+names its own invoice. Re-signing a MAC cannot fix a name. Minted payments are the
+unsigned ones, which is another reason minting is off by default.
+
 What it costs: a rotation becomes an operation with a data pass, so it has to be
 transactional and it has to be tested interrupted halfway. While a roll is in
 progress the cluster is partitioned until every instance carries the new value, which

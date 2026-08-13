@@ -13,7 +13,6 @@ export type Note = { have: Watermarks } | { facts: Facts; more: boolean };
 export type Gossip = {
 	self: string;
 	key: Uint8Array;
-	retired: Uint8Array[];
 	peers: Map<string, (note: Note) => void>;
 	onFacts: (facts: Facts) => void;
 	onConverged: () => void;
@@ -37,7 +36,7 @@ export function attach(gossip: Gossip, stream: unknown): void {
 		protocol: PROTOCOL,
 		handshake: c.json,
 		onopen: (them: Introduction) => {
-			if (!introduces([gossip.key, ...gossip.retired], them)) {
+			if (!introduces([gossip.key], them)) {
 				log.warn("a peer without the cluster key tried to join");
 				channel?.close();
 				return;

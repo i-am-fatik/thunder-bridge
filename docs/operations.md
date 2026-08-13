@@ -98,22 +98,27 @@ out of Railway the moment the instance is up.
 
 ## Rotate a cluster key
 
-Set `CLUSTER_KEYS_RETIRED` to the old key on every instance first, then move
-`CLUSTER_KEY` to the new one, instance by instance. A retired key still verifies a
-peer's facts and a peer's handshake, so a rolled instance keeps absorbing what an
-unrolled one signs, and the ledger it already holds stays readable throughout: the
-fact MAC is only ever checked on arrival from a peer, never on a local read.
+A rotation is a rotation. Set `CLUSTER_KEY` to the new value and restart: the ledger
+remembers which key signed it, by a fingerprint that proves the key without holding
+it, and a boot under a new one re-signs every fact it still holds in one transaction.
+The old value opens nothing afterwards, which is the point. There is no list of
+retired keys any more, because a key that still admits a peer and still writes facts
+was never retired.
 
-Two costs, both bounded. The swarm topic comes from `CLUSTER_KEY` alone, so while
-the roll is half done the two halves cannot find each other over the DHT and
-converge only once everyone carries the new key. And a socket ticket is signed with
-`CLUSTER_KEY` alone too, so a ticket minted by one half and presented to the other
-is refused for its 60 second life, which costs the client a re-mint.
+The pass is bounded by what a ledger keeps rather than by history: an hour past
+settlement, plus the window `KEEP_SEALED_DAYS` sets for sealed blobs.
 
-Payments keep the id they were minted under, because an id is a keyed hash of the
-payment hash. After a rotation the same invoice registered again gets a different
-id, and both remain readable. Drop the retired key once every instance carries the
-new one and nothing is left to verify from before.
+Roll every instance. While a roll is half done the two halves are apart, because the
+swarm topic, the socket ticket and now the facts themselves all come from the live key
+alone. A ticket minted by one half and presented to the other is refused for its 60
+second life, which costs the client a re-mint.
+
+One thing does not survive a rotation, and it is worth knowing which. A payment its
+caller signed for is named after that caller, so it replicates across a rotation
+untouched. A payment nobody signed for is named by this instance's key, so after a
+rotation it stays readable here and a peer will refuse it, because it no longer names
+its own invoice. Minted payments are the ones that arrive unsigned, which is one more
+reason the minting endpoint is off unless an instance turns it on.
 
 Where those keys are kept, who can read them, and what happens when the person
 holding them leaves is not decided yet, and this file will not pretend otherwise.
