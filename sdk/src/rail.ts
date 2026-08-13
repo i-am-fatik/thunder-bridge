@@ -234,7 +234,16 @@ export function blindLightningRail(config: BlindLightningRailConfig): Rail {
   };
 }
 
-async function invoiceFrom(lnAddresses: string[], amountMsat: number): Promise<Resolved> {
+/**
+ * A provable invoice from the first address on the list that will issue one, which
+ * is what a client mints for itself rather than asking a gateway to. Everything the
+ * gateway needs to watch it comes back with everything you need to prove it came
+ * from the address you asked for, so you can hand over the first and keep the second.
+ *
+ * Server side: it resolves hostnames and refuses a private one, which no browser can
+ * do. Throws `NoWalletAvailableError` when no address on the list would serve
+ */
+export async function invoiceFrom(lnAddresses: string[], amountMsat: number): Promise<Resolved> {
   try {
     return await resolve(lnAddresses, amountMsat);
   } catch (refused: unknown) {

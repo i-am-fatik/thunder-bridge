@@ -288,7 +288,13 @@ what LUD-21 is.
 - Make the SDK believe a settlement, because the SDK proves it against the recipient
   and not against the gateway.
 - Hold a secret of the client's, of any kind.
-- Hand a payment to anybody but the key that created it.
+- Hand a payment to anybody but the key that created it, over HTTP. The socket is the
+  one exception and it is deliberate: a browser has no server side secret and so cannot
+  sign, and following your own payment from a page is the reason the socket exists. So
+  `/ws/incoming-payments/{id}` stays a capability held by whoever knows the id, and the
+  id is now `sha256(caller key ‖ ...)`, which a payer cannot compute because the caller
+  key never reaches them. A ticket, and `GATEWAY_TOKEN`, are how an instance closes even
+  that.
 - Name the client's payments, so that nothing of the client's depends on a key the
   operator rotates.
 - Keep any of it longer than the window it published.

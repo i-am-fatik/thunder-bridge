@@ -169,6 +169,12 @@ const toPay = invoiceToSvg(payment.bolt11, { size: 320, color: "#1a1a2e" });
 const tipJar = lnurlToSvg("https://agora.gripe/tip");
 ```
 
+**Minting your own invoice** - [`src/rail.ts`](src/rail.ts): `invoiceFrom`, from
+`thunder-bridge/server`. A gateway that does not mint is one that never sees an
+address or an amount, so this is how a client gets a provable invoice itself and hands
+the gateway only a hash, a url and an expiry. Server side, because it resolves
+hostnames and refuses a private one.
+
 **Webhooks** - [`src/webhook.ts`](src/webhook.ts): `parseSettlementRequest`,
 `parseSettlement`, `isProvablySettled`, `parseWebhookRequest`, `parseWebhook`,
 `parseWatchedWebhookRequest`, `parseWatchedWebhook`, `verifyWebhookSignature`,

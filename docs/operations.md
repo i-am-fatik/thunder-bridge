@@ -240,6 +240,17 @@ There is no redelivery command. The payment is readable by id and on the trigger
 so the answer is for the client to reconcile against `GET /incoming-payments/{id}`, which
 is what a client should be able to do anyway.
 
+## A payment is read by its owner, and followed by whoever holds the id
+
+An HTTP read of a payment answers 404 to anybody but the key that created it. A socket
+on `/ws/incoming-payments/{id}` does not, and that is on purpose: a browser holds no
+server side secret, so it cannot sign, and watching your own payment from a page is
+what the socket is for. The id is derived from the caller's key, so a payer holding the
+invoice cannot work it out.
+
+Tell a client who wants even that closed to ask for a ticket, or to run an instance
+with `GATEWAY_TOKEN`, which puts the socket handshake behind the bearer too.
+
 ## A client asking how a delivery is signed
 
 `ed25519=<signature>` with a key derived from `CLUSTER_KEY`, and there is no other
