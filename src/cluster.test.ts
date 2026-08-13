@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
 
+import { callerKey, paymentNamedBy } from "../core/caller.ts";
+
 import { expect, test } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
@@ -377,5 +379,52 @@ test("an instance rolled onto a new key still takes the facts its unrolled peers
 	} finally {
 		rolled.stop();
 		alone.stop();
+	}
+});
+
+test("a payment named after its caller replicates, and the peer checks the name itself", async () => {
+	const cluster = await connected();
+	try {
+		const owner = (await callerKey("rail_cluster_4b8f2e1a9c7d3056")).publicKeyHex;
+		const mine = cluster.first.insert({ ...payment(5), caller: owner });
+
+		expect(mine.id).toBe(paymentNamedBy(owner, payment(5).paymentHash));
+		await until(() => cluster.second.get(mine.id) !== null, "the caller's payment to gossip across");
+
+		const settled = cluster.first.paid(mine.id, preimage(5));
+		expect(settled.won).toBe(true);
+		await until(() => cluster.second.get(mine.id)?.status === "paid", "the paid fact to replicate");
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a fact named after one caller but claiming another is refused, key or no key", async () => {
+	const cluster = await connected();
+	try {
+		const owner = (await callerKey("rail_cluster_4b8f2e1a9c7d3056")).publicKeyHex;
+		const misnamed = {
+			...spread(101),
+			caller: owner,
+			id: paymentNamedBy("00".repeat(32), spread(101).paymentHash),
+		};
+		const fact = {
+			origin: "a-peer-that-holds-the-key",
+			seq: 1,
+			id: misnamed.id,
+			payment: JSON.stringify(misnamed),
+			acceptedAt: 1_700_000_000,
+			expiresAt: misnamed.expiresAt,
+		};
+
+		expect(() =>
+			cluster.first.gossip.onFacts({
+				accepted: [{ ...fact, mac: signedAsCluster("accepted", Object.values(fact)) }],
+			}),
+		).toThrow("does not name the invoice it watches");
+
+		expect(cluster.first.get(misnamed.id)).toBeNull();
+	} finally {
+		cluster.stop();
 	}
 });

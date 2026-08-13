@@ -1,3 +1,4 @@
+import { paymentNamedBy } from "../core/caller.ts";
 import { announce, type Gossip } from "./gossip.ts";
 import {
 	paymentId,
@@ -75,7 +76,7 @@ export class Store {
 	}
 
 	insert(unsaved: UnsavedPayment): Payment {
-		const id = paymentId(this.key, unsaved.paymentHash);
+		const id = this.names(unsaved);
 		const settled = this.ledger.settlement(id);
 		if (settled) return asPayment(settled);
 
@@ -83,6 +84,17 @@ export class Store {
 		this.spread(taken.facts);
 
 		return taken.payment;
+	}
+
+	/**
+	 * A caller's payment is named after that caller, so the name survives a
+	 * rotation of this instance's key and reads the same at every gateway watching
+	 * it. Only a payment nobody signed for falls back to this instance's own key
+	 */
+	names(named: { caller: string | null; paymentHash: string }): string {
+		return named.caller === null
+			? paymentId(this.key, named.paymentHash)
+			: paymentNamedBy(named.caller, named.paymentHash);
 	}
 
 	private spread(facts: Facts): void {

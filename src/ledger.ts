@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import { decodeInvoice } from "../core/bolt11.ts";
+import { paymentNamedBy } from "../core/caller.ts";
 
 import {
 	withoutSecrets,
@@ -855,8 +856,16 @@ export class Ledger {
 		return [this.key, ...this.retired];
 	}
 
-	private namesItsOwnHash(id: string, paymentHash: string): boolean {
-		return this.everyKeyHeld().some((key) => id === paymentId(key, paymentHash));
+	/**
+	 * A fact has to be named after what it settles. A payment its caller signed for
+	 * is named after that caller, which any instance can check without holding
+	 * anything of theirs, and one nobody signed for is named by a key this cluster
+	 * holds
+	 */
+	private namesItsOwnHash(id: string, payment: { caller: string | null; paymentHash: string }): boolean {
+		if (payment.caller !== null) return id === paymentNamedBy(payment.caller, payment.paymentHash);
+
+		return this.everyKeyHeld().some((key) => id === paymentId(key, payment.paymentHash));
 	}
 
 	private provenAccepted(fact: AcceptedFact): void {
@@ -867,7 +876,7 @@ export class Ledger {
 		);
 
 		const payment = JSON.parse(fact.payment) as Payment;
-		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment.paymentHash)) {
+		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment)) {
 			throw new Error(`accepted fact ${fact.id} does not name the invoice it watches`);
 		}
 		if (payment.expiresAt !== fact.expiresAt) {
@@ -883,7 +892,7 @@ export class Ledger {
 		this.verify("paid", [fact.origin, fact.seq, fact.id, fact.payment, fact.settledAt], fact.mac);
 
 		const payment = JSON.parse(fact.payment) as PublicPayment;
-		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment.paymentHash)) {
+		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment)) {
 			throw new Error(`paid fact ${fact.id} does not name the invoice it settles`);
 		}
 		proves(payment.preimage, payment.paymentHash);

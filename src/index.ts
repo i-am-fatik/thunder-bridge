@@ -16,7 +16,7 @@ import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
 import { bearer, hosts, positive, secret, secrets, whole } from "./env.ts";
-import { Ledger, paymentId } from "./ledger.ts";
+import { Ledger } from "./ledger.ts";
 import { pinnedToTheAddressWeVerified } from "./pinned.ts";
 import { quote, resolve, RESOLVE_TIMEOUT_MS, speaksVerify } from "../core/lnurl.ts";
 import { sendThrough } from "../core/outbound.ts";
@@ -623,7 +623,7 @@ async function watchOnly(
 	serving: Serving,
 	caller: string | null,
 ): Promise<Response> {
-	const { key, webhookKey } = serving;
+	const { webhookKey } = serving;
 	let asked: WatchRequest;
 	try {
 		asked = readWatchRequest(await request.json());
@@ -644,7 +644,7 @@ async function watchOnly(
 		);
 	}
 
-	const known = store.get(paymentId(key, asked.paymentHash));
+	const known = store.get(store.names({ caller, paymentHash: asked.paymentHash }));
 	if (known && (!belongsTo(known, caller) || !isThisWatch(known, asked))) {
 		return conflict(ALREADY_WATCHED, "This payment hash is already being watched here");
 	}

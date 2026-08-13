@@ -53,10 +53,14 @@ fetches an address its own operator chose, not a URL a stranger named.
 
 ## 3. The client names the payment
 
-`payment_id` is `HMAC(rail secret, "payment-id" ‖ payment hash)`. The same
-construction the gateway uses today, with the client's key instead of the
-operator's. Deterministic, unguessable, and the same at every gateway watching that
-payment, so no second identifier is needed.
+`payment_id` is `sha256(caller public key ‖ "payment-id" ‖ payment hash)`.
+
+Writing it changed it. The plan said to derive the id from the client's rail secret,
+and deriving it from the client's public key instead is strictly better for one
+reason: the gateway can work it out too. So the id is never sent, it is computed on
+both sides, and the check that a fact is named after what it settles survives instead
+of being deleted. Nothing here is secret and nothing needs to be, because a payment is
+handed only to the key that created it.
 
 This answer was reversed once, and the reversal is the reason to trust it. Naming by
 the client was refused first, because a gateway with one instance wide bearer cannot
@@ -72,7 +76,14 @@ it is meant to be rotatable, and today that rotation renames history, which is w
 already permanent adds no fragility. Naming from a key that rotates buys that
 complication for good.
 
-So `paymentId`, `namesItsOwnHash` and the id half of `CLUSTER_KEYS_RETIRED` all go.
+`namesItsOwnHash` therefore stays, in a better form: a fact carrying a caller must be
+named after that caller, and only a payment nobody signed for falls back to a key this
+cluster holds. Which is also the honest answer to a hole in the plan: on the minting
+path the client cannot name the payment, because the gateway learns the payment hash
+from the wallet and the client never sees it first. Anonymous callers and minted
+payments keep the old naming, and it is the caller that decides which, not the route.
+
+The rest of `paymentId` and the id half of `CLUSTER_KEYS_RETIRED` do go.
 There is no data migration and no window that reads both forms either, because the
 release is one coordinated cutover and a gateway can be drained first. Nothing is
 minted, the watches in flight settle or expire within three days, and the new build
@@ -80,8 +91,16 @@ starts on a ledger that holds no old ids at all. A drain is cheaper than
 compatibility code, and it leaves none behind.
 
 One honest cost. Several gateways now hold records under one name, so they have to
-agree about it, and it is the SDK that checks they do. The gateway is not the place
-that reconciles.
+agree about it, and it is the SDK that checks they do: `watchPayment` refuses a
+`GatewayCheatError` of its own, `id_not_mine`, when the answer is named after somebody
+else. The gateway is not the place that reconciles.
+
+And one property that reads like a regression and is not. Two different callers may
+now watch the same invoice, because their names for it differ. They each poll the
+verify url they named, on their own quota, and neither can touch the other's record.
+What that closes is the leak the old global name left open: knowing a payment hash is
+enough to know its id, so a payer could re-register somebody else's watch and have
+`mergedWebhooks` quietly add their own webhook to it.
 
 ## 4. The gateway holds no secret of the client's, so the shared one goes
 

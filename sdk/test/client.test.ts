@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { callerKey, callerOf } from "../../core/caller.js";
+import { callerKey, callerOf, paymentNamedBy } from "../../core/caller.js";
 import { ThunderBridge } from "../src/client";
 import {
   GatewayCheatError,
@@ -1532,6 +1532,8 @@ describe("watchPayment", () => {
     };
   }
 
+  const NAMING_SECRET = "rail_naming_7d1c4b9e2a6f0538";
+
   function gatewayWatches(overrides: Record<string, unknown> = {}): Routes {
     return {
       [`${GATEWAY}/watched-payments`]: () =>
@@ -1550,6 +1552,37 @@ describe("watchPayment", () => {
         ),
     };
   }
+
+  it("knows what the payment is called before any gateway has heard of it", async () => {
+    const named = new ThunderBridge(GATEWAY, { secret: NAMING_SECRET });
+    const key = await callerKey(NAMING_SECRET);
+
+    expect(await named.nameFor(WATCH_HASH)).toBe(paymentNamedBy(key.publicKeyHex, WATCH_HASH));
+    expect(await new ThunderBridge(GATEWAY).nameFor(WATCH_HASH)).toBeNull();
+  });
+
+  it("takes the name it worked out itself, whichever gateway answers", async () => {
+    const key = await callerKey(NAMING_SECRET);
+    const mine = paymentNamedBy(key.publicKeyHex, WATCH_HASH);
+    stubFetch(gatewayWatches({ id: mine }));
+
+    const watched = await new ThunderBridge(GATEWAY, { secret: NAMING_SECRET }).watchPayment(
+      watchable(),
+    );
+
+    expect(watched.id).toBe(mine);
+  });
+
+  it("catches a gateway that answers with a name that is not this payment's", async () => {
+    stubFetch(gatewayWatches({ id: "watch_0001" }));
+
+    const rejection = await new ThunderBridge(GATEWAY, { secret: NAMING_SECRET })
+      .watchPayment(watchable())
+      .catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(GatewayCheatError);
+    expect((rejection as GatewayCheatError).code).toBe("id_not_mine");
+  });
 
   it("hands over a hash, a URL and an expiry, and deliberately nothing else", async () => {
     const calls = stubFetch(gatewayWatches());
@@ -1900,7 +1933,10 @@ describe("a client that names itself", () => {
 
     await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).listPayments(10);
 
-    for (const [, value] of headersOf(calls[0])) expect(value).not.toContain(SECRET);
+    const headers = headersOf(calls[0]);
+    for (const name of ["x-client-key", "x-signature", "x-timestamp", "authorization"]) {
+      expect(headers.get(name) ?? "").not.toContain(SECRET);
+    }
   });
 
   it("says nothing when no secret was given, so an anonymous client still works", async () => {

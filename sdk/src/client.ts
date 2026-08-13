@@ -19,7 +19,7 @@ import type {
   WatchPaymentParams,
 } from "./types.js";
 import { preimageMatchesHash } from "../../core/bolt11.js";
-import { callerKey, signedAs } from "../../core/caller.js";
+import { callerKey, paymentNamedBy, signedAs } from "../../core/caller.js";
 import type { SigningKey } from "../../core/ed25519.js";
 import { sha256Hex } from "../../core/sha256.js";
 import { isProvablyPaid, proveOrigin } from "./verify.js";
@@ -522,7 +522,22 @@ export class ThunderBridge {
         title: "The gateway answered with something that is not a watched payment",
       });
     }
+    const named = await this.nameFor(params.paymentHash);
+    if (named !== null && watched.id !== named) {
+      throw new GatewayCheatError("id_not_mine", watched.id);
+    }
     return watched;
+  }
+
+  /**
+   * What this payment is called, which you can work out before any gateway has
+   * heard of it. Every gateway you hand the same invoice to answers with the same
+   * name, so watching at several of them adds up to one payment rather than
+   * several, and no gateway's key is in the answer. Null when no secret was given,
+   * because then the gateway names the payment and only it can
+   */
+  async nameFor(paymentHash: string): Promise<string | null> {
+    return this.secret === null ? null : paymentNamedBy((await this.speaking()).publicKeyHex, paymentHash);
   }
 
   /**

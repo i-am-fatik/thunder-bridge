@@ -20,6 +20,18 @@ export async function callerKey(secret: string): Promise<SigningKey> {
 }
 
 /**
+ * What a payment is called, from the key that created it and the hash it settles
+ * against. Both sides work it out from the same public facts, so a client knows
+ * the name before it asks and every gateway watching that payment agrees on it.
+ *
+ * Nothing here is secret. An id was a capability once and is not one any more,
+ * because a payment is handed only to the key that created it
+ */
+export function paymentNamedBy(caller: string, paymentHash: string): string {
+	return sha256Hex(`${caller}.payment-id.${paymentHash}`);
+}
+
+/**
  * Headers that say who is calling and prove it, over the method, the path, the
  * body and a timestamp, so a captured request cannot be replayed at another route
  * or after {@link TOLERANCE_SECS}

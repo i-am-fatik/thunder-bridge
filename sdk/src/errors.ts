@@ -11,7 +11,8 @@ export type GatewayCheatCode =
   | "description_hash_mismatch"
   | "verify_url_foreign"
   | "invoice_not_issued"
-  | "preimage_mismatch";
+  | "preimage_mismatch"
+  | "id_not_mine";
 
 /**
  * Thrown when the gateway demonstrably misbehaved, the invoice it returned is

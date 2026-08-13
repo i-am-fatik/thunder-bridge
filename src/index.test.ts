@@ -4,7 +4,7 @@ import { connect } from "node:net";
 
 import { expect, test, vi } from "vitest";
 
-import { callerKey, signedAs } from "../core/caller.ts";
+import { callerKey, paymentNamedBy, signedAs } from "../core/caller.ts";
 import { start, type Service } from "./index.ts";
 import { paymentId } from "./ledger.ts";
 import type { UnsavedPayment } from "./payment.ts";
@@ -735,21 +735,49 @@ test("a watch that named its caller is handed back to that caller and to nobody 
 	app.stop();
 });
 
-test("a stranger who knows the payment hash cannot join somebody else's watch", async () => {
+test("a stranger who knows the payment hash gets a watch of their own and never joins yours", async () => {
 	const app = await running();
 	const restore = hookAnswering("s".repeat(32));
 
-	const mine = { ...WATCHABLE, webhook: { url: "https://shop.example/hooks/mine", secret: "s".repeat(32) } };
-	const created = (await (await postWatch(app, mine, OWNER)).json()) as Problem;
+	try {
+		const mine = {
+			...WATCHABLE,
+			webhook: { url: "https://shop.example/hooks/mine", secret: "s".repeat(32) },
+		};
+		const created = (await (await postWatch(app, mine, OWNER)).json()) as Problem;
 
-	const theirs = await postWatch(app, WATCHABLE, STRANGER);
-	expect(theirs.status).toBe(409);
-	expect(((await theirs.json()) as Problem)["type"]).toBe(ALREADY_WATCHED);
+		const theirs = await postWatch(app, WATCHABLE, STRANGER);
+		expect(theirs.status).toBe(201);
+		expect(((await theirs.json()) as Problem)["id"]).not.toBe(created["id"]);
 
-	const stored = app.store.get(String(created["id"]));
-	expect(stored?.webhooks.map((hook) => hook.url)).toEqual(["https://shop.example/hooks/mine"]);
+		const stored = app.store.get(String(created["id"]));
+		expect(stored?.webhooks.map((hook) => hook.url)).toEqual(["https://shop.example/hooks/mine"]);
+	} finally {
+		restore();
+		app.stop();
+	}
+});
 
-	restore();
+test("a payment is named after the caller, so this instance's key can be rotated under it", async () => {
+	const app = await running();
+
+	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+
+	expect(created["id"]).toBe(paymentNamedBy(owner, WATCHED_HASH));
+	expect(created["id"]).not.toBe(paymentId(CLUSTER_KEY, WATCHED_HASH));
+
+	app.stop();
+});
+
+test("the same caller asking twice for the same invoice is one watch, not two", async () => {
+	const app = await running();
+
+	const first = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const again = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+
+	expect(again["id"]).toBe(first["id"]);
+
 	app.stop();
 });
 
