@@ -124,6 +124,7 @@ standard's camelCase, and there is no authorization server.
 | Variable | Default | Meaning |
 |---|---|---|
 | `CLUSTER_KEY` | required | 32 bytes of hex, the swarm topic and the right to write a fact |
+| `MINTING` | off | `1` turns on `POST /incoming-payments` and `POST /quotes`. Off, the gateway only watches invoices a client minted itself, which is the only way the operator never sees an address or an amount |
 | `CLIENT_KEYS` | none | comma-separated client public keys this instance serves, and it serves nobody else. Unset serves everybody |
 | `KEEP_SEALED_DAYS` | `90` | how long a sealed blob outlives the payment it belonged to, after which it goes too |
 | `PORT` | `3000` | listen port, Railway sets this for you |

@@ -48,6 +48,7 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			verifyHosts: null,
 			verifyChallenge: true,
 			clientKeys: null,
+			mints: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs,
 			keepSealedSecs: 90 * 86_400,
@@ -78,6 +79,7 @@ async function runningWithoutTheVerifyChallenge(): Promise<App> {
 			verifyHosts: null,
 			verifyChallenge: false,
 			clientKeys: null,
+			mints: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			keepSealedSecs: 90 * 86_400,
@@ -759,6 +761,7 @@ async function runningWith(
 			verifyHosts: null,
 			verifyChallenge: true,
 			clientKeys: null,
+			mints: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			keepSealedSecs: 90 * 86_400,
@@ -778,6 +781,26 @@ async function runningWith(
 		},
 	};
 }
+
+test("an instance mints nothing unless it was turned on, and says how to proceed", async () => {
+	const app = await runningWith({ mints: false });
+	const port = app.service.port;
+
+	const minted = await fetch(`http://127.0.0.1:${port}/incoming-payments`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ ln_addresses: ["charter@coinos.io"], incoming_amount: MSAT_21K }),
+	});
+	expect(minted.status).toBe(403);
+	expect(String(((await minted.json()) as Problem)["detail"])).toContain("MINTING=1");
+
+	const quoted = await postQuote(app, { ln_addresses: ["charter@coinos.io"], amount: MSAT_21K });
+	expect(quoted.status).toBe(403);
+
+	expect((await postWatch(app, WATCHABLE, OWNER)).status).toBe(201);
+
+	app.stop();
+});
 
 test("a caller over its share is refused with the ceiling in the headers", async () => {
 	const app = await runningWith({ maxPending: 1 });
@@ -1006,6 +1029,7 @@ async function pinnedTo(allowed: string[]): Promise<App> {
 			verifyHosts: new Set(allowed),
 			verifyChallenge: true,
 			clientKeys: null,
+			mints: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			keepSealedSecs: 90 * 86_400,

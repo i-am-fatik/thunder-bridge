@@ -126,6 +126,7 @@ export type Options = {
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
 	clientKeys: Set<string> | null;
+	mints: boolean;
 	tickStallMs: number;
 	drainTimeoutMs: number;
 	keepSealedSecs: number;
@@ -145,6 +146,7 @@ type Serving = {
 	key: Uint8Array;
 	keepSealedSecs: number;
 	clientKeys: Set<string> | null;
+	mints: boolean;
 	webhookKey: SigningKey;
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
@@ -157,6 +159,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		key: options.key,
 		keepSealedSecs: options.keepSealedSecs,
 		clientKeys: options.clientKeys,
+		mints: options.mints,
 		webhookKey: await webhookSigningKey(options.key),
 		verifyHosts: options.verifyHosts,
 		verifyChallenge: options.verifyChallenge,
@@ -449,7 +452,7 @@ async function route(
 		return serving.token === null ? notFound() : listed(incoming, store);
 	}
 	if (path === "/incoming-payments" && incoming.method === "POST") {
-		if (serving.verifyHosts) return mintsNothing();
+		if (!mints(serving)) return mintsNothing(serving);
 		const request = await asRequest(incoming);
 		const caller = await callerFor(request);
 		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
@@ -457,7 +460,7 @@ async function route(
 		return await create(request, store, serving.webhookKey, caller);
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
-		if (serving.verifyHosts) return mintsNothing();
+		if (!mints(serving)) return mintsNothing(serving);
 		return await quoted(await asRequest(incoming));
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
@@ -876,12 +879,22 @@ function hostOf(url: string): string {
 	return new URL(url).hostname.toLowerCase();
 }
 
-function mintsNothing(): Response {
+/**
+ * Minting is off unless an instance turns it on, because it is the one path where
+ * the operator is handed the address and the amount in the clear and could log
+ * them. A blind store protects nothing that was already read
+ */
+function mints(serving: Serving): boolean {
+	return serving.mints && serving.verifyHosts === null;
+}
+
+function mintsNothing(serving: Serving): Response {
 	return problem(403, {
 		type: VERIFY_HOST_REFUSED,
 		title: "This gateway only watches, it does not mint",
-		detail:
-			"VERIFY_HOSTS pins this instance to a list of verify endpoints, and minting an invoice would put it on a wallet's host instead. Resolve the address yourself and register the payment with POST /watched-payments.",
+		detail: serving.verifyHosts
+			? "VERIFY_HOSTS pins this instance to a list of verify endpoints, and minting an invoice would put it on a wallet's host instead. Resolve the address yourself and register the payment with POST /watched-payments."
+			: "minting is off here, because it is the one path that hands the operator the address and the amount. Mint the invoice yourself and register it with POST /watched-payments, or ask the operator to set MINTING=1 and accept that they see both.",
 	});
 }
 
@@ -955,6 +968,7 @@ if (import.meta.main) {
 			verifyHosts: allowed("VERIFY_HOSTS"),
 			verifyChallenge: process.env["VERIFY_CHALLENGE"] !== "0",
 			clientKeys: allowed("CLIENT_KEYS"),
+			mints: process.env["MINTING"] === "1",
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,
