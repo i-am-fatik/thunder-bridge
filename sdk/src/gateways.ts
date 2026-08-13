@@ -47,16 +47,19 @@ export class Gateways {
   async watchPayment(params: WatchPaymentParams): Promise<TriggerEvent> {
     const asked = await Promise.allSettled(this.each.map((gateway) => gateway.watchPayment(params)));
     const taken: TriggerEvent[] = [];
+    const refusals: unknown[] = [];
 
     for (const [at, answer] of asked.entries()) {
-      if (answer.status === "fulfilled") taken.push(answer.value);
-      else this.onRefused(this.urls[at]!, answer.reason);
+      if (answer.status === "fulfilled") {
+        taken.push(answer.value);
+        continue;
+      }
+      refusals.push(answer.reason);
+      this.onRefused(this.urls[at]!, answer.reason);
     }
-    if (taken.length === 0) {
-      throw (asked.find((answer) => answer.status === "rejected") as PromiseRejectedResult).reason;
-    }
+    if (taken[0] === undefined) throw refusals[0];
 
-    return taken[0]!;
+    return taken[0];
   }
 
   /**

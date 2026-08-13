@@ -441,40 +441,28 @@ async function route(
 	if (path === "/docs") return rendered();
 	if (path === "/webhook-key") return publishedWebhookKey(serving.webhookKey);
 
-	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
-	if (one && incoming.method === "GET") {
-		const caller = await callerFor(await asRequest(incoming));
-		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
+	const request = await asRequest(incoming);
+	const caller = await callerFor(request);
+	if (!accepted(caller, serving.clientKeys)) return unknownCaller();
 
-		return handedTo(one[1]!, store, caller);
-	}
+	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
+	if (one && incoming.method === "GET") return handedTo(one[1]!, store, caller);
+
 	if (path === "/incoming-payments" && incoming.method === "GET") {
 		return serving.token === null ? notFound() : listed(incoming, store);
 	}
 	if (path === "/incoming-payments" && incoming.method === "POST") {
 		if (!mints(serving)) return mintsNothing(serving);
-		const request = await asRequest(incoming);
-		const caller = await callerFor(request);
-		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
-
 		return await create(request, store, serving.webhookKey, caller);
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
 		if (!mints(serving)) return mintsNothing(serving);
-		return await quoted(await asRequest(incoming));
+		return await quoted(request);
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
-		const request = await asRequest(incoming);
-		const caller = await callerFor(request);
-		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
-
 		return await watchOnly(request, store, serving, caller);
 	}
 	if (path === "/ws-tickets" && incoming.method === "POST") {
-		const request = await asRequest(incoming);
-		const caller = await callerFor(request);
-		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
-
 		return await ticketed(request, store, serving.key, caller);
 	}
 

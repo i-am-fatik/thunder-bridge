@@ -500,3 +500,43 @@ test("a fact named after one caller but claiming another is refused, key or no k
 		cluster.stop();
 	}
 });
+
+test("every kind of fact survives a rotation, because re-signing reads the same fields the signing did", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-allkinds-"));
+	const ledger = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("55".repeat(32), "hex");
+	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
+	const owner = (await callerKey("rail_allkinds_1f7b")).publicKeyHex;
+
+	const before = openStore({ ledger });
+	const mine = before.store.insert({
+		...payment(4),
+		caller: owner,
+		webhooks: [{ url: "https://shop.example/hooks/one" }],
+	});
+	before.store.paid(mine.id, preimage(4));
+	const owed = before.store.dueDeliveries(10, 0);
+	expect(owed).toHaveLength(1);
+	before.store.delivered(owed[0]!);
+	expect(before.store.info().rows).toMatchObject({ accepted: 1, paid: 1, outbox: 1, delivered: 1 });
+	before.stop();
+
+	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const { facts } = rolled.store.gossip.since(nothingSeen);
+	rolled.stop();
+
+	const peer = openStore({ key: NEXT_KEY });
+	try {
+		peer.store.gossip.onFacts(facts);
+
+		expect(peer.store.info().rows).toMatchObject({
+			accepted: 1,
+			paid: 1,
+			outbox: 1,
+			delivered: 1,
+		});
+	} finally {
+		peer.stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});

@@ -840,13 +840,17 @@ test("one caller filling its share leaves another caller's share alone", async (
 	app.stop();
 });
 
-test("an instance keeping a list of client keys serves nobody else", async () => {
+test("an instance keeping a list of client keys serves nobody else, on any route", async () => {
 	const owner = (await callerKey(OWNER)).publicKeyHex;
 	const app = await runningWith({ clientKeys: new Set([owner]) });
 
 	expect((await postWatch(app, WATCHABLE, OWNER)).status).toBe(201);
 	expect((await postWatch(app, WATCHABLE, STRANGER)).status).toBe(403);
 	expect((await postWatch(app, WATCHABLE)).status).toBe(403);
+
+	const quoted = await postQuote(app, { ln_addresses: ["charter@coinos.io"], amount: MSAT_21K });
+	expect(quoted.status).toBe(403);
+	expect((await fetch(`http://127.0.0.1:${app.service.port}/health`)).status).toBe(200);
 
 	app.stop();
 });
