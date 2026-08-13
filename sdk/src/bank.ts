@@ -83,9 +83,6 @@ export interface BankTransferParams {
    */
   webhookUrl?: string;
 
-  /** Signs that delivery, so `verifyWebhookSignature` can tell it came from the gateway */
-  webhookSecret?: string;
-
   /**
    * Register on a gateway you do not own anyway. The verify URL names the amount
    * and the reference, so its operator ends up reading your order book, and the
@@ -168,7 +165,6 @@ export async function bankTransfer(params: BankTransferParams): Promise<BankTran
     trigger: params.trigger,
     sealed: params.sealed,
     webhookUrl: params.webhookUrl,
-    webhookSecret: params.webhookSecret,
   });
 
   return { id: watched.id, paymentHash: watched.paymentHash, verifyUrl, spd };

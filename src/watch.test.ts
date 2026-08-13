@@ -6,11 +6,9 @@ import { signingKeyFromSeed, verifyHex } from "../core/ed25519.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
 import {
-	CHALLENGE,
 	confirmWebhook,
 	nextDue,
 	pollDelayMs,
-	sign,
 	spend,
 	tick,
 	unixNow,
@@ -92,7 +90,7 @@ function payment(overrides: Partial<Payment> = {}): Payment {
 		trigger: null,
 		sealed: null,
 		caller: null,
-		webhooks: [{ url: HOOK_URL, secret: "hunter2" }],
+		webhooks: [{ url: HOOK_URL }],
 		...overrides,
 	};
 }
@@ -144,7 +142,6 @@ function owed(overrides: Partial<Delivery> = {}): Delivery {
 		seq: 1,
 		id: "aa".repeat(32),
 		url: HOOK_URL,
-		secret: "hunter2",
 		body: '{"id":"aa","status":"paid","preimage":"00"}',
 		...overrides,
 	};
@@ -235,32 +232,10 @@ test("a webhook the merchant rejects goes back on the outbox", async () => {
 	}
 });
 
-test("the webhook posts the stored body, signed with the merchant's secret where there is one", async () => {
-	const wire = intercepting(() => new Response("", { status: 200 }));
-	const { watcher } = owing([owed()]);
-
-	try {
-		await tick(watcher);
-
-		const signed = wire.calls.find((call) => call.url === HOOK_URL);
-
-		expect(signed?.method).toBe("POST");
-		expect(signed?.body).toBe(owed().body);
-		expect(signed?.headers["x-signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
-
-		const stamp = signed?.headers["x-timestamp"] ?? "";
-		expect(`sha256=${await sign("hunter2", `${stamp}.${owed().body}`)}`).toBe(
-			signed?.headers["x-signature"] ?? "",
-		);
-	} finally {
-		wire.restore();
-	}
-});
-
-test("a webhook that handed over no secret is signed with the gateway's own key instead", async () => {
+test("a delivery is signed with the key the gateway publishes, and nothing of the receiver's", async () => {
 	const wire = intercepting(() => new Response("", { status: 200 }));
 	const url = "https://other.example/hook";
-	const { watcher } = owing([owed({ url, secret: null })]);
+	const { watcher } = owing([owed({ url })]);
 
 	try {
 		await tick(watcher);
@@ -372,12 +347,6 @@ test("the next poll never lands after the invoice has expired", () => {
 	} finally {
 		vi.useRealTimers();
 	}
-});
-
-test("the signature is an hmac a receiver can recompute", async () => {
-	expect(await sign("key", "The quick brown fox jumps over the lazy dog")).toBe(
-		"f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8",
-	);
 });
 
 test("one busy wallet host does not slow the polls aimed at another", async () => {
@@ -497,37 +466,14 @@ test("a delivery with no retries left is reported at error level, not as one mor
 	}
 });
 
-async function echoing(call: Call, secret: string | null): Promise<Response> {
-	const nonce = (JSON.parse(call.body) as { nonce: string }).nonce;
-	if (!secret) return Response.json({ nonce });
-
-	return Response.json({ nonce, signature: `sha256=${await sign(secret, nonce)}` });
+function echoing(call: Call): Response {
+	return Response.json({ nonce: (JSON.parse(call.body) as { nonce: string }).nonce });
 }
 
-test("a challenge is signed the way a delivery is, so a receiver can tell who is asking", async () => {
-	const wire = intercepting((call) => echoing(call, "hunter2"));
+test("a challenge is signed with the gateway's own key, so a receiver can tell who is asking", async () => {
+	const wire = intercepting((call) => echoing(call));
 	try {
-		expect(await confirmWebhook({ url: HOOK_URL, secret: "hunter2" }, GATEWAY_KEY)).toBe(true);
-
-		const sent = wire.calls[0]!;
-		expect(sent.url).toBe(HOOK_URL);
-		expect(sent.method).toBe("POST");
-
-		const asked = JSON.parse(sent.body) as { type: string; nonce: string };
-		expect(asked.type).toBe(CHALLENGE);
-		expect(asked.nonce).toMatch(/^[0-9a-f]{64}$/);
-		expect(sent.headers["x-signature"]).toBe(
-			`sha256=${await sign("hunter2", `${sent.headers["x-timestamp"]}.${sent.body}`)}`,
-		);
-	} finally {
-		wire.restore();
-	}
-});
-
-test("a webhook that handed over no secret is challenged under the gateway's own key", async () => {
-	const wire = intercepting((call) => echoing(call, null));
-	try {
-		expect(await confirmWebhook({ url: HOOK_URL, secret: null }, GATEWAY_KEY)).toBe(true);
+		expect(await confirmWebhook({ url: HOOK_URL }, GATEWAY_KEY)).toBe(true);
 
 		const sent = wire.calls[0]!;
 		const signature = sent.headers["x-signature"] ?? "";
@@ -548,21 +494,16 @@ test("a challenge answered wrongly leaves the webhook unconfirmed, whichever way
 	const refusing = intercepting(() => new Response("no thanks", { status: 500 }));
 	const silent = () => Response.json({});
 	const inventing = () => Response.json({ nonce: "f".repeat(64) });
-	const unsigned = (call: Call) => echoing(call, null);
 
 	try {
-		expect(await confirmWebhook({ url: HOOK_URL, secret: null }, GATEWAY_KEY)).toBe(false);
+		expect(await confirmWebhook({ url: HOOK_URL }, GATEWAY_KEY)).toBe(false);
 		refusing.restore();
 
 		for (const answering of [silent, inventing]) {
 			const wire = intercepting(answering);
-			expect(await confirmWebhook({ url: HOOK_URL, secret: null }, GATEWAY_KEY)).toBe(false);
+			expect(await confirmWebhook({ url: HOOK_URL }, GATEWAY_KEY)).toBe(false);
 			wire.restore();
 		}
-
-		const wire = intercepting(unsigned);
-		expect(await confirmWebhook({ url: HOOK_URL, secret: "hunter2" }, GATEWAY_KEY)).toBe(false);
-		wire.restore();
 	} finally {
 		console.warn = quiet;
 	}

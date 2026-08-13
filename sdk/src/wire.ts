@@ -5,6 +5,7 @@ import type {
   PaymentKind,
   PaymentStatus,
   Quote,
+  Settlement,
   TriggerEvent,
   WalletFailure,
   WalletReason,
@@ -26,9 +27,7 @@ export function createRequestBody(params: CreatePaymentParams, trigger: string |
   return JSON.stringify({
     ln_addresses: params.lnAddresses,
     incoming_amount: toAmount(params.amountMsat),
-    webhook: params.webhookUrl
-      ? { url: params.webhookUrl, secret: params.webhookSecret }
-      : undefined,
+    webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
     trigger: trigger ?? undefined,
   });
 }
@@ -105,10 +104,30 @@ export function watchRequestBody(params: WatchPaymentParams, trigger: string | n
     expires_at: expiresAt.toISOString(),
     trigger: trigger ?? undefined,
     sealed: params.sealed,
-    webhook: params.webhookUrl
-      ? { url: params.webhookUrl, secret: params.webhookSecret }
-      : undefined,
+    webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
   });
+}
+
+/**
+ * A delivery says the least it can and still be worth having: the name, how it
+ * ended, and a preimage against the hash it has to match. No verify url, because
+ * you named it, and no sealed record, because the size of a retry should not
+ * depend on what you put in it
+ */
+export function settlementFromWire(body: unknown): Settlement | null {
+  const wire = asObject(body);
+  if (wire === null) return null;
+
+  const id = text(wire["id"]);
+  const paymentHash = text(wire["payment_hash"]);
+  const settledAt = secondsFrom(wire["settled_at"]);
+  const status = wire["status"];
+  const preimage = wire["preimage"] ?? null;
+
+  if (id === null || paymentHash === null || settledAt === null || !isStatus(status)) return null;
+  if (preimage !== null && typeof preimage !== "string") return null;
+
+  return { id, status, paymentHash, preimage, settledAt };
 }
 
 export function triggerEventFromWire(body: unknown): TriggerEvent | null {

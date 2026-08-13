@@ -38,7 +38,7 @@ function payment(nth: number): UnsavedPayment {
 		trigger: null,
 		sealed: null,
 		caller: null,
-		webhooks: [{ url: "https://example.com/hook", secret: "hunter2" }],
+		webhooks: [{ url: "https://example.com/hook" }],
 	};
 }
 
@@ -318,11 +318,11 @@ test("the same invoice inserted on both instances converges to one payment", asy
 		const invoice = payment(1);
 		const mine = cluster.first.insert({
 			...invoice,
-			webhooks: [{ url: "https://a.example/hook", secret: null }],
+			webhooks: [{ url: "https://a.example/hook" }],
 		});
 		const theirs = cluster.second.insert({
 			...invoice,
-			webhooks: [{ url: "https://b.example/hook", secret: null }],
+			webhooks: [{ url: "https://b.example/hook" }],
 		});
 
 		expect(theirs.id).toBe(mine.id);

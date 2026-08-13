@@ -1,13 +1,12 @@
 export type Status = "pending" | "paid" | "expired";
 
-export type Webhook = { url: string; secret: string | null };
+export type Webhook = { url: string };
 
 export type Delivery = {
 	origin: string;
 	seq: number;
 	id: string;
 	url: string;
-	secret: string | null;
 	body: string;
 };
 

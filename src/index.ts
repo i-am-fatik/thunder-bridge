@@ -47,6 +47,7 @@ import {
 } from "./watch.ts";
 import {
 	fingerprint,
+	keptToWire,
 	paymentToWire,
 	quoteToWire,
 	readCreateRequest,
@@ -124,6 +125,7 @@ export type Options = {
 	verifyChallenge: boolean;
 	tickStallMs: number;
 	drainTimeoutMs: number;
+	keepSealedSecs: number;
 	token: string | null;
 	key: Uint8Array;
 };
@@ -138,6 +140,7 @@ type Vitals = "serving" | "stalled" | "draining";
 type Serving = {
 	token: string | null;
 	key: Uint8Array;
+	keepSealedSecs: number;
 	webhookKey: SigningKey;
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
@@ -148,6 +151,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	const serving: Serving = {
 		token,
 		key: options.key,
+		keepSealedSecs: options.keepSealedSecs,
 		webhookKey: await webhookSigningKey(options.key),
 		verifyHosts: options.verifyHosts,
 		verifyChallenge: options.verifyChallenge,
@@ -252,7 +256,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	}, PING_INTERVAL_MS);
 
 	const sweeper = setInterval(() => {
-		for (const expired of store.sweep(EXPIRED_GRACE_SECS)) publish(expired);
+		for (const expired of store.sweep(EXPIRED_GRACE_SECS, options.keepSealedSecs)) publish(expired);
 	}, SWEEP_INTERVAL_MS);
 
 	let ticking = false;
@@ -464,9 +468,12 @@ async function route(
  */
 function handedTo(id: string, store: Store, caller: string | null): Response {
 	const payment = store.get(id);
-	if (!payment || !belongsTo(payment, caller)) return notFound();
+	if (payment) return belongsTo(payment, caller) ? json(paymentToWire(payment)) : notFound();
 
-	return json(paymentToWire(payment));
+	const kept = store.kept(id);
+	if (!kept || (kept.caller !== null && kept.caller !== caller)) return notFound();
+
+	return json(keptToWire(kept));
 }
 
 function belongsTo(payment: Payment, caller: string | null): boolean {
@@ -890,6 +897,7 @@ if (import.meta.main) {
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,
+			keepSealedSecs: positive("KEEP_SEALED_DAYS", 90) * 86_400,
 			token: bearer("GATEWAY_TOKEN"),
 			key: clusterKey,
 		},

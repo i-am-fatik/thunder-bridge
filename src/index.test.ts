@@ -21,7 +21,7 @@ import {
 } from "./problem.ts";
 import type { Store } from "./store.ts";
 import { CLUSTER_KEY, openStore, until } from "./testing.ts";
-import { sign, VERIFY_CHALLENGE } from "./watch.ts";
+import { VERIFY_CHALLENGE } from "./watch.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
 
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
@@ -48,6 +48,7 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			verifyChallenge: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs,
+			keepSealedSecs: 90 * 86_400,
 			token,
 			key: CLUSTER_KEY,
 		},
@@ -76,6 +77,7 @@ async function runningWithoutTheVerifyChallenge(): Promise<App> {
 			verifyChallenge: false,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
+			keepSealedSecs: 90 * 86_400,
 			token: null,
 			key: CLUSTER_KEY,
 		},
@@ -106,7 +108,7 @@ function pendingPayment(overrides: Partial<UnsavedPayment> = {}): UnsavedPayment
 		trigger: null,
 		sealed: null,
 		caller: null,
-		webhooks: [{ url: "https://example.com/hook", secret: "hunter2" }],
+		webhooks: [{ url: "https://example.com/hook" }],
 		...overrides,
 	};
 }
@@ -257,25 +259,19 @@ function walletServing(seen: string[]): () => void {
 	};
 }
 
-function hookAnswering(secret: string | null, nonceShift = ""): () => void {
+function hookAnswering(nonceShift = ""): () => void {
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
 		if (target.includes("127.0.0.1")) return real(...args);
 
 		const asked = JSON.parse(String(args[1]?.body ?? "{}")) as { nonce?: string };
-		return answerChallenge(`${asked.nonce ?? ""}${nonceShift}`, secret);
+		return Response.json({ nonce: `${asked.nonce ?? ""}${nonceShift}` });
 	}) as typeof fetch;
 
 	return () => {
 		globalThis.fetch = real;
 	};
-}
-
-async function answerChallenge(nonce: string, secret: string | null): Promise<Response> {
-	if (!secret) return Response.json({ nonce });
-
-	return Response.json({ nonce, signature: `sha256=${await sign(secret, nonce)}` });
 }
 
 function postQuote(app: App, body: unknown): Promise<Response> {
@@ -722,6 +718,30 @@ async function readAs(app: App, id: string, secret: string | null): Promise<Resp
 	});
 }
 
+test("once the gateway has forgotten a payment, its owner still reads its own record back", async () => {
+	const app = await running();
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+	const mine = app.store.insert(
+		pendingPayment({ caller: owner, sealed: "v1.mineAlone", expiresAt: 1_600_000_000 }),
+	);
+
+	app.store.sweep(0, 7_776_000);
+	expect(app.store.get(mine.id)).toBeNull();
+
+	const read = await readAs(app, mine.id, OWNER);
+	expect(read.status).toBe(200);
+	const body = (await read.json()) as Problem;
+	expect(body["kind"]).toBe("kept");
+	expect(body["sealed"]).toBe("v1.mineAlone");
+	expect(body).not.toHaveProperty("payment_hash");
+	expect(body).not.toHaveProperty("ln_address");
+
+	expect((await readAs(app, mine.id, STRANGER)).status).toBe(404);
+	expect((await readAs(app, mine.id, null)).status).toBe(404);
+
+	app.stop();
+});
+
 test("a watch that named its caller is handed back to that caller and to nobody else", async () => {
 	const app = await running();
 
@@ -737,12 +757,12 @@ test("a watch that named its caller is handed back to that caller and to nobody 
 
 test("a stranger who knows the payment hash gets a watch of their own and never joins yours", async () => {
 	const app = await running();
-	const restore = hookAnswering("s".repeat(32));
+	const restore = hookAnswering();
 
 	try {
 		const mine = {
 			...WATCHABLE,
-			webhook: { url: "https://shop.example/hooks/mine", secret: "s".repeat(32) },
+			webhook: { url: "https://shop.example/hooks/mine" },
 		};
 		const created = (await (await postWatch(app, mine, OWNER)).json()) as Problem;
 
@@ -855,20 +875,20 @@ test("what the gateway stores about a blind watch names no recipient and no amou
 
 test("a watched payment can be owed a webhook, which is the bank rail's only way to be told", async () => {
 	const app = await running();
-	const restore = hookAnswering("s".repeat(32));
+	const restore = hookAnswering();
 
 	const created = (await (
 		await postWatch(app, {
 			...WATCHABLE,
 			payment_hash: PAYMENT_HASH,
-			webhook: { url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
+			webhook: { url: "https://shop.example/hooks/bank" },
 		})
 	).json()) as Problem;
 	restore();
 	const stored = app.store.get(String(created["id"]));
 
 	expect(stored?.webhooks).toEqual([
-		{ url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
+		{ url: "https://shop.example/hooks/bank" },
 	]);
 
 	app.store.paid(String(created["id"]), PREIMAGE);
@@ -883,7 +903,7 @@ test("a watched payment can be owed a webhook, which is the bank rail's only way
 test("re-registering the same watch with another webhook owes both, because webhooks are a set", async () => {
 	const app = await running();
 	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
-	const restore = hookAnswering(null);
+	const restore = hookAnswering();
 
 	await postWatch(app, { ...watchable, webhook: { url: "https://shop.example/hooks/one" } });
 	const again = await postWatch(app, {
@@ -915,6 +935,7 @@ async function pinnedTo(allowed: string[]): Promise<App> {
 			verifyChallenge: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
+			keepSealedSecs: 90 * 86_400,
 			token: null,
 			key: CLUSTER_KEY,
 		},
@@ -1068,27 +1089,10 @@ test("a webhook that will not answer the challenge is refused, and nothing is wa
 	app.stop();
 });
 
-test("a webhook whose answer the registered secret does not sign is refused", async () => {
-	const app = await running();
-	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
-	const answeringForItself = hookAnswering("someone-elses-secret");
-
-	const refused = await postWatch(app, {
-		...watchable,
-		webhook: { url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
-	});
-	answeringForItself();
-
-	expect(refused.status).toBe(424);
-	expect(((await refused.json()) as Problem)["type"]).toBe(WEBHOOK_UNCONFIRMED);
-
-	app.stop();
-});
-
 test("a webhook that answers with a nonce of its own is refused", async () => {
 	const app = await running();
 	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
-	const answeringSomethingElse = hookAnswering(null, "-and-a-bit-more");
+	const answeringSomethingElse = hookAnswering("-and-a-bit-more");
 
 	const refused = await postWatch(app, {
 		...watchable,
@@ -1107,7 +1111,7 @@ test("a watch asking for a webhook somewhere private is refused, like a create i
 
 	const refused = await postWatch(app, {
 		...WATCHABLE,
-		webhook: { url: "http://192.168.1.10/hooks", secret: "s".repeat(32) },
+		webhook: { url: "http://192.168.1.10/hooks" },
 	});
 
 	expect(refused.status).toBe(400);

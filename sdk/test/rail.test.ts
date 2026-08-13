@@ -204,13 +204,10 @@ describe("bankRail", () => {
   it("asks for a webhook when given one, which is the only way a bank leg tells a server anything", async () => {
     const calls = stubFetch(railsServing());
 
-    await bank({ webhookUrl: "https://shop.example.org/hooks/bank", webhookSecret: "s".repeat(32) })(
-      ORDER,
-    );
+    await bank({ webhookUrl: "https://shop.example.org/hooks/bank" })(ORDER);
 
     expect(bodyOf(`${GATEWAY}/watched-payments`, calls)["webhook"]).toEqual({
       url: "https://shop.example.org/hooks/bank",
-      secret: "s".repeat(32),
     });
   });
 

@@ -49,6 +49,11 @@ export {
 } from "./webhook.js";
 export type { WebhookCredential, WebhookOptions } from "./webhook.js";
 export {
+  isProvablySettled,
+  parseSettlement,
+  parseSettlementRequest,
+} from "./webhook.js";
+export {
   GatewayCheatError,
   IdempotencyConflictError,
   NoWalletAvailableError,
@@ -70,6 +75,7 @@ export type {
   PaymentKind,
   PaymentStatus,
   Quote,
+  Settlement,
   TriggerEvent,
   WalletFailure,
   WalletReason,

@@ -75,8 +75,6 @@ export interface BankRailConfig {
 
   webhookUrl?: string;
 
-  webhookSecret?: string;
-
   /** Register on a gateway you do not own anyway, on the terms `bankTransfer` sets out */
   allowPublicGateway?: boolean;
 
@@ -105,8 +103,6 @@ export interface LightningRailConfig {
 
   webhookUrl?: string;
 
-  webhookSecret?: string;
-
   /** What `Leg.rail` reads, for a shop running more than one wallet */
   name?: string;
 }
@@ -128,8 +124,6 @@ export interface BlindLightningRailConfig {
   sealed?: (order: Order) => string | Promise<string>;
 
   webhookUrl?: string;
-
-  webhookSecret?: string;
 
   /**
    * Where your own `lightningVerifyEndpoint` is mounted, and the secret it
@@ -166,7 +160,6 @@ export function bankRail(config: BankRailConfig): Rail {
       sealed: await config.sealed?.(order),
       variableSymbol: config.variableSymbol?.(order),
       webhookUrl: config.webhookUrl,
-      webhookSecret: config.webhookSecret,
       allowPublicGateway: config.allowPublicGateway,
     });
 
@@ -192,8 +185,7 @@ export function lightningRail(config: LightningRailConfig): Rail {
         lnAddresses: config.lnAddresses,
         amountMsat: await config.amountMsat(order),
         webhookUrl: config.webhookUrl,
-        webhookSecret: config.webhookSecret,
-      },
+        },
       { idempotencyKey: config.idempotencyKey?.(order), trigger: config.trigger },
     );
 
@@ -230,7 +222,6 @@ export function blindLightningRail(config: BlindLightningRailConfig): Rail {
       trigger: config.trigger,
       sealed: await config.sealed?.(order),
       webhookUrl: config.webhookUrl,
-      webhookSecret: config.webhookSecret,
     });
 
     return {

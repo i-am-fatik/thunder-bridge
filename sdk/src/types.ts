@@ -26,7 +26,6 @@ export interface CreatePaymentParams {
   lnAddresses: string[];
   amountMsat: number;
   webhookUrl?: string;
-  webhookSecret?: string;
 }
 
 /**
@@ -85,7 +84,6 @@ export interface WatchPaymentParams {
   trigger?: string;
   sealed?: string;
   webhookUrl?: string;
-  webhookSecret?: string;
 }
 
 /** Why one wallet in the list could not be used */
@@ -99,4 +97,16 @@ export type WalletReason =
 export interface WalletFailure {
   address: string;
   reason: WalletReason;
+}
+
+/**
+ * What a delivery carries. Everything needed to act on a settlement and to check
+ * it, and nothing else, so a retry is the same size every time
+ */
+export interface Settlement {
+  id: string;
+  status: PaymentStatus;
+  paymentHash: string;
+  preimage: string | null;
+  settledAt: number;
 }

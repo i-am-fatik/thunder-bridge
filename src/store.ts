@@ -5,6 +5,7 @@ import {
 	SOURCES,
 	type Claim,
 	type Facts,
+	type Kept,
 	type Ledger,
 	type Retry,
 	type Source,
@@ -168,8 +169,12 @@ export class Store {
 		this.ledger.releaseKey(key);
 	}
 
-	sweep(graceSecs: number): Payment[] {
-		return this.ledger.sweep(graceSecs);
+	sweep(graceSecs: number, keepSealedSecs: number): Payment[] {
+		return this.ledger.sweep(graceSecs, keepSealedSecs);
+	}
+
+	kept(id: string): Kept | null {
+		return this.ledger.kept(id);
 	}
 
 	close(): void {

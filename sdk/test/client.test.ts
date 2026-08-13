@@ -223,20 +223,19 @@ describe("createPayment", () => {
     expect(String(calls[0].init?.body)).not.toContain(`"value":${AMOUNT_MSAT}`);
   });
 
-  it("sends the webhook url and secret nested under one webhook object when they are given", async () => {
+  it("sends the webhook url nested under one webhook object, and no secret to hold", async () => {
     const calls = stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
 
     await new ThunderBridge(GATEWAY).createPayment({
       lnAddresses: [LN_ADDRESS],
       amountMsat: AMOUNT_MSAT,
       webhookUrl: "https://shop.example.org/hooks/lightning",
-      webhookSecret: "s3cret",
     });
 
     expect(postedBody(calls)).toEqual({
       ln_addresses: [LN_ADDRESS],
       incoming_amount: { value: String(AMOUNT_MSAT), asset_code: "BTC", asset_scale: 11 },
-      webhook: { url: "https://shop.example.org/hooks/lightning", secret: "s3cret" },
+      webhook: { url: "https://shop.example.org/hooks/lightning" },
     });
   });
 

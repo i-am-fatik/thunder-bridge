@@ -2,7 +2,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { bytesToHex } from "../core/bytes.ts";
 import type { SigningKey } from "../core/ed25519.ts";
-import { equalInConstantTime } from "../core/hmac.ts";
 import { checkSettled } from "../core/lnurl.ts";
 import { ask } from "../core/outbound.ts";
 import * as log from "./log.ts";
@@ -104,7 +103,7 @@ async function notify(owed: Delivery, gatewayKey: SigningKey): Promise<boolean> 
 	try {
 		const answer = await ask(owed.url, {
 			method: "POST",
-			headers: await signedHeaders(owed.body, owed.secret, gatewayKey),
+			headers: await signedHeaders(owed.body, gatewayKey),
 			body: owed.body,
 		});
 		if (!answer.ok) log.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
@@ -116,26 +115,21 @@ async function notify(owed: Delivery, gatewayKey: SigningKey): Promise<boolean> 
 }
 
 export async function confirmWebhook(hook: Webhook, gatewayKey: SigningKey): Promise<boolean> {
-	return await consents(hook.url, CHALLENGE, hook.secret, gatewayKey);
+	return await consents(hook.url, CHALLENGE, gatewayKey);
 }
 
 export async function confirmVerify(url: string, gatewayKey: SigningKey): Promise<boolean> {
-	return await consents(url, VERIFY_CHALLENGE, null, gatewayKey);
+	return await consents(url, VERIFY_CHALLENGE, gatewayKey);
 }
 
-async function consents(
-	url: string,
-	type: string,
-	secret: string | null,
-	gatewayKey: SigningKey,
-): Promise<boolean> {
+async function consents(url: string, type: string, gatewayKey: SigningKey): Promise<boolean> {
 	const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
 	const body = JSON.stringify({ type, nonce });
 
 	try {
 		const answer = await ask(url, {
 			method: "POST",
-			headers: await signedHeaders(body, secret, gatewayKey),
+			headers: await signedHeaders(body, gatewayKey),
 			body,
 		});
 		if (!answer.ok) {
@@ -143,26 +137,19 @@ async function consents(
 			return false;
 		}
 
-		return await proves(answer.body, nonce, secret);
+		return proves(answer.body, nonce);
 	} catch (error: unknown) {
 		log.warn(`${url} could not be sent a ${type}: ${String(error)}`);
 		return false;
 	}
 }
 
-async function proves(body: string, nonce: string, secret: string | null): Promise<boolean> {
-	const answered = asJson(body);
-	if (answered["nonce"] !== nonce) {
-		log.warn("a webhook answered a challenge without the nonce it was given");
-		return false;
-	}
-	if (!secret) return true;
+function proves(body: string, nonce: string): boolean {
+	if (asJson(body)["nonce"] === nonce) return true;
 
-	const expected = `sha256=${await sign(secret, nonce)}`;
-	const signed = equalInConstantTime(String(answered["signature"] ?? ""), expected);
-	if (!signed) log.warn("a webhook answered a challenge the registered secret does not sign");
+	log.warn("a webhook answered a challenge without the nonce it was given");
 
-	return signed;
+	return false;
 }
 
 function asJson(body: string): Record<string, unknown> {
@@ -175,18 +162,14 @@ function asJson(body: string): Record<string, unknown> {
 
 async function signedHeaders(
 	body: string,
-	secret: string | null,
 	gatewayKey: SigningKey,
 ): Promise<Record<string, string>> {
 	const stamped = String(unixNow());
-	const signed = `${stamped}.${body}`;
 
 	return {
 		"content-type": "application/json",
 		"x-timestamp": stamped,
-		"x-signature": secret
-			? `sha256=${await sign(secret, signed)}`
-			: `ed25519=${await gatewayKey.sign(new TextEncoder().encode(signed))}`,
+		"x-signature": `ed25519=${await gatewayKey.sign(new TextEncoder().encode(`${stamped}.${body}`))}`,
 	};
 }
 
@@ -225,18 +208,6 @@ export function pollDelayMs(
 	if (askedMs !== null) return askedMs;
 	if (waitedSecs < EAGER_WINDOW_SECS) return eagerMs;
 	return waitedSecs * STALENESS * 1000;
-}
-
-export async function sign(secret: string, body: string): Promise<string> {
-	const key = await crypto.subtle.importKey(
-		"raw",
-		new TextEncoder().encode(secret),
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign"],
-	);
-	const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
-	return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function unixNow(): number {
