@@ -549,7 +549,7 @@ export class Ledger {
 
 	settlement(id: string): PublicPayment | null {
 		const row = this.statements.settlement.get(id) as Row | undefined;
-		return row ? (JSON.parse(row.payment) as PublicPayment) : null;
+		return row ? asStored<PublicPayment>(row.payment) : null;
 	}
 
 	replay(trigger: string, limit: number, window: number): PublicPayment[] {
@@ -576,7 +576,7 @@ export class Ledger {
 
 	private recentlySettled(window: number): PublicPayment[] {
 		const rows = this.statements.recentlyPaid.all(window) as Row[];
-		return rows.map((row) => JSON.parse(row.payment) as PublicPayment);
+		return rows.map((row) => asStored<PublicPayment>(row.payment));
 	}
 
 	settle(pending: Payment, preimage: string): { settled: PublicPayment; facts: Facts } {
@@ -1003,7 +1003,7 @@ export class Ledger {
 			fact.mac,
 		);
 
-		const payment = JSON.parse(fact.payment) as Payment;
+		const payment = asStored<Payment>(fact.payment);
 		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment)) {
 			throw new Error(`accepted fact ${fact.id} does not name the invoice it watches`);
 		}
@@ -1019,7 +1019,7 @@ export class Ledger {
 	private provenPaid(fact: PaidFact): PublicPayment {
 		this.verify("paid", [fact.origin, fact.seq, fact.id, fact.payment, fact.settledAt], fact.mac);
 
-		const payment = JSON.parse(fact.payment) as PublicPayment;
+		const payment = asStored<PublicPayment>(fact.payment);
 		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment)) {
 			throw new Error(`paid fact ${fact.id} does not name the invoice it settles`);
 		}
@@ -1042,6 +1042,18 @@ export class Ledger {
 
 export function paymentId(key: Uint8Array, paymentHash: string): string {
 	return createHmac("sha256", key).update("payment-id").update(paymentHash).digest("hex");
+}
+
+/**
+ * A payment as the ledger holds it. A record written before a field existed simply
+ * has no key for it, and `JSON.parse` hands that back as `undefined` however the
+ * type reads, so every field added since is normalised here rather than at each of
+ * the places that reads one
+ */
+function asStored<T extends PublicPayment>(record: string): T {
+	const payment = JSON.parse(record) as T;
+
+	return { ...payment, caller: payment.caller ?? null };
 }
 
 function macWith(key: Uint8Array, source: Source, fields: (string | number | null)[]): string {
@@ -1091,7 +1103,7 @@ function mergedWebhooks(known: Webhook[], added: Webhook[]): Webhook[] {
 }
 
 function revive(row: Row): Payment {
-	return withStatus(JSON.parse(row.payment) as Payment);
+	return withStatus(asStored<Payment>(row.payment));
 }
 
 function withStatus(payment: Payment): Payment {

@@ -612,3 +612,30 @@ test("a payment that sealed nothing leaves nothing behind at all", () => {
 		one.stop();
 	}
 });
+
+test("a record written before callers existed reads back as anonymous, not as nobody's", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-before-callers-"));
+	const ledger = join(directory, "ledger.db");
+	const before = openStore({ ledger });
+	const mine = before.store.insert(payment(0));
+	before.stop();
+
+	const written = new DatabaseSync(ledger);
+	const held = written.prepare("SELECT payment FROM accepted WHERE id = ?").get(mine.id) as {
+		payment: string;
+	};
+	const asItUsedToBe = JSON.parse(held.payment) as Record<string, unknown>;
+	delete asItUsedToBe["caller"];
+	written
+		.prepare("UPDATE accepted SET payment = ? WHERE id = ?")
+		.run(JSON.stringify(asItUsedToBe), mine.id);
+	written.close();
+
+	const after = openStore({ ledger });
+	try {
+		expect(after.store.get(mine.id)?.caller).toBeNull();
+	} finally {
+		after.stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
