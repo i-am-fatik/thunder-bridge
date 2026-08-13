@@ -258,11 +258,11 @@ test("a key left claimed by a crashed request is retaken once its lease runs out
 test("the store reports itself full once the worklist reaches its cap", () => {
 	const { store, stop } = openStore({ maxPending: 2 });
 	try {
-		expect(store.full()).toBe(false);
+		expect(store.full(null)).toBe(false);
 		store.insert(payment(0));
-		expect(store.full()).toBe(false);
+		expect(store.full(null)).toBe(false);
 		store.insert(payment(1));
-		expect(store.full()).toBe(true);
+		expect(store.full(null)).toBe(true);
 	} finally {
 		stop();
 	}
@@ -350,7 +350,7 @@ test("a payment past the cap is still recorded and still offered to a peer", () 
 	try {
 		one.store.insert(payment(0));
 		const past = one.store.insert(payment(1));
-		expect(one.store.full()).toBe(true);
+		expect(one.store.full(null)).toBe(true);
 
 		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
 		two.store.gossip.onFacts(facts);

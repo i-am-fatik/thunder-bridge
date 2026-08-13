@@ -21,7 +21,7 @@ export function bearer(name: string): string | null {
 	return raw === "" ? null : raw;
 }
 
-export function hosts(name: string): Set<string> | null {
+export function allowed(name: string): Set<string> | null {
 	const raw = (process.env[name] ?? "").trim();
 	if (raw === "") return null;
 

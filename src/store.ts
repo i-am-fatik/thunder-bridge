@@ -133,8 +133,8 @@ export class Store {
 		return this.ledger.list(limit, window);
 	}
 
-	full(): boolean {
-		return this.ledger.count() >= this.maxPending;
+	full(caller: string | null): boolean {
+		return this.ledger.countFor(caller) >= this.maxPending;
 	}
 
 	duePolls(limit: number, leaseSecs: number): Payment[] {

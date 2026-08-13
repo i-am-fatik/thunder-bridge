@@ -195,7 +195,7 @@ test("two instances at their cap still both hold every payment", async () => {
 	const cluster = await connected({ maxPending: 2 });
 	try {
 		const made = [0, 1, 2].map((n) => cluster.first.insert(spread(n)).id);
-		expect(cluster.first.full()).toBe(true);
+		expect(cluster.first.full(null)).toBe(true);
 
 		await until(
 			() => made.every((one) => cluster.second.get(one) !== null),

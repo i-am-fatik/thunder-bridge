@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { expect, test, vi } from "vitest";
 
 import { callerKey, paymentNamedBy, signedAs } from "../core/caller.ts";
-import { start, type Service } from "./index.ts";
+import { start, type Options, type Service } from "./index.ts";
 import { paymentId } from "./ledger.ts";
 import type { UnsavedPayment } from "./payment.ts";
 import {
@@ -14,6 +14,7 @@ import {
 	KEY_REUSED,
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
+	TOO_MANY_PENDING,
 	VERIFY_HOST_REFUSED,
 	VERIFY_UNCONFIRMED,
 	VERIFY_UNCONSENTED,
@@ -46,6 +47,7 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			workPerTick: 50,
 			verifyHosts: null,
 			verifyChallenge: true,
+			clientKeys: null,
 			tickStallMs: 30_000,
 			drainTimeoutMs,
 			keepSealedSecs: 90 * 86_400,
@@ -75,6 +77,7 @@ async function runningWithoutTheVerifyChallenge(): Promise<App> {
 			workPerTick: 50,
 			verifyHosts: null,
 			verifyChallenge: false,
+			clientKeys: null,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			keepSealedSecs: 90 * 86_400,
@@ -742,6 +745,75 @@ test("once the gateway has forgotten a payment, its owner still reads its own re
 	app.stop();
 });
 
+async function runningWith(
+	overrides: Partial<Options> & { maxPending?: number },
+): Promise<App> {
+	const { maxPending, ...serving } = overrides;
+	const opened = openStore(maxPending === undefined ? {} : { maxPending });
+	const service = await start(
+		{
+			port: 0,
+			eagerDelayMs: 3000,
+			pollsPerSecond: 5,
+			workPerTick: 50,
+			verifyHosts: null,
+			verifyChallenge: true,
+			clientKeys: null,
+			tickStallMs: 30_000,
+			drainTimeoutMs: 10_000,
+			keepSealedSecs: 90 * 86_400,
+			token: null,
+			key: CLUSTER_KEY,
+			...serving,
+		},
+		opened.store,
+	);
+
+	return {
+		service,
+		store: opened.store,
+		stop: () => {
+			service.stop();
+			opened.stop();
+		},
+	};
+}
+
+test("a caller over its share is refused with the ceiling in the headers", async () => {
+	const app = await runningWith({ maxPending: 1 });
+
+	const first = await postWatch(app, WATCHABLE, OWNER);
+	expect(first.status).toBe(201);
+
+	const second = await postWatch(app, { ...WATCHABLE, payment_hash: "dd".repeat(32) }, OWNER);
+	expect(second.status).toBe(429);
+	expect(second.headers.get("ratelimit-limit")).toBe("1");
+	expect(((await second.json()) as Problem)["type"]).toBe(TOO_MANY_PENDING);
+
+	app.stop();
+});
+
+test("one caller filling its share leaves another caller's share alone", async () => {
+	const app = await runningWith({ maxPending: 1 });
+
+	expect((await postWatch(app, WATCHABLE, OWNER)).status).toBe(201);
+	expect((await postWatch(app, { ...WATCHABLE, payment_hash: "dd".repeat(32) }, OWNER)).status).toBe(429);
+	expect((await postWatch(app, WATCHABLE, STRANGER)).status).toBe(201);
+
+	app.stop();
+});
+
+test("an instance keeping a list of client keys serves nobody else", async () => {
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+	const app = await runningWith({ clientKeys: new Set([owner]) });
+
+	expect((await postWatch(app, WATCHABLE, OWNER)).status).toBe(201);
+	expect((await postWatch(app, WATCHABLE, STRANGER)).status).toBe(403);
+	expect((await postWatch(app, WATCHABLE)).status).toBe(403);
+
+	app.stop();
+});
+
 test("a watch that named its caller is handed back to that caller and to nobody else", async () => {
 	const app = await running();
 
@@ -933,6 +1005,7 @@ async function pinnedTo(allowed: string[]): Promise<App> {
 			workPerTick: 50,
 			verifyHosts: new Set(allowed),
 			verifyChallenge: true,
+			clientKeys: null,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			keepSealedSecs: 90 * 86_400,

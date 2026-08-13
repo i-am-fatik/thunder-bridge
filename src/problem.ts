@@ -16,6 +16,8 @@ export const WEBHOOK_UNCONFIRMED = "urn:problem-type:thunder-bridge:webhook-unco
 export const VERIFY_UNCONFIRMED = "urn:problem-type:thunder-bridge:verify-unconfirmed";
 export const VERIFY_HOST_REFUSED = "urn:problem-type:thunder-bridge:verify-host-refused";
 export const VERIFY_UNCONSENTED = "urn:problem-type:thunder-bridge:verify-unconsented";
+export const TOO_MANY_PENDING = "urn:problem-type:thunder-bridge:too-many-pending";
+export const CALLER_UNKNOWN = "urn:problem-type:thunder-bridge:caller-unknown";
 
 const STATUS: Record<WalletReason, number> = {
 	"address-unusable": 400,

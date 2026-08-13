@@ -218,6 +218,7 @@ type Statements = {
 	read: StatementSync;
 	all: StatementSync;
 	count: StatementSync;
+	countFor: StatementSync;
 	paymentsByIds: StatementSync;
 	listing: StatementSync;
 	factCounts: Record<Source, StatementSync>;
@@ -291,6 +292,12 @@ export class Ledger {
 				"SELECT accepted.id AS id, accepted.payment AS payment FROM accepted JOIN schedule ON schedule.id = accepted.id ORDER BY accepted.id, accepted.origin, accepted.seq",
 			),
 			count: this.db.prepare("SELECT count(*) AS rows FROM schedule"),
+			countFor: this.db.prepare(`
+				SELECT count(DISTINCT accepted.id) AS rows
+				FROM accepted
+				JOIN schedule ON schedule.id = accepted.id
+				WHERE json_extract(accepted.payment, '$.caller') IS ?
+			`),
 			paymentsByIds: this.db.prepare(
 				"SELECT id, payment FROM accepted WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id, origin, seq",
 			),
@@ -445,6 +452,15 @@ export class Ledger {
 
 	count(): number {
 		return (this.statements.count.get() as { rows: number }).rows;
+	}
+
+	/**
+	 * How many payments this caller has waiting here. A caller who signed nothing
+	 * shares one bucket with every other anonymous caller, which is the only
+	 * honest way to count someone who will not say who they are
+	 */
+	countFor(caller: string | null): number {
+		return (this.statements.countFor.get(caller) as { rows: number }).rows;
 	}
 
 	kept(id: string): Kept | null {

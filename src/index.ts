@@ -15,7 +15,7 @@ import { signingKeyFromSeed, type SigningKey } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
-import { bearer, hosts, positive, secret, secrets, whole } from "./env.ts";
+import { allowed, bearer, positive, secret, secrets, whole } from "./env.ts";
 import { Ledger } from "./ledger.ts";
 import { pinnedToTheAddressWeVerified } from "./pinned.ts";
 import { quote, resolve, RESOLVE_TIMEOUT_MS, speaksVerify } from "../core/lnurl.ts";
@@ -25,12 +25,14 @@ import {
 	ALREADY_WATCHED,
 	BodyTooLarge,
 	INVALID_REQUEST,
+	CALLER_UNKNOWN,
 	KEY_REUSED,
 	MalformedRequest,
 	NoWalletAvailable,
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
 	statusForWallets,
+	TOO_MANY_PENDING,
 	VERIFY_HOST_REFUSED,
 	VERIFY_UNCONFIRMED,
 	VERIFY_UNCONSENTED,
@@ -123,6 +125,7 @@ export type Options = {
 	workPerTick: number;
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
+	clientKeys: Set<string> | null;
 	tickStallMs: number;
 	drainTimeoutMs: number;
 	keepSealedSecs: number;
@@ -141,6 +144,7 @@ type Serving = {
 	token: string | null;
 	key: Uint8Array;
 	keepSealedSecs: number;
+	clientKeys: Set<string> | null;
 	webhookKey: SigningKey;
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
@@ -152,6 +156,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		token,
 		key: options.key,
 		keepSealedSecs: options.keepSealedSecs,
+		clientKeys: options.clientKeys,
 		webhookKey: await webhookSigningKey(options.key),
 		verifyHosts: options.verifyHosts,
 		verifyChallenge: options.verifyChallenge,
@@ -435,7 +440,10 @@ async function route(
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
-		return handedTo(one[1]!, store, await callerFor(await asRequest(incoming)));
+		const caller = await callerFor(await asRequest(incoming));
+		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
+
+		return handedTo(one[1]!, store, caller);
 	}
 	if (path === "/incoming-payments" && incoming.method === "GET") {
 		return serving.token === null ? notFound() : listed(incoming, store);
@@ -443,7 +451,10 @@ async function route(
 	if (path === "/incoming-payments" && incoming.method === "POST") {
 		if (serving.verifyHosts) return mintsNothing();
 		const request = await asRequest(incoming);
-		return await create(request, store, serving.webhookKey, await callerFor(request));
+		const caller = await callerFor(request);
+		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
+
+		return await create(request, store, serving.webhookKey, caller);
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
 		if (serving.verifyHosts) return mintsNothing();
@@ -451,11 +462,17 @@ async function route(
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
 		const request = await asRequest(incoming);
-		return await watchOnly(request, store, serving, await callerFor(request));
+		const caller = await callerFor(request);
+		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
+
+		return await watchOnly(request, store, serving, caller);
 	}
 	if (path === "/ws-tickets" && incoming.method === "POST") {
 		const request = await asRequest(incoming);
-		return await ticketed(request, store, serving.key, await callerFor(request));
+		const caller = await callerFor(request);
+		if (!accepted(caller, serving.clientKeys)) return unknownCaller();
+
+		return await ticketed(request, store, serving.key, caller);
 	}
 
 	return notFound();
@@ -474,6 +491,14 @@ function handedTo(id: string, store: Store, caller: string | null): Response {
 	if (!kept || (kept.caller !== null && kept.caller !== caller)) return notFound();
 
 	return json(keptToWire(kept));
+}
+
+/**
+ * Whether this instance serves that caller at all. An instance keeping no list
+ * serves everybody, which is what a gateway with one client is for
+ */
+function accepted(caller: string | null, clientKeys: Set<string> | null): boolean {
+	return clientKeys === null || (caller !== null && clientKeys.has(caller));
 }
 
 function belongsTo(payment: Payment, caller: string | null): boolean {
@@ -504,8 +529,8 @@ async function create(
 		return unreadable(error);
 	}
 
-	if (store.full()) {
-		return unavailable(AT_CAPACITY);
+	if (store.full(caller)) {
+		return tooMany(caller, store.info().maxPending);
 	}
 	if (asked.webhook && !(await confirmWebhook(asked.webhook, webhookKey))) {
 		return unconfirmedWebhook(asked.webhook.url);
@@ -638,8 +663,8 @@ async function watchOnly(
 		return unreadable(error);
 	}
 
-	if (store.full()) {
-		return unavailable(AT_CAPACITY);
+	if (store.full(caller)) {
+		return tooMany(caller, store.info().maxPending);
 	}
 	const now = unixNow();
 	if (asked.expiresAt <= now) {
@@ -789,6 +814,42 @@ function gone(detail: string): Response {
 	return problem(410, { title: "Gone", detail });
 }
 
+/**
+ * A caller over its share is refused with the pace and the ceiling in the headers
+ * the gateway itself reads off wallets, so a client learns the shape of the limit
+ * from the refusal rather than from documentation
+ */
+function tooMany(caller: string | null, maxPending: number): Response {
+	return new Response(
+		JSON.stringify({
+			type: TOO_MANY_PENDING,
+			status: 429,
+			title: "Too Many Requests",
+			detail:
+				caller === null
+					? `${AT_CAPACITY}, and every caller who signs nothing shares one share of it`
+					: AT_CAPACITY,
+		}),
+		{
+			status: 429,
+			headers: {
+				"content-type": "application/problem+json",
+				"ratelimit-limit": `${maxPending}`,
+				"ratelimit-remaining": "0",
+			},
+		},
+	);
+}
+
+/** A caller this instance does not accept, on an instance that keeps a list of them */
+function unknownCaller(): Response {
+	return problem(403, {
+		type: CALLER_UNKNOWN,
+		title: "This gateway does not accept that key",
+		detail: "this instance serves a list of client keys, and yours is not one of them",
+	});
+}
+
 function unavailable(detail: string): Response {
 	return problem(503, { title: "Service Unavailable", detail });
 }
@@ -892,8 +953,9 @@ if (import.meta.main) {
 			port: whole("PORT", 3000),
 			eagerDelayMs: positive("POLL_INTERVAL_SECS", 5) * 1000,
 			workPerTick: positive("WORK_PER_TICK", 50),
-			verifyHosts: hosts("VERIFY_HOSTS"),
+			verifyHosts: allowed("VERIFY_HOSTS"),
 			verifyChallenge: process.env["VERIFY_CHALLENGE"] !== "0",
+			clientKeys: allowed("CLIENT_KEYS"),
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,
