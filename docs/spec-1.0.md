@@ -51,6 +51,13 @@ Minting in the SDK runs without the gateway's address pinning, because that is
 gateway only and Deno has no `options.lookup`. It matters far less here: the SDK
 fetches an address its own operator chose, not a URL a stranger named.
 
+Half of this was already built, which reading the code before writing any found out.
+`blindLightningRail` has always resolved the address itself through `core/lnurl` and
+handed the gateway only a hash, a url and an expiry. So nothing moved: what changed is
+that the gateway's own minting is off unless an instance says otherwise, and the one
+client still using it, the Deno example, says in its README that an instance has to
+allow it.
+
 ## 3. The client names the payment
 
 `payment_id` is `sha256(caller public key ‖ "payment-id" ‖ payment hash)`.

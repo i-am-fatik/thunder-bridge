@@ -79,7 +79,9 @@ them and this table does not repeat them.
 
 | Export | What it does |
 |---|---|
-| `new ThunderBridge(baseUrl, options?)` | a gateway handle. `{ verify: false }` turns off the automatic proof, `{ token }` makes the instance yours |
+| `new ThunderBridge(baseUrl, options?)` | a gateway handle. `{ secret }` is your rail secret and makes every call speak as you, `{ verify: false }` turns off the automatic proof, `{ token }` makes the instance yours |
+| `new Gateways(baseUrls, options?)` | the same payment watched at several gateways, so any one of them is replaceable. `onRefused` says which of them would not take it |
+| `gateway.nameFor(paymentHash)` | what this payment is called, worked out before any gateway has heard of it, and the same at all of them |
 | `gateway.createPayment(params, options?)` | mint an invoice on the first address that can prove one, and prove it before returning |
 | `gateway.createQuote(params)` | ask which address would take an amount without minting anything |
 | `gateway.getPayment(id)` | read a payment back, `null` when the gateway never heard of it |
@@ -167,10 +169,11 @@ const toPay = invoiceToSvg(payment.bolt11, { size: 320, color: "#1a1a2e" });
 const tipJar = lnurlToSvg("https://agora.gripe/tip");
 ```
 
-**Webhooks** - [`src/webhook.ts`](src/webhook.ts): `parseWebhookRequest`,
-`parseWebhook`, `parseWatchedWebhookRequest`, `parseWatchedWebhook`,
-`verifyWebhookSignature`, `answerWebhookChallengeRequest`,
-`answerWebhookChallenge`. See [Webhooks](#webhooks).
+**Webhooks** - [`src/webhook.ts`](src/webhook.ts): `parseSettlementRequest`,
+`parseSettlement`, `isProvablySettled`, `parseWebhookRequest`, `parseWebhook`,
+`parseWatchedWebhookRequest`, `parseWatchedWebhook`, `verifyWebhookSignature`,
+`answerWebhookChallengeRequest`, `answerWebhookChallenge`. See
+[Webhooks](#webhooks).
 
 **Errors** - [`src/errors.ts`](src/errors.ts): `ProblemError`,
 `NoWalletAvailableError`, `GatewayCheatError`, `UnverifiedRecipientError`,
@@ -387,15 +390,17 @@ try {
 
 ## Webhooks
 
-Pass `webhookUrl` and optionally `webhookSecret` when you create a payment, or on
-any rail. Once it reaches `paid` the gateway POSTs the same JSON the API returns,
-so the body is a `Payment`. Every delivery carries `x-timestamp` and an
-`x-signature` over `<timestamp>.<body>` rather than the body alone, so a captured
-delivery cannot be replayed at you later. With a secret set it is
-`sha256=<hmac>` keyed with that secret, and without one it is `ed25519=<signature>`
-from the gateway's own key, which is the better default and is below. Retries widen
-until the payment itself runs out, never sooner than an hour. An invoice that expires
-fires nothing.
+Pass `webhookUrl` when you create a payment, or on any rail. There is no webhook
+secret: a gateway holds nothing of yours, and sending one is refused rather than
+ignored. Every delivery is signed `ed25519=<signature>` with the key the gateway
+publishes at `/webhook-key`, over `<x-timestamp>.<raw body>` rather than the body
+alone, so a captured delivery cannot be replayed at you later.
+
+The body is a `Settlement`: the id, the status, the payment hash, the preimage and
+the time. Enough to act on and to check, and no more, so a retry is the same size
+whatever you put in your own record. Read `sealed` back by id when you want it.
+Retries widen until the payment itself runs out, never sooner than an hour. An
+invoice that expires fires nothing.
 
 Delivery is at-least-once, so deduplicate on `id`.
 
@@ -409,85 +414,78 @@ settlement, and it leaves the body unread either way.
 ```ts
 import {
   answerWebhookChallengeRequest,
-  parseWebhookRequest,
-  proveSettlement,
+  isProvablySettled,
+  parseSettlementRequest,
 } from "thunder-bridge";
 
+const signs = { publicKey: await gateway.webhookKey() };
+
 app.post("/hooks/paid", async (context) => {
-  const challenge = await answerWebhookChallengeRequest(context.req.raw, secret);
+  const challenge = await answerWebhookChallengeRequest(context.req.raw, signs);
   if (challenge) return challenge;
 
-  const payment = await parseWebhookRequest(context.req.raw, secret);
-  if (payment === null) return context.text("bad signature", 401);
-
-  const preimage = await proveSettlement(payment, requestFor(payment.id));
-  if (preimage === null) return context.text("the recipient has not seen it", 402);
-
-  await fulfil(payment.id);
-  return context.text("ok");
-});
-```
-
-### A watched payment sends a different body
-
-`bankRail` and `blindLightningRail` register a payment the gateway was told almost
-nothing about, so its webhook carries no address, no amount and no invoice. That is
-not a `Payment`, and `parseWebhook` answers `null` for it, which looks exactly like a
-bad signature. Use `parseWatchedWebhookRequest` there instead and you get a
-`TriggerEvent`, the shape `getWatched` hands back.
-
-```ts
-import { parseWatchedWebhookRequest } from "thunder-bridge";
-
-app.post("/hooks/bank", async (context) => {
-  const settled = await parseWatchedWebhookRequest(context.req.raw, secret);
+  const settled = await parseSettlementRequest(context.req.raw, signs);
   if (settled === null) return context.text("bad signature", 401);
+  if (!isProvablySettled(settled)) return context.text("no preimage that hashes to it", 402);
 
   await fulfil(settled.id, settled.preimage);
   return context.text("ok");
 });
 ```
 
+`isProvablySettled` answers the only question that matters about a delivery: it says
+paid and it carries a preimage that hashes to the payment hash the same body names.
+Ask the recipient's own server with `proveSettlement` when the payment is one you
+minted through the gateway and you want the proof to come from somewhere other than
+the delivery.
+
+### Every rail sends the same body
+
+`bankRail` and `blindLightningRail` used to need a parser of their own, because their
+webhook carried no address, no amount and no invoice while a minted one did. A
+delivery is a `Settlement` on every rail now, so `parseSettlementRequest` is the only
+one to reach for. `parseWatchedWebhookRequest` is still there for reading the shape a
+socket frame and `getWatched` hand back, which is a payment rather than a delivery.
+
 Give each rail its own path, as above, and neither endpoint has to guess which body
 it was handed. Both events also carry `kind`, `"minted"` or `"watched"`, so a single
 path serving a trigger that both rails settle on can branch on the field instead of
 on which fields are missing.
 
-### Or hand the gateway no secret at all
+### The gateway holds nothing of yours
 
-A secret you give the gateway is kept in its ledger and replicated to its peers,
-because any instance may be the one that delivers. Leave `webhookSecret` out and the
-delivery is signed with the gateway's own key instead, `x-signature:
-ed25519=<signature>` over the same `<timestamp>.<body>`. Fetch the public half once
-and pass it as `{ publicKey }` wherever a secret would go.
+There is nothing to hand it. A delivery is signed with the gateway's own key,
+`x-signature: ed25519=<signature>` over `<x-timestamp>.<raw body>`. Fetch the public
+half once and keep it.
 
 ```ts
-const publicKey = await gateway.webhookKey();
+const signs = { publicKey: await gateway.webhookKey() };
 
 app.post("/hooks/paid", async (context) => {
-  const challenge = await answerWebhookChallengeRequest(context.req.raw, { publicKey });
+  const challenge = await answerWebhookChallengeRequest(context.req.raw, signs);
   if (challenge) return challenge;
 
-  const payment = await parseWebhookRequest(context.req.raw, { publicKey });
-  if (payment === null) return context.text("bad signature", 401);
+  const settled = await parseSettlementRequest(context.req.raw, signs);
+  if (settled === null) return context.text("bad signature", 401);
   ...
 });
 ```
 
-Answering echoes the nonce and nothing else here, because there is no secret to sign it
-with. Holding the URL the gateway challenged is the whole proof in that case.
+Answering echoes the nonce and nothing else, because there is nothing to sign it with.
+Holding the URL the gateway challenged is the whole proof.
 
 The key is derived from the gateway's `CLUSTER_KEY`, so every instance in one cluster
-signs alike and an operator rotating that key changes this one too. Neither
-credential is ever accepted for the other's scheme, so a secret cannot check an
-`ed25519=` delivery and a public key cannot check a `sha256=` one.
+signs alike and an operator rotating that key changes this one too. A signature that
+stops verifying is therefore a reason to read `/webhook-key` again before it is a
+reason to distrust the gateway. A `sha256=` signature is refused outright: that scheme
+is gone.
 
-`parseWebhookRequest` refuses anything more than five minutes out of date,
-adjustable with `toleranceSecs`. The signature proves the body came from someone
-holding your secret. It does not prove the payment happened, since the gateway
-holds that secret too. The proof is `proveSettlement`, and it needs the request you
-originally sent, which is why `requestFor` above is your own lookup from a payment
-id back to the `CreatePaymentParams` you stored.
+`parseSettlementRequest` refuses anything more than five minutes out of date,
+adjustable with `toleranceSecs`. The signature proves the delivery came from the
+gateway. It does not prove the payment happened, because the gateway holds the key
+that signs it either way. The proof is the preimage, checked by `isProvablySettled`
+against the hash in the same body, or `proveSettlement` against the recipient's own
+server when you want the answer from somewhere else entirely.
 
 For a framework that hands you the raw body and headers separately, use
 `parseWebhook`. The body must be the bytes as received, so mount a raw body parser

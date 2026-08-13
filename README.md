@@ -137,7 +137,7 @@ standard's camelCase, and there is no authorization server.
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
 | `POLLS_PER_SEC` | `5` | fallback ceiling on outbound `verify` polls per host, used only where the endpoint names none itself with `RateLimit-Limit`. It stops one wallet everybody uses being hit harder than this however many payments point at it |
-| `MAX_PENDING` | `5000` | payments the cluster watches before a create or a watch answers 503, never a limit on what an instance knows |
+| `MAX_PENDING` | `5000` | payments one signing key may have waiting before a create or a watch answers 429. Every unsigned caller shares one share of it. `0` takes nothing new while still polling and serving what it holds, which is how a release that changes a delivery is cut over |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, each one that far further off than the last, retried for as long as the payment has left and never under an hour |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`. At `info` a line names every payment paid and every webhook delivered, so a shop's order flow is in your logs until you turn it down |
@@ -208,22 +208,20 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   that answers publicly and then rebinds to `127.0.0.1` never gets connected to, and
   the certificate is still checked against the name rather than the address. A name
   nothing answers for is refused here rather than left to the connection.
-- **Without `GATEWAY_TOKEN` every write is anonymous, and nothing here rate limits
-  one.** That is what a public instance is for, but it means one caller can take all
-  `MAX_PENDING` slots with watches nobody will ever pay, and every later create or
-  watch answers 503 until those expire. `POST /quotes` is the same shape pointed
-  outward: it makes this service fetch a host the caller names, which is why it may
-  only name a public https one, at most three addresses per domain, and never more
-  than the addresses it resolved and verified itself. An instance meant to be
-  reachable by strangers wants a rate limit in front of it.
-- **An `Idempotency-Key` is a capability on a shared instance.** Listing is refused
-  without a token and a payment id is an HMAC nobody can guess, but a replay needs
-  neither: present the same key with the same body and the original payment comes
-  back, `bolt11` and `verify_url` included. That is what makes a retry safe, and on
-  an instance strangers share it also means a guessable key hands your invoice to
-  whoever guesses it. Use a random one. There is no per-caller identity to scope it
-  by, because `GATEWAY_TOKEN` is one bearer for the whole instance rather than one
-  per caller.
+- **A keypair is free to make, so a quota is fairness rather than a defence.**
+  `MAX_PENDING` counts per signing key, so one caller filling its share leaves
+  everybody else's alone and a caller over it gets `429`. Nothing stops the same
+  stranger coming back under a new key, though. `CLIENT_KEYS` does, by serving a named
+  list and nobody else, and that is the whole defence on an instance whose clients are
+  known. An instance open to strangers still wants a limiter in front of it.
+- **An unsigned caller is anonymous, and anonymous callers share one share.** Signing
+  is what makes a payment yours to read, so a caller that signs nothing gets a payment
+  any holder of the id can read, and its watches count against the one share every
+  anonymous caller shares.
+- **An `Idempotency-Key` is scoped to whoever presented it, and only for a signed
+  caller.** A replay hands back the payment that key created, which is what makes a
+  retry safe. On a signed call that is your key's own key. Unsigned, it is still a
+  capability anybody can guess their way into, so use a random one or sign.
 
 ## More
 

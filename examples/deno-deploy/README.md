@@ -25,18 +25,25 @@ each one.
 
 Settlement arrives as a webhook rather than over a socket because Deploy ends an
 invocation when it answers, and a payment can live for weeks. The webhook is not
-taken at its word: `parseWebhookRequest` checks the HMAC and the timestamp, then
+taken at its word: `parseWebhookRequest` checks the signature against the key the
+gateway publishes at `/webhook-key`, read once at boot, and the timestamp, then
 `proveSettlement` goes to the recipient's own server for the preimage, and the
 content stays locked unless that server released one. Why those are two separate
 calls is in [../../sdk/README.md](../../sdk/README.md#origin-is-not-settlement).
+
+This example asks the gateway to mint, which is off unless an instance sets
+`MINTING=1`, because that path hands the operator the address and the amount. A shop
+that would rather the operator saw neither mints its own invoice and hands over only
+the hash: that is `blindLightningRail` in
+[../bank-transfer](../bank-transfer), and it is the better shape for anything that has
+somewhere to run.
 
 ## Configure
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `LN_ADDRESSES` | required | comma-separated priority list, first one that can issue a provable invoice wins |
-| `WEBHOOK_SECRET` | generated at boot | 32 characters of randomness, signs the webhook |
-| `CALLBACK_SECRET` | generated at boot | signs the address callback, without it anyone could make this endpoint mint |
+| `CALLBACK_SECRET` | generated at boot | signs the address callback, and is this shop's identity to the gateway, so set it to keep both across restarts |
 | `WATCH_SECRET` | generated at boot | groups every payment into one trigger, minting sends only its sha256 |
 | `ADDRESS_NAME` | `tips` | the local part, so the address is `tips@your-app.deno.dev` |
 | `PRICE_MSAT` | `21000` | what one unlock costs, in millisatoshi |
@@ -57,7 +64,6 @@ payment arrived and the gateway refuses it at creation. Who implements it is in
 ```bash
 cat > .env <<EOF
 LN_ADDRESSES=you@blink.sv,you@coinos.io
-WEBHOOK_SECRET=$(openssl rand -hex 16)
 CALLBACK_SECRET=$(openssl rand -hex 16)
 WATCH_SECRET=$(openssl rand -hex 16)
 PRICE_MSAT=21000

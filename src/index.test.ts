@@ -802,6 +802,20 @@ test("an instance mints nothing unless it was turned on, and says how to proceed
 	app.stop();
 });
 
+test("an instance told to hold nothing takes no new work and keeps what it has", async () => {
+	const app = await runningWith({ maxPending: 0 });
+	const mine = app.store.insert(pendingPayment({ caller: null }));
+
+	const refused = await postWatch(app, WATCHABLE, OWNER);
+	expect(refused.status).toBe(429);
+	expect(refused.headers.get("ratelimit-limit")).toBe("0");
+
+	expect((await readAs(app, mine.id, null)).status).toBe(200);
+	expect(app.store.duePolls(10, 0).map((one) => one.id)).toEqual([mine.id]);
+
+	app.stop();
+});
+
 test("a caller over its share is refused with the ceiling in the headers", async () => {
 	const app = await runningWith({ maxPending: 1 });
 

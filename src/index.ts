@@ -951,7 +951,7 @@ if (import.meta.main) {
 			deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
 		},
 	);
-	const store = new Store(ledger, clusterKey, positive("MAX_PENDING", 5000));
+	const store = new Store(ledger, clusterKey, whole("MAX_PENDING", 5000));
 	const cluster = new Cluster(store.gossip, {
 		key: clusterKey,
 		listenPort: whole("REPLICATE_LISTEN", 0),

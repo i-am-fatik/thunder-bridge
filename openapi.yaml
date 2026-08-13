@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Thunder Bridge
-  version: 0.10.0
+  version: 1.0.0
   license:
     name: MIT
     identifier: MIT
@@ -190,16 +190,18 @@ paths:
     get:
       tags: [webhooks]
       operationId: getWebhookKey
-      summary: The public key this gateway signs webhooks with when you gave it no secret
+      summary: The public key this gateway signs every webhook and challenge with
       description: |
         Served without a bearer, because a receiver has to be able to fetch it before it
         trusts anything. The key is derived from the instance's `CLUSTER_KEY`, so every
         instance in one cluster publishes the same one and a delivery from any of them
         verifies against it. It changes only if that key changes.
 
-        Fetch it once and keep it. A webhook registered with no `secret` arrives as
+        Fetch it once and keep it. Every delivery and every challenge arrives as
         `x-signature: ed25519=<signature>` over `<x-timestamp>.<raw body>`, and this is the
-        key that checks it, so the gateway never holds a secret of yours.
+        key that checks it. Because the key is derived from `CLUSTER_KEY`, a rotation
+        invalidates it for every receiver at once, so treat a signature that stops verifying
+        as a reason to read this again before treating it as a gateway misbehaving.
       responses:
         "200":
           description: The public half, hex encoded.
@@ -292,6 +294,11 @@ paths:
       operationId: createIncomingPayment
       summary: Get a provable invoice from the first address that will issue one
       description: |
+        This endpoint is off unless the instance sets `MINTING=1`, and answers `403` when it is
+        not. It is the one path that hands the operator the address and the amount in the clear,
+        so a client that would rather they saw neither mints its own invoice and registers it at
+        `POST /watched-payments`.
+
         Walks `ln_addresses` in order and stops at the first address that resolves, accepts
         the amount, returns an invoice for exactly that amount, binds that invoice to the
         metadata it serves (LUD-06 description hash), and publishes a usable LUD-21
@@ -347,20 +354,26 @@ paths:
       operationId: getIncomingPayment
       summary: Read one payment and its proof
       description: |
-        The id is the capability: it is an HMAC of the payment hash, so knowing it is what
-        entitles you to read the payment. A public gateway needs nothing else, and a private
-        one wants the bearer on top.
+        A payment is handed to the key that created it and to nobody else. Sign the request
+        the way you signed the one that created it, and anybody else is answered `404` rather
+        than `403`, because a `403` would confirm the payment exists, which is the question a
+        stranger was asking. An id is no longer a capability on its own.
 
-        A collection endpoint exists only on a private gateway, for the reason this used to
-        say there was none at all: an unscoped list on a shared gateway would hand every
-        caller every other caller's invoices, and this API has no accounts to scope one to.
+        Once the gateway has forgotten the payment, an hour past settlement or expiry, this
+        answers the `kept` shape instead for as long as `KEEP_SEALED_DAYS` says: the client's
+        own sealed record, how it ended, and nothing the gateway could read. Branch on `kind`.
+
+        A collection endpoint exists only on a private gateway. It is the operator's tool and
+        is not scoped per caller, because an operator holds the disk anyway.
       responses:
         "200":
-          description: The payment.
+          description: The payment, or what is left of it.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/incoming_payment"
+                oneOf:
+                  - $ref: "#/components/schemas/incoming_payment"
+                  - $ref: "#/components/schemas/kept_payment"
         "404":
           $ref: "#/components/responses/not_found"
 
@@ -410,6 +423,11 @@ paths:
 
         Nothing here is verified on your behalf, because there is nothing to verify against:
         you resolved the address, so the origin proof is yours to have run already.
+
+        Sign the request. The key that signs it owns the payment: it names the payment, it is
+        the only key that can read it back, and its share of `MAX_PENDING` is what the payment
+        counts against. An unsigned request still works and is anonymous, which means any
+        holder of the id can read what it names and every anonymous caller shares one share.
 
         The URL is asked once before anything is watched, and has to answer a JSON body
         carrying a boolean `settled`, the shape LUD-21 defines. Otherwise the request is
@@ -481,6 +499,8 @@ paths:
           $ref: "#/components/responses/verify_host_refused"
         "424":
           $ref: "#/components/responses/nothing_confirmed"
+        "429":
+          $ref: "#/components/responses/too_many_pending"
         "503":
           $ref: "#/components/responses/at_capacity"
 
@@ -601,6 +621,11 @@ paths:
       operationId: createQuote
       summary: Ask which address would serve an amount, without minting anything
       description: |
+        This endpoint is off unless the instance sets `MINTING=1`, and answers `403` when it is
+        not. It is the one path that hands the operator the address and the amount in the clear,
+        so a client that would rather they saw neither mints its own invoice and registers it at
+        `POST /watched-payments`.
+
         Runs the reachability half of the resolve: fetches each address's LNURL-pay
         endpoint in order and returns the first one that answers and accepts the amount.
         No callback is called, so no invoice is created and nothing is charged to the
@@ -648,8 +673,11 @@ webhooks:
         that expires unpaid is never delivered, so a webhook is proof of settlement rather
         than a status feed, and code waiting for an outcome still needs the expiry.
 
-        The body is the same `incoming_payment` you would read back by id, so the preimage
-        arrives with it and nothing has to be fetched to act on this.
+        The body is a `settlement`: the id, the status, the payment hash, the preimage and the
+        time. Enough to act on and to check without asking anybody, and no more, so the size of
+        a retry never depends on what a client put in its own record. It does not carry the
+        verify url, which you named, and it does not carry `sealed`, which you can read back by
+        id when you want it.
 
         Delivery is at-least-once and any 2xx retires it. Anything else is retried on a
         widening delay, `WEBHOOK_BACKOFF_SECS` seconds further apart each attempt, for as long
@@ -659,9 +687,11 @@ webhooks:
         payment settled on one instance is delivered by whichever instance in the cluster gets
         there first, so a duplicate is normal and the receiver must be idempotent.
 
-        Verify before you act. The SDK's `parseWebhookRequest` does both halves in one call,
-        and refuses a body whose signature or timestamp does not hold up. Hand it your secret
-        or, if you registered without one, the key from `/webhook-key`.
+        Verify before you act. The SDK's `parseSettlementRequest` does both halves in one call
+        and refuses a body whose signature or timestamp does not hold up, and
+        `isProvablySettled` then answers the only question that matters about one: whether the
+        preimage hashes to the payment hash the delivery itself names. The credential is the key
+        from `/webhook-key`.
       parameters:
         - name: x-timestamp
           in: header
@@ -676,13 +706,9 @@ webhooks:
           in: header
           required: true
           description: |
-            The scheme prefix says which key signed, and both cover the same
-            `<x-timestamp>.<raw body>`.
-
-            `sha256=<hmac>` when a `webhook.secret` was given at create time, keyed with that
-            secret. `ed25519=<signature>` when none was, signed with the key this gateway
-            publishes at `/webhook-key`, which is the way to take deliveries without handing
-            the gateway a secret of yours at all. Parse the prefix rather than assuming one.
+            `ed25519=<signature>` over `<x-timestamp>.<raw body>`, signed with the key this
+            gateway publishes at `/webhook-key`. There is one scheme now: the shared secret is
+            gone, so a gateway holds nothing of yours and a `sha256=` signature is refused.
           schema:
             type: string
             pattern: "^(sha256=[0-9a-f]{64}|ed25519=[0-9a-f]{128})$"
@@ -691,7 +717,7 @@ webhooks:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/incoming_payment"
+              $ref: "#/components/schemas/settlement"
       responses:
         "200":
           description: Taken. Any 2xx stops the retries.
@@ -940,6 +966,10 @@ components:
         expires, and delivery is at-least-once, so the receiver must tolerate duplicates.
         The shape is under `webhooks` in this document.
 
+        There is no `secret` any more, and sending one is refused rather than ignored. Every
+        delivery is signed `ed25519=<signature>` with the key at `/webhook-key`, so the gateway
+        holds nothing of yours and no secret of yours rides along to its peers.
+
         This URL is challenged before the payment is taken on, so it has to be serving
         already and the request answers `webhook-unconfirmed` if it is not. That is what
         keeps a caller from pointing this gateway at somebody else's server.
@@ -948,18 +978,6 @@ components:
           type: string
           format: uri
           description: A public https URL. Loopback and private ranges are refused.
-        secret:
-          type: string
-          writeOnly: true
-          maxLength: 256
-          description: |
-            Signs the body as `x-signature: sha256=<hmac>`. Never read back, on any endpoint.
-
-            Optional, and leaving it out is the stronger choice. The gateway keeps a secret you
-            give it in its ledger and replicates it to its peers, because any instance may be
-            the one that delivers. Omit it and the body is signed `ed25519=<signature>` with
-            the key at `/webhook-key` instead, which proves the same thing while the gateway
-            holds nothing of yours.
       required: [url]
 
     trigger:
@@ -985,6 +1003,50 @@ components:
         trigger:
           $ref: "#/components/schemas/trigger"
       required: [ln_addresses, incoming_amount]
+
+    settlement:
+      type: object
+      description: |
+        What a delivery carries. The least that can be acted on and still checked: the name of
+        the payment, how it ended, and a preimage against the hash the same body names.
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [paid]
+        payment_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        preimage:
+          type: [string, "null"]
+          pattern: "^[0-9a-f]{64}$"
+        settled_at:
+          type: string
+          format: date-time
+      required: [id, status, payment_hash, preimage, settled_at]
+
+    kept_payment:
+      type: object
+      description: |
+        What is left of a payment the gateway has forgotten: the ciphertext its client asked
+        it to keep, how the payment ended, and when. No hash, no url, no invoice, no preimage,
+        because none of those were kept.
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [kept]
+        status:
+          type: string
+          enum: [paid, expired]
+        settled_at:
+          type: string
+          format: date-time
+        sealed:
+          type: string
+      required: [id, kind, status, sealed]
 
     incoming_payment:
       type: object
@@ -1378,6 +1440,37 @@ components:
         The cluster is already watching as many payments as `MAX_PENDING` allows. Every
         instance holds every payment, so this is a ceiling on the cluster's worklist rather
         than on one machine, and it clears as payments settle or expire.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
+
+    too_many_pending:
+      description: |
+        This caller is holding its whole share of the worklist. `MAX_PENDING` counts per
+        signing key, so one caller filling its share leaves everybody else's alone, and every
+        caller that signs nothing shares one share between them.
+
+        A keypair costs nothing to make, so this is fairness between honest callers and not a
+        defence against a flood. That belongs in front of the gateway.
+      headers:
+        RateLimit-Limit:
+          schema:
+            type: string
+          description: How many payments one key may have waiting here.
+        RateLimit-Remaining:
+          schema:
+            type: string
+          description: Always `0` on this refusal.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/problem"
+
+    caller_unknown:
+      description: |
+        This instance serves a named list of client keys, set with `CLIENT_KEYS`, and the key
+        that signed this request is not one of them. An instance with no list serves everybody.
       content:
         application/problem+json:
           schema:

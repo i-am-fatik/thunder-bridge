@@ -19,7 +19,6 @@ const LN_ADDRESSES = (Deno.env.get("LN_ADDRESSES") ?? "")
   .split(",")
   .map((address) => address.trim())
   .filter(Boolean);
-const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET") ?? randomSecret();
 const CALLBACK_SECRET = Deno.env.get("CALLBACK_SECRET") ?? randomSecret();
 const WATCH_SECRET = Deno.env.get("WATCH_SECRET") ?? randomSecret();
 const ADDRESS_NAME = Deno.env.get("ADDRESS_NAME") ?? "tips";
@@ -32,6 +31,9 @@ const ADDRESS_PATH = `/.well-known/lnurlp/${ADDRESS_NAME}`;
 if (LN_ADDRESSES.length === 0) {
   console.log("LN_ADDRESSES is unset, every route answers 503 until it names a wallet");
 }
+if (!Deno.env.get("CALLBACK_SECRET")) {
+  console.log(`CALLBACK_SECRET=${CALLBACK_SECRET} generated, set it to keep this shop's identity`);
+}
 if (!Deno.env.get("WATCH_SECRET")) {
   console.log(`WATCH_SECRET=${WATCH_SECRET} generated, set it to keep it across restarts`);
 }
@@ -41,9 +43,10 @@ if (!PUBLIC_URL) {
 
 const askedFor: CreatePaymentParams = { lnAddresses: LN_ADDRESSES, amountMsat: PRICE_MSAT };
 const tellsUs: Partial<CreatePaymentParams> = PUBLIC_URL
-  ? { webhookUrl: `${PUBLIC_URL}/hooks/paid`, webhookSecret: WEBHOOK_SECRET }
+  ? { webhookUrl: `${PUBLIC_URL}/hooks/paid` }
   : {};
-const gateway = new ThunderBridge(GATEWAY_URL);
+const gateway = new ThunderBridge(GATEWAY_URL, { secret: CALLBACK_SECRET });
+const signs = { publicKey: await gateway.webhookKey() };
 const kv = await Deno.openKv();
 
 const serveAddress = lnurlPayEndpoint({
@@ -69,10 +72,10 @@ async function sellOne(origin: string): Promise<Response> {
 }
 
 async function unlockOnSettlement(request: Request): Promise<Response> {
-  const challenge = await answerWebhookChallengeRequest(request, WEBHOOK_SECRET);
+  const challenge = await answerWebhookChallengeRequest(request, signs);
   if (challenge) return challenge;
 
-  const payment = await parseWebhookRequest(request, WEBHOOK_SECRET);
+  const payment = await parseWebhookRequest(request, signs);
   if (!payment) return new Response("bad signature", { status: 401 });
 
   const preimage = await proveSettlement(payment, askedFor);

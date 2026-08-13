@@ -77,7 +77,10 @@ if (!OFFERS_LIGHTNING) {
   console.log("LN_ADDRESSES is unset, so an order is payable by transfer only");
 }
 
-const gateway = new ThunderBridge(GATEWAY.origin, { token: decodeURIComponent(GATEWAY.username) });
+const gateway = new ThunderBridge(GATEWAY.origin, {
+  token: decodeURIComponent(GATEWAY.username),
+  secret: BANK_SECRET,
+});
 const kv = await Deno.openKv();
 
 interface Remembered {
