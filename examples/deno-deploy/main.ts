@@ -1,11 +1,15 @@
 import {
   answerWebhookChallengeRequest,
-  type CreatePaymentParams,
-  parseWebhookRequest,
-  proveSettlement,
+  isProvablySettled,
+  parseSettlementRequest,
   ThunderBridge,
 } from "thunder-bridge";
-import { lnurlPayEndpoint } from "thunder-bridge/server";
+import {
+  invoiceFrom,
+  lightningVerifyEndpoint,
+  lnurlPayEndpoint,
+  relayedVerifyUrl,
+} from "thunder-bridge/server";
 
 function randomSecret(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -26,7 +30,9 @@ const PRICE_MSAT = Number(Deno.env.get("PRICE_MSAT") ?? 21_000);
 const CONTENT = Deno.env.get("CONTENT") ?? "The sats landed. Here is the thing you paid for.";
 const PUBLIC_URL = Deno.env.get("PUBLIC_URL");
 const UNLOCKED_FOR_MS = 30 * 24 * 60 * 60 * 1000;
+const PAY_WITHIN_SECS = 3600;
 const ADDRESS_PATH = `/.well-known/lnurlp/${ADDRESS_NAME}`;
+const VERIFY_PATH = "/verify";
 
 if (LN_ADDRESSES.length === 0) {
   console.log("LN_ADDRESSES is unset, every route answers 503 until it names a wallet");
@@ -38,13 +44,10 @@ if (!Deno.env.get("WATCH_SECRET")) {
   console.log(`WATCH_SECRET=${WATCH_SECRET} generated, set it to keep it across restarts`);
 }
 if (!PUBLIC_URL) {
-  console.log("PUBLIC_URL is unset, so no webhook is registered and nothing will unlock content");
+  console.log("PUBLIC_URL is unset, so the gateway can reach neither /verify nor a webhook");
 }
 
-const askedFor: CreatePaymentParams = { lnAddresses: LN_ADDRESSES, amountMsat: PRICE_MSAT };
-const tellsUs: Partial<CreatePaymentParams> = PUBLIC_URL
-  ? { webhookUrl: `${PUBLIC_URL}/hooks/paid` }
-  : {};
+const WEBHOOK_URL = PUBLIC_URL ? `${PUBLIC_URL}/hooks/paid` : undefined;
 const gateway = new ThunderBridge(GATEWAY_URL, { secret: CALLBACK_SECRET });
 const signs = { publicKey: await gateway.webhookKey() };
 const kv = await Deno.openKv();
@@ -56,18 +59,30 @@ const serveAddress = lnurlPayEndpoint({
   secret: CALLBACK_SECRET,
   watchSecret: WATCH_SECRET,
   baseUrl: PUBLIC_URL ? `${PUBLIC_URL}${ADDRESS_PATH}` : undefined,
+  blind: true,
 });
 
+const serveVerify = lightningVerifyEndpoint({ secret: CALLBACK_SECRET });
+
 async function sellOne(origin: string): Promise<Response> {
-  const payment = await gateway.createPayment({ ...askedFor, ...tellsUs }, {
+  const invoice = await invoiceFrom(LN_ADDRESSES, PRICE_MSAT);
+  const watched = await gateway.watchPayment({
+    paymentHash: invoice.paymentHash,
+    verifyUrl: await relayedVerifyUrl(
+      `${origin}${VERIFY_PATH}`,
+      { url: invoice.verifyUrl, hash: invoice.paymentHash },
+      CALLBACK_SECRET,
+    ),
+    expiresAt: Math.min(invoice.expiresAt, Math.floor(Date.now() / 1000) + PAY_WITHIN_SECS),
     trigger: WATCH_SECRET,
+    webhookUrl: WEBHOOK_URL,
   });
 
   return Response.json({
-    id: payment.id,
-    bolt11: payment.bolt11,
-    amount_msat: payment.amountMsat,
-    content_url: `${origin}/content/${payment.id}`,
+    id: watched.id,
+    bolt11: invoice.bolt11,
+    amount_msat: PRICE_MSAT,
+    content_url: `${origin}/content/${watched.id}`,
   });
 }
 
@@ -75,13 +90,13 @@ async function unlockOnSettlement(request: Request): Promise<Response> {
   const challenge = await answerWebhookChallengeRequest(request, signs);
   if (challenge) return challenge;
 
-  const payment = await parseWebhookRequest(request, signs);
-  if (!payment) return new Response("bad signature", { status: 401 });
+  const settled = await parseSettlementRequest(request, signs);
+  if (!settled) return new Response("bad signature", { status: 401 });
 
-  const preimage = await proveSettlement(payment, askedFor);
+  const preimage = isProvablySettled(settled) ? settled.preimage : null;
   if (preimage === null) return new Response("the recipient released no preimage", { status: 202 });
 
-  await kv.set(["unlocked", payment.id], preimage, { expireIn: UNLOCKED_FOR_MS });
+  await kv.set(["unlocked", settled.id], preimage, { expireIn: UNLOCKED_FOR_MS });
 
   return new Response("ok");
 }
@@ -104,6 +119,7 @@ function route(request: Request): Response | Promise<Response> {
 
   if (LN_ADDRESSES.length === 0) return unconfigured();
   if (url.pathname === ADDRESS_PATH) return serveAddress(request);
+  if (url.pathname === VERIFY_PATH) return serveVerify(request);
   if (request.method === "POST" && url.pathname === "/invoice") {
     return sellOne(PUBLIC_URL ?? url.origin);
   }
