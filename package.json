@@ -29,6 +29,6 @@
 		"compact-encoding": "3.3.0",
 		"hyperswarm": "4.17.0",
 		"protomux": "3.11.0",
-		"ws": "^8.21.2"
+		"ws": "^8.21.3"
 	}
 }
