@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { expect, test, vi } from "vitest";
 
 import { callerKey, paymentNamedBy, signedAs } from "../core/caller.ts";
-import { start, type Options, type Service } from "./index.ts";
+import { type Options, type Service, start } from "./index.ts";
 import { paymentId } from "./ledger.ts";
 import type { UnsavedPayment } from "./payment.ts";
 import {
@@ -243,10 +243,14 @@ function walletServing(seen: string[]): () => void {
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
-		if (target.includes("127.0.0.1")) return real(...args);
+		if (target.includes("127.0.0.1")) {
+			return real(...args);
+		}
 
 		seen.push(target);
-		if (target !== WELL_KNOWN) return Promise.resolve(new Response("no route", { status: 404 }));
+		if (target !== WELL_KNOWN) {
+			return Promise.resolve(new Response("no route", { status: 404 }));
+		}
 
 		return Promise.resolve(
 			Response.json({
@@ -268,7 +272,9 @@ function hookAnswering(nonceShift = ""): () => void {
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
-		if (target.includes("127.0.0.1")) return real(...args);
+		if (target.includes("127.0.0.1")) {
+			return real(...args);
+		}
 
 		const asked = JSON.parse(String(args[1]?.body ?? "{}")) as { nonce?: string };
 		return Response.json({ nonce: `${asked.nonce ?? ""}${nonceShift}` });
@@ -459,7 +465,9 @@ test("a limit outside what the list will serve is refused rather than silently c
 
 function postTicket(app: App, body: unknown, token?: string): Promise<Response> {
 	const headers: Record<string, string> = { "content-type": "application/json" };
-	if (token) headers["authorization"] = `Bearer ${token}`;
+	if (token) {
+		headers["authorization"] = `Bearer ${token}`;
+	}
 
 	return fetch(`http://127.0.0.1:${app.service.port}/ws-tickets`, {
 		method: "POST",
@@ -560,7 +568,9 @@ function handshake(app: App, path: string, token?: string): Promise<number> {
 		"sec-websocket-version": "13",
 		"sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
 	};
-	if (token) headers["authorization"] = `Bearer ${token}`;
+	if (token) {
+		headers["authorization"] = `Bearer ${token}`;
+	}
 
 	return new Promise((answered) => {
 		const asked = httpRequest({ host: "127.0.0.1", port: app.service.port, path, headers });
@@ -669,7 +679,9 @@ const WATCHABLE = {
 };
 
 function nonceOffered(init: RequestInit | undefined): string | null {
-	if (init?.method !== "POST" || typeof init.body !== "string") return null;
+	if (init?.method !== "POST" || typeof init.body !== "string") {
+		return null;
+	}
 	try {
 		const asked = JSON.parse(init.body) as { type?: unknown; nonce?: unknown };
 		return asked.type === VERIFY_CHALLENGE && typeof asked.nonce === "string" ? asked.nonce : null;
@@ -684,7 +696,9 @@ async function postWatch(app: App, body: unknown, secret: string | null = null):
 		const target = String(args[0]);
 		if (!target.includes("127.0.0.1") && target.includes("/verify")) {
 			const challenged = nonceOffered(args[1]);
-			if (challenged !== null) return Promise.resolve(Response.json({ nonce: challenged }));
+			if (challenged !== null) {
+				return Promise.resolve(Response.json({ nonce: challenged }));
+			}
 			return Promise.resolve(Response.json({ settled: false }));
 		}
 
@@ -747,9 +761,7 @@ test("once the gateway has forgotten a payment, its owner still reads its own re
 	app.stop();
 });
 
-async function runningWith(
-	overrides: Partial<Options> & { maxPending?: number },
-): Promise<App> {
+async function runningWith(overrides: Partial<Options> & { maxPending?: number }): Promise<App> {
 	const { maxPending, ...serving } = overrides;
 	const opened = openStore(maxPending === undefined ? {} : { maxPending });
 	const service = await start(
@@ -834,7 +846,9 @@ test("one caller filling its share leaves another caller's share alone", async (
 	const app = await runningWith({ maxPending: 1 });
 
 	expect((await postWatch(app, WATCHABLE, OWNER)).status).toBe(201);
-	expect((await postWatch(app, { ...WATCHABLE, payment_hash: "dd".repeat(32) }, OWNER)).status).toBe(429);
+	expect(
+		(await postWatch(app, { ...WATCHABLE, payment_hash: "dd".repeat(32) }, OWNER)).status,
+	).toBe(429);
 	expect((await postWatch(app, WATCHABLE, STRANGER)).status).toBe(201);
 
 	app.stop();
@@ -1000,9 +1014,7 @@ test("a watched payment can be owed a webhook, which is the bank rail's only way
 	restore();
 	const stored = app.store.get(String(created["id"]));
 
-	expect(stored?.webhooks).toEqual([
-		{ url: "https://shop.example/hooks/bank" },
-	]);
+	expect(stored?.webhooks).toEqual([{ url: "https://shop.example/hooks/bank" }]);
 
 	app.store.paid(String(created["id"]), PREIMAGE);
 
@@ -1028,10 +1040,12 @@ test("re-registering the same watch with another webhook owes both, because webh
 	expect(again.status).toBe(201);
 
 	const created = (await again.json()) as Problem;
-	expect(app.store.get(String(created["id"]))?.webhooks.map((hook) => hook.url).sort()).toEqual([
-		"https://shop.example/hooks/one",
-		"https://shop.example/hooks/two",
-	]);
+	expect(
+		app.store
+			.get(String(created["id"]))
+			?.webhooks.map((hook) => hook.url)
+			.sort(),
+	).toEqual(["https://shop.example/hooks/one", "https://shop.example/hooks/two"]);
 
 	app.stop();
 });
@@ -1107,7 +1121,9 @@ test("a verify URL that answers nothing like LUD-21 is refused, so nobody else g
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
-		if (target.includes("127.0.0.1")) return real(...args);
+		if (target.includes("127.0.0.1")) {
+			return real(...args);
+		}
 
 		return Promise.resolve(new Response("<html>a stranger's home page</html>"));
 	}) as typeof fetch;
@@ -1132,7 +1148,9 @@ function verifySpeakingButSilentOnTheChallenge(seen: string[]): () => void {
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
-		if (target.includes("127.0.0.1")) return real(...args);
+		if (target.includes("127.0.0.1")) {
+			return real(...args);
+		}
 
 		seen.push(`${args[1]?.method ?? "GET"} ${target}`);
 		return Promise.resolve(Response.json({ settled: false }));
@@ -1158,10 +1176,7 @@ test("a wallet cannot be pointed at, because it never agreed to be polled", asyn
 		expect(refused.status).toBe(424);
 		expect(((await refused.json()) as Problem)["type"]).toBe(VERIFY_UNCONSENTED);
 		expect(app.store.get(paymentId(CLUSTER_KEY, PAYMENT_HASH))).toBeNull();
-		expect(seen).toEqual([
-			`GET ${WATCHABLE.verify_url}`,
-			`POST ${WATCHABLE.verify_url}`,
-		]);
+		expect(seen).toEqual([`GET ${WATCHABLE.verify_url}`, `POST ${WATCHABLE.verify_url}`]);
 	} finally {
 		restore();
 		app.stop();
@@ -1384,7 +1399,9 @@ test("every watcher of one trigger sees its payments, and watchers of another se
 	expect(seenByOverlay[0]!["status"]).toBe("paid");
 	expect(seenByOverlay[0]!["preimage"]).toBe(PREIMAGE);
 
-	for (const socket of [overlay, lamp, stranger]) socket.close();
+	for (const socket of [overlay, lamp, stranger]) {
+		socket.close();
+	}
 	app.stop();
 });
 
@@ -1496,7 +1513,9 @@ test("a draining instance turns readiness down and waits for the tick in flight"
 	let asked = 0;
 	globalThis.fetch = (() => {
 		asked += 1;
-		return new Promise((answer) => setTimeout(() => answer(Response.json({ settled: false })), 400));
+		return new Promise((answer) =>
+			setTimeout(() => answer(Response.json({ settled: false })), 400),
+		);
 	}) as typeof fetch;
 
 	const app = await running(null, 3000);
@@ -1542,7 +1561,9 @@ test("a body larger than this gateway reads is refused before anything parses it
 
 function post(app: App, body: unknown, key?: string): Promise<Response> {
 	const headers: Record<string, string> = { "content-type": "application/json" };
-	if (key) headers["idempotency-key"] = key;
+	if (key) {
+		headers["idempotency-key"] = key;
+	}
 
 	return fetch(`http://127.0.0.1:${app.service.port}/incoming-payments`, {
 		method: "POST",

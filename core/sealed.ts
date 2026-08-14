@@ -32,10 +32,14 @@ export async function seal(secret: string, plaintext: string): Promise<string> {
  */
 export async function unseal(secret: string, sealed: string): Promise<string | null> {
 	const key = await keyFor(secret);
-	if (!sealed.startsWith(`${VERSION}.`)) return null;
+	if (!sealed.startsWith(`${VERSION}.`)) {
+		return null;
+	}
 
 	const joined = fromBase64Url(sealed.slice(VERSION.length + 1));
-	if (joined === null || joined.length <= IV_BYTES) return null;
+	if (joined === null || joined.length <= IV_BYTES) {
+		return null;
+	}
 
 	try {
 		const body = await crypto.subtle.decrypt(
@@ -73,18 +77,24 @@ async function keyFor(secret: string) {
 
 function toBase64Url(bytes: Uint8Array): string {
 	let binary = "";
-	for (const byte of bytes) binary += String.fromCharCode(byte);
+	for (const byte of bytes) {
+		binary += String.fromCharCode(byte);
+	}
 
 	return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function fromBase64Url(text: string): Uint8Array | null {
-	if (text.length === 0 || !/^[A-Za-z0-9_-]+$/.test(text)) return null;
+	if (text.length === 0 || !/^[A-Za-z0-9_-]+$/.test(text)) {
+		return null;
+	}
 
 	try {
 		const binary = atob(text.replace(/-/g, "+").replace(/_/g, "/"));
 		const bytes = new Uint8Array(binary.length);
-		for (let at = 0; at < bytes.length; at++) bytes[at] = binary.charCodeAt(at);
+		for (let at = 0; at < bytes.length; at++) {
+			bytes[at] = binary.charCodeAt(at);
+		}
 
 		return bytes;
 	} catch {

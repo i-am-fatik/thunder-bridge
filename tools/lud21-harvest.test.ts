@@ -1,6 +1,13 @@
 import { expect, test, vi } from "vitest";
 
-import { byDomain, lud16Of, measure, verdictOf, type Measured, type Verdict } from "./lud21-harvest.ts";
+import {
+	byDomain,
+	lud16Of,
+	type Measured,
+	measure,
+	type Verdict,
+	verdictOf,
+} from "./lud21-harvest.ts";
 
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
 
@@ -94,9 +101,7 @@ test("a wallet answering settled and preimage is usable", async () => {
 });
 
 test("a verify answering without a preimage key is what the denylist is for", async () => {
-	const restore = answering(
-		servedBy({ [VERIFY]: { status: "OK", settled: false, pr: "lnbc1" } }),
-	);
+	const restore = answering(servedBy({ [VERIFY]: { status: "OK", settled: false, pr: "lnbc1" } }));
 	try {
 		const measured = await measure("someone@wallet.example");
 		expect(measured.verdict).toBe("verify-without-preimage");

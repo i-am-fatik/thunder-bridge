@@ -53,7 +53,9 @@ export function decodeInvoice(bolt11: string): Invoice {
 
 /** True when `preimage` is the secret behind `paymentHash` */
 export function preimageMatchesHash(preimage: string, paymentHash: string): boolean {
-	if (!isHex(preimage)) return false;
+	if (!isHex(preimage)) {
+		return false;
+	}
 
 	return bytesToHex(sha256(hexToBytes(preimage))) === paymentHash.toLowerCase();
 }
@@ -65,18 +67,26 @@ interface Bech32Parts {
 
 function splitBech32(bolt11: string): Bech32Parts | null {
 	const lower = bolt11.toLowerCase();
-	if (isBolt12Encoding(lower)) return null;
+	if (isBolt12Encoding(lower)) {
+		return null;
+	}
 
 	const separator = lower.lastIndexOf("1");
-	if (separator < 1) return null;
+	if (separator < 1) {
+		return null;
+	}
 
 	const dataChars = lower.slice(separator + 1);
-	if (dataChars.length < CHECKSUM_WORDS) return null;
+	if (dataChars.length < CHECKSUM_WORDS) {
+		return null;
+	}
 
 	const words: number[] = [];
 	for (const char of dataChars) {
 		const value = BECH32_CHARSET.indexOf(char);
-		if (value === -1) return null;
+		if (value === -1) {
+			return null;
+		}
 		words.push(value);
 	}
 
@@ -98,8 +108,12 @@ function taggedFields(words: number[]): TaggedFields {
 		const lengthWords = words[cursor + 1]! * 32 + words[cursor + 2]!;
 		const dataStart = cursor + 1 + TAGGED_FIELD_LENGTH_WORDS;
 		const dataEnd = dataStart + lengthWords;
-		if (dataEnd > signatureStart) return fields;
-		if (!fields.has(words[cursor]!)) fields.set(words[cursor]!, words.slice(dataStart, dataEnd));
+		if (dataEnd > signatureStart) {
+			return fields;
+		}
+		if (!fields.has(words[cursor]!)) {
+			fields.set(words[cursor]!, words.slice(dataStart, dataEnd));
+		}
 		cursor = dataEnd;
 	}
 
@@ -108,22 +122,31 @@ function taggedFields(words: number[]): TaggedFields {
 
 function hexTag(fields: TaggedFields, tag: number, expectedWords: number): string | null {
 	const words = fields.get(tag);
-	if (words === undefined || words.length !== expectedWords) return null;
+	if (words === undefined || words.length !== expectedWords) {
+		return null;
+	}
 
 	return bytesToHex(wordsToBytes(words));
 }
 
 function expiryOf(words: number[], fields: TaggedFields): number | null {
-	if (words.length < TIMESTAMP_WORDS + SIGNATURE_WORDS) return null;
+	if (words.length < TIMESTAMP_WORDS + SIGNATURE_WORDS) {
+		return null;
+	}
 
 	const expiry = fields.get(EXPIRY_TAG);
 
-	return readNumber(words.slice(0, TIMESTAMP_WORDS)) + (expiry ? readNumber(expiry) : DEFAULT_EXPIRY_SECS);
+	return (
+		readNumber(words.slice(0, TIMESTAMP_WORDS)) +
+		(expiry ? readNumber(expiry) : DEFAULT_EXPIRY_SECS)
+	);
 }
 
 function amountFromHrp(hrp: string): number | null {
 	const match = HRP_AMOUNT.exec(hrp);
-	if (match === null) return null;
+	if (match === null) {
+		return null;
+	}
 
 	const [, digits, multiplier] = match;
 

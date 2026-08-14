@@ -18,10 +18,14 @@ export async function hmacHex(
 }
 
 export function equalInConstantTime(one: string, other: string): boolean {
-	if (one.length !== other.length) return false;
+	if (one.length !== other.length) {
+		return false;
+	}
 
 	let difference = 0;
-	for (let at = 0; at < one.length; at++) difference |= one.charCodeAt(at) ^ other.charCodeAt(at);
+	for (let at = 0; at < one.length; at++) {
+		difference |= one.charCodeAt(at) ^ other.charCodeAt(at);
+	}
 
 	return difference === 0;
 }

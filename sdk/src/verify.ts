@@ -31,8 +31,12 @@ export async function proveOrigin(payment: Payment, request: CreatePaymentParams
   const listed = request.lnAddresses.find((address) =>
     equalIgnoringCase(address, payment.lnAddress),
   );
-  if (listed === undefined) throw cheat("address_not_requested");
-  if (payment.amountMsat !== request.amountMsat) throw cheat("amount_mismatch");
+  if (listed === undefined) {
+    throw cheat("address_not_requested");
+  }
+  if (payment.amountMsat !== request.amountMsat) {
+    throw cheat("amount_mismatch");
+  }
 
   const invoice = decodeInvoice(payment.bolt11);
   if (
@@ -41,7 +45,9 @@ export async function proveOrigin(payment: Payment, request: CreatePaymentParams
   ) {
     throw cheat("hash_mismatch");
   }
-  if (invoice.amountMsat !== request.amountMsat) throw cheat("amount_mismatch");
+  if (invoice.amountMsat !== request.amountMsat) {
+    throw cheat("amount_mismatch");
+  }
 
   const payRequest = await payRequestFor(listed, payment);
   if (typeof payRequest.metadata !== "string" || typeof payRequest.callback !== "string") {
@@ -50,7 +56,9 @@ export async function proveOrigin(payment: Payment, request: CreatePaymentParams
   if (invoice.descriptionHash !== sha256Hex(payRequest.metadata)) {
     throw cheat("description_hash_mismatch");
   }
-  if (!sameOrigin(payment.verifyUrl, payRequest.callback)) throw cheat("verify_url_foreign");
+  if (!sameOrigin(payment.verifyUrl, payRequest.callback)) {
+    throw cheat("verify_url_foreign");
+  }
 
   const issued = await reachable<Verification>(payment.verifyUrl, payment);
   if (typeof issued.pr !== "string" || !equalIgnoringCase(issued.pr, payment.bolt11)) {
@@ -71,7 +79,9 @@ export async function proveSettlement(
   await proveOrigin(payment, request);
 
   const verified = await reachable<Verification>(payment.verifyUrl, payment);
-  if (verified.settled !== true || typeof verified.preimage !== "string") return null;
+  if (verified.settled !== true || typeof verified.preimage !== "string") {
+    return null;
+  }
   if (!preimageMatchesHash(verified.preimage, payment.paymentHash)) {
     throw new GatewayCheatError("preimage_mismatch", payment.id);
   }
@@ -84,9 +94,13 @@ export async function proveSettlement(
  * sanity check and not a proof, only `proveSettlement` asks the recipient
  */
 export function isProvablyPaid(payment: Payment): boolean {
-  if (payment.status !== "paid" || payment.preimage === null) return false;
+  if (payment.status !== "paid" || payment.preimage === null) {
+    return false;
+  }
   const invoiceHash = decodeInvoice(payment.bolt11).paymentHash;
-  if (invoiceHash === null || !equalIgnoringCase(invoiceHash, payment.paymentHash)) return false;
+  if (invoiceHash === null || !equalIgnoringCase(invoiceHash, payment.paymentHash)) {
+    return false;
+  }
   return preimageMatchesHash(payment.preimage, invoiceHash);
 }
 
@@ -102,14 +116,20 @@ async function payRequestFor(listed: string, payment: Payment): Promise<PayReque
 
 async function reachable<T>(url: string, payment: Payment): Promise<T> {
   try {
-    if (!publicHttps(url)) throw new Error(`${url} is not a public https URL`);
+    if (!publicHttps(url)) {
+      throw new Error(`${url} is not a public https URL`);
+    }
     const response = await fetch(url, {
       signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
       headers: { accept: "application/json" },
     });
-    if (!response.ok) throw new Error(`answered ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`answered ${response.status}`);
+    }
     const body: unknown = await response.json();
-    if (body === null || typeof body !== "object") throw new Error("answered with no JSON object");
+    if (body === null || typeof body !== "object") {
+      throw new Error("answered with no JSON object");
+    }
     return body as T;
   } catch (cause: unknown) {
     throw new UnverifiedRecipientError(payment.lnAddress, payment.id, cause);
@@ -119,4 +139,3 @@ async function reachable<T>(url: string, payment: Payment): Promise<T> {
 function equalIgnoringCase(one: string, other: string): boolean {
   return one.toLowerCase() === other.toLowerCase();
 }
-

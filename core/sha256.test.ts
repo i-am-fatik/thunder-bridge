@@ -10,7 +10,9 @@ async function webCrypto(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
 test("the hand written digest matches WebCrypto across every padding boundary", async () => {
 	for (const length of [0, 1, 3, 54, 55, 56, 63, 64, 65, 119, 120, 1000]) {
 		const bytes = new Uint8Array(length);
-		for (let at = 0; at < length; at++) bytes[at] = (at * 31 + 7) & 0xff;
+		for (let at = 0; at < length; at++) {
+			bytes[at] = (at * 31 + 7) & 0xff;
+		}
 		expect(bytesToHex(sha256(bytes))).toBe(await webCrypto(bytes));
 	}
 });

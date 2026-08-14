@@ -1,13 +1,13 @@
 import { paymentNamedBy } from "../core/caller.ts";
 import { announce, type Gossip } from "./gossip.ts";
 import {
-	paymentId,
-	SOURCES,
 	type Claim,
 	type Facts,
 	type Kept,
 	type Ledger,
+	paymentId,
 	type Retry,
+	SOURCES,
 	type Source,
 	type Watermarks,
 } from "./ledger.ts";
@@ -78,7 +78,9 @@ export class Store {
 	insert(unsaved: UnsavedPayment): Payment {
 		const id = this.names(unsaved);
 		const settled = this.ledger.settlement(id);
-		if (settled) return asPayment(settled);
+		if (settled) {
+			return asPayment(settled);
+		}
 
 		const taken = this.ledger.accept({ ...unsaved, id });
 		this.spread(taken.facts);
@@ -98,7 +100,9 @@ export class Store {
 	}
 
 	private spread(facts: Facts): void {
-		if (facts.accepted) announce(this.gossip, { facts, more: false });
+		if (facts.accepted) {
+			announce(this.gossip, { facts, more: false });
+		}
 	}
 
 	get(id: string): Payment | null {
@@ -115,7 +119,9 @@ export class Store {
 			this.ledger.forget(id);
 			return { payment: asPayment(already, pending), won: false };
 		}
-		if (!pending) throw new Error(`payment ${id} is not on the worklist`);
+		if (!pending) {
+			throw new Error(`payment ${id} is not on the worklist`);
+		}
 
 		const { settled, facts } = this.ledger.settle(pending, preimage);
 		announce(this.gossip, { facts, more: false });

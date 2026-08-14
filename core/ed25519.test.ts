@@ -27,9 +27,9 @@ test("a signature verifies against the public half and nothing else does", async
 	const signature = await key.sign(PAYLOAD);
 
 	expect(await verifyHex(key.publicKeyHex, signature, PAYLOAD)).toBe(true);
-	expect(await verifyHex(key.publicKeyHex, signature, new TextEncoder().encode("1700000000.{ }"))).toBe(
-		false,
-	);
+	expect(
+		await verifyHex(key.publicKeyHex, signature, new TextEncoder().encode("1700000000.{ }")),
+	).toBe(false);
 });
 
 test("a flipped bit anywhere in the signature is refused", async () => {

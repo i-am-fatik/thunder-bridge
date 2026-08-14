@@ -1,5 +1,5 @@
 import { hexToBytes } from "./bytes.ts";
-import { signingKeyFromSeed, type SigningKey, verifyHex } from "./ed25519.ts";
+import { type SigningKey, signingKeyFromSeed, verifyHex } from "./ed25519.ts";
 import { hmacHex } from "./hmac.ts";
 import { sha256Hex } from "./sha256.ts";
 
@@ -64,8 +64,12 @@ export async function callerOf(
 	const key = headers.get(KEY_HEADER)?.toLowerCase();
 	const signature = headers.get(SIGNATURE_HEADER);
 	const timestamp = headers.get(TIMESTAMP_HEADER);
-	if (!key || signature === null || timestamp === null) return null;
-	if (!signature.startsWith(PREFIX) || !recent(timestamp)) return null;
+	if (!key || signature === null || timestamp === null) {
+		return null;
+	}
+	if (!signature.startsWith(PREFIX) || !recent(timestamp)) {
+		return null;
+	}
 
 	const proven = await verifyHex(
 		key,
@@ -89,7 +93,9 @@ function spoken(
 
 function recent(timestamp: string): boolean {
 	const sent = Number(timestamp);
-	if (!Number.isFinite(sent)) return false;
+	if (!Number.isFinite(sent)) {
+		return false;
+	}
 
 	return Math.abs(Math.floor(Date.now() / 1000) - sent) <= TOLERANCE_SECS;
 }

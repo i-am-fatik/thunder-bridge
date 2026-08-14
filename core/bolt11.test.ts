@@ -35,7 +35,9 @@ test("the description hash is the sha256 coinos publishes as its metadata", asyn
 	const metadata =
 		'[["text/plain","Paying charter@coinos.io"],["text/identifier","charter@coinos.io"]]';
 	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(metadata));
-	const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+	const hex = [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
 
 	expect(decodeInvoice(COINOS_21_SAT).descriptionHash).toBe(hex);
 	expect(decodeInvoice(ALBY_21_SAT).descriptionHash).not.toBe(hex);

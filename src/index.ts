@@ -6,30 +6,29 @@ import { dirname } from "node:path";
 import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { WebSocketServer, type WebSocket } from "ws";
-import * as log from "./log.ts";
-
+import { type WebSocket, WebSocketServer } from "ws";
 import { hexToBytes } from "../core/bytes.ts";
 import { callerOf } from "../core/caller.ts";
-import { signingKeyFromSeed, type SigningKey } from "../core/ed25519.ts";
+import { type SigningKey, signingKeyFromSeed } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
+import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.ts";
+import { sendThrough } from "../core/outbound.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
 import { allowed, bearer, positive, secret, whole } from "./env.ts";
 import { Ledger } from "./ledger.ts";
-import { pinnedToTheAddressWeVerified } from "./pinned.ts";
-import { quote, resolve, RESOLVE_TIMEOUT_MS, speaksVerify } from "../core/lnurl.ts";
-import { sendThrough } from "../core/outbound.ts";
+import * as log from "./log.ts";
 import type { Payment } from "./payment.ts";
+import { pinnedToTheAddressWeVerified } from "./pinned.ts";
 import {
 	ALREADY_WATCHED,
 	BodyTooLarge,
-	INVALID_REQUEST,
 	CALLER_UNKNOWN,
+	INVALID_REQUEST,
 	KEY_REUSED,
 	MalformedRequest,
-	NoWalletAvailable,
 	NO_WALLET_AVAILABLE,
+	NoWalletAvailable,
 	REQUEST_IN_FLIGHT,
 	statusForWallets,
 	TOO_MANY_PENDING,
@@ -48,16 +47,16 @@ import {
 	type Watcher,
 } from "./watch.ts";
 import {
+	type CreateRequest,
 	fingerprint,
 	keptToWire,
 	paymentToWire,
+	type QuoteRequest,
 	quoteToWire,
 	readCreateRequest,
 	readQuoteRequest,
 	readTicketRequest,
 	readWatchRequest,
-	type CreateRequest,
-	type QuoteRequest,
 	type TicketRequest,
 	type WatchRequest,
 } from "./wire.ts";
@@ -89,7 +88,8 @@ const STALLED = "the watch loop has stopped being scheduled, so this instance ne
 const LEAVING = "this instance is shutting down and is not taking new work";
 const AT_CAPACITY = "this instance is watching as many payments as it can";
 const SPEC = readFileSync(new URL("../openapi.yaml", import.meta.url), "utf8");
-const RENDERER = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.64.0/dist/browser/standalone.js";
+const RENDERER =
+	"https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.64.0/dist/browser/standalone.js";
 const RENDERER_HASH = "sha384-ei8P62VHbV+6AdLO3hN333PsTEYp6k9OAVhlYvpmer+zdPIf8jSbdgh9ojiLWX3T";
 const RENDERER_ORIGIN = new URL(RENDERER).origin;
 const DOCS_POLICY = [
@@ -185,9 +185,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	const followers = new Map<WebSocket, Follower>();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
-		void respond(incoming, store, serving, vitals()).then((answer) =>
-			reply(answer, outgoing),
-		);
+		void respond(incoming, store, serving, vitals()).then((answer) => reply(answer, outgoing));
 	});
 
 	server.on("upgrade", (incoming, socket, head) => {
@@ -201,14 +199,19 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		if (ticketed) {
 			void readTicket(options.key, ticketed[1]!, unixNow())
 				.then((permits) => {
-					if (socket.destroyed) return;
+					if (socket.destroyed) {
+						return;
+					}
 					if (permits === null) {
 						refuseUpgrade(socket);
 						return;
 					}
 					upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
-						if (permits.kind === "trigger") subscribe(accepted, permits.trigger, store, followers);
-						else follow(accepted, permits.paymentId, store, followers);
+						if (permits.kind === "trigger") {
+							subscribe(accepted, permits.trigger, store, followers);
+						} else {
+							follow(accepted, permits.paymentId, store, followers);
+						}
 					});
 				})
 				.catch(() => refuseUpgrade(socket));
@@ -245,7 +248,9 @@ export async function start(options: Options, store: Store): Promise<Service> {
 			const mine =
 				follower.id === payment.id ||
 				(follower.trigger !== null && follower.trigger === payment.trigger);
-			if (mine) socket.send(frame);
+			if (mine) {
+				socket.send(frame);
+			}
 		}
 	};
 	store.onChange = publish;
@@ -264,14 +269,18 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	}, PING_INTERVAL_MS);
 
 	const sweeper = setInterval(() => {
-		for (const expired of store.sweep(EXPIRED_GRACE_SECS, options.keepSealedSecs)) publish(expired);
+		for (const expired of store.sweep(EXPIRED_GRACE_SECS, options.keepSealedSecs)) {
+			publish(expired);
+		}
 	}, SWEEP_INTERVAL_MS);
 
 	let ticking = false;
 	let inFlight: Promise<void> = Promise.resolve();
 	const ticker = setInterval(() => {
 		firedAt = Date.now();
-		if (ticking) return;
+		if (ticking) {
+			return;
+		}
 		ticking = true;
 		inFlight = tick(watcher)
 			.catch((error: unknown) => log.warn(`tick failed: ${String(error)}`))
@@ -286,13 +295,17 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	return {
 		port,
 		stop: async () => {
-			if (draining) return;
+			if (draining) {
+				return;
+			}
 			draining = true;
 			clearInterval(keepalive);
 			clearInterval(ticker);
 			clearInterval(sweeper);
 			await Promise.race([inFlight, sleep(options.drainTimeoutMs, undefined, { ref: false })]);
-			for (const socket of followers.keys()) socket.close();
+			for (const socket of followers.keys()) {
+				socket.close();
+			}
 			upgrades.close();
 			server.closeAllConnections();
 			server.close();
@@ -316,7 +329,9 @@ function follow(
 	followers.set(socket, follower);
 	keepFresh(socket, follower, followers);
 	socket.send(JSON.stringify(paymentToWire(payment)));
-	if (payment.status !== "pending") socket.close();
+	if (payment.status !== "pending") {
+		socket.close();
+	}
 }
 
 function watch(
@@ -364,18 +379,24 @@ async function respond(
 	serving: Serving,
 	vitals: Vitals,
 ): Promise<Response> {
-	if (incoming.method === "OPTIONS") return new Response(null, { status: 204, headers: OPEN });
+	if (incoming.method === "OPTIONS") {
+		return new Response(null, { status: 204, headers: OPEN });
+	}
 
 	const answer =
 		refused(incoming, serving.token) ??
 		(await route(incoming, store, serving, vitals).catch(oversized).catch(unhandled));
-	for (const [header, value] of Object.entries(OPEN)) answer.headers.set(header, value);
+	for (const [header, value] of Object.entries(OPEN)) {
+		answer.headers.set(header, value);
+	}
 
 	return answer;
 }
 
 function refused(incoming: IncomingMessage, token: string | null): Response | null {
-	if (token === null || UNGATED.has(pathOf(incoming))) return null;
+	if (token === null || UNGATED.has(pathOf(incoming))) {
+		return null;
+	}
 
 	return bearerMatches(incoming, token) ? null : unauthorized();
 }
@@ -398,10 +419,14 @@ function readiness(
 	token: string | null,
 	vitals: Vitals,
 ): Response {
-	if (vitals === "draining") return unavailable(LEAVING);
+	if (vitals === "draining") {
+		return unavailable(LEAVING);
+	}
 
 	const trusted = token !== null && bearerMatches(incoming, token);
-	if (!trusted) return json({ status: "ready" });
+	if (!trusted) {
+		return json({ status: "ready" });
+	}
 
 	const info = store.info();
 
@@ -435,28 +460,46 @@ async function route(
 	vitals: Vitals,
 ): Promise<Response> {
 	const path = pathOf(incoming);
-	if (path === "/health") return vitals === "stalled" ? unavailable(STALLED) : new Response("OK");
-	if (path === "/ready") return readiness(incoming, store, serving.token, vitals);
-	if (path === "/openapi.yaml") return spec();
-	if (path === "/docs") return rendered();
-	if (path === "/webhook-key") return publishedWebhookKey(serving.webhookKey);
+	if (path === "/health") {
+		return vitals === "stalled" ? unavailable(STALLED) : new Response("OK");
+	}
+	if (path === "/ready") {
+		return readiness(incoming, store, serving.token, vitals);
+	}
+	if (path === "/openapi.yaml") {
+		return spec();
+	}
+	if (path === "/docs") {
+		return rendered();
+	}
+	if (path === "/webhook-key") {
+		return publishedWebhookKey(serving.webhookKey);
+	}
 
 	const request = await asRequest(incoming);
 	const caller = await callerFor(request);
-	if (!accepted(caller, serving.clientKeys)) return unknownCaller();
+	if (!accepted(caller, serving.clientKeys)) {
+		return unknownCaller();
+	}
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
-	if (one && incoming.method === "GET") return handedTo(one[1]!, store, caller);
+	if (one && incoming.method === "GET") {
+		return handedTo(one[1]!, store, caller);
+	}
 
 	if (path === "/incoming-payments" && incoming.method === "GET") {
 		return serving.token === null ? notFound() : listed(incoming, store);
 	}
 	if (path === "/incoming-payments" && incoming.method === "POST") {
-		if (!mints(serving)) return mintsNothing(serving);
+		if (!mints(serving)) {
+			return mintsNothing(serving);
+		}
 		return await create(request, store, serving.webhookKey, caller);
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
-		if (!mints(serving)) return mintsNothing(serving);
+		if (!mints(serving)) {
+			return mintsNothing(serving);
+		}
 		return await quoted(request);
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
@@ -476,10 +519,14 @@ async function route(
  */
 function handedTo(id: string, store: Store, caller: string | null): Response {
 	const payment = store.get(id);
-	if (payment) return belongsTo(payment, caller) ? json(paymentToWire(payment)) : notFound();
+	if (payment) {
+		return belongsTo(payment, caller) ? json(paymentToWire(payment)) : notFound();
+	}
 
 	const kept = store.kept(id);
-	if (!kept || (kept.caller !== null && kept.caller !== caller)) return notFound();
+	if (!kept || (kept.caller !== null && kept.caller !== caller)) {
+		return notFound();
+	}
 
 	return json(keptToWire(kept));
 }
@@ -529,7 +576,9 @@ async function create(
 
 	const key = request.headers.get("idempotency-key");
 	const claim = key ? store.claim(key, fingerprint(asked), CLAIM_LEASE_SECS) : null;
-	if (claim?.state === "done") return replay(store, claim.paymentId);
+	if (claim?.state === "done") {
+		return replay(store, claim.paymentId);
+	}
 	if (claim?.state === "inflight") {
 		return conflict(REQUEST_IN_FLIGHT, "A request with this Idempotency-Key is still running");
 	}
@@ -539,12 +588,18 @@ async function create(
 
 	try {
 		const payment = await mint(asked, store, caller);
-		if (key) store.fulfill(key, payment.id);
+		if (key) {
+			store.fulfill(key, payment.id);
+		}
 
 		return json(paymentToWire(payment), 201);
 	} catch (error: unknown) {
-		if (key) store.release(key);
-		if (!(error instanceof NoWalletAvailable)) throw error;
+		if (key) {
+			store.release(key);
+		}
+		if (!(error instanceof NoWalletAvailable)) {
+			throw error;
+		}
 
 		return problem(statusForWallets(error.wallets), {
 			type: NO_WALLET_AVAILABLE,
@@ -554,11 +609,7 @@ async function create(
 	}
 }
 
-async function mint(
-	asked: CreateRequest,
-	store: Store,
-	caller: string | null,
-): Promise<Payment> {
+async function mint(asked: CreateRequest, store: Store, caller: string | null): Promise<Payment> {
 	const resolved = await resolve(asked.addresses, asked.amountMsat);
 
 	return store.insert({
@@ -580,7 +631,9 @@ async function mint(
 
 function replay(store: Store, paymentId: string): Response {
 	const payment = store.get(paymentId);
-	if (!payment) return gone("the payment this Idempotency-Key created has already been pruned");
+	if (!payment) {
+		return gone("the payment this Idempotency-Key created has already been pruned");
+	}
 
 	return json(paymentToWire(payment), 201);
 }
@@ -600,7 +653,9 @@ async function ticketed(
 
 	if (asked.kind === "payment") {
 		const payment = store.get(asked.paymentId);
-		if (!payment || !belongsTo(payment, caller)) return notFound();
+		if (!payment || !belongsTo(payment, caller)) {
+			return notFound();
+		}
 	}
 
 	const subject: Subject =
@@ -610,7 +665,10 @@ async function ticketed(
 
 	const minted = await mintTicket(key, subject, TICKET_TTL_SECS, unixNow());
 
-	return json({ ticket: minted.ticket, expires_at: new Date(minted.expiresAt * 1000).toISOString() });
+	return json({
+		ticket: minted.ticket,
+		expires_at: new Date(minted.expiresAt * 1000).toISOString(),
+	});
 }
 
 function isThisWatch(known: Payment, asked: WatchRequest): boolean {
@@ -716,7 +774,9 @@ async function quoted(request: Request): Promise<Response> {
 
 		return json(quoteToWire(served.won, asked.amountMsat, served.refusals));
 	} catch (error: unknown) {
-		if (!(error instanceof NoWalletAvailable)) throw error;
+		if (!(error instanceof NoWalletAvailable)) {
+			throw error;
+		}
 
 		return problem(statusForWallets(error.wallets), {
 			type: NO_WALLET_AVAILABLE,
@@ -731,17 +791,23 @@ function pathOf(incoming: IncomingMessage): string {
 }
 
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
-	if (Number(incoming.headers["content-length"] ?? 0) > MAX_INBOUND_BYTES) throw new BodyTooLarge();
+	if (Number(incoming.headers["content-length"] ?? 0) > MAX_INBOUND_BYTES) {
+		throw new BodyTooLarge();
+	}
 
 	const headers = new Headers();
 	for (const [name, value] of Object.entries(incoming.headers)) {
-		if (typeof value === "string") headers.set(name, value);
+		if (typeof value === "string") {
+			headers.set(name, value);
+		}
 	}
 	const chunks: Buffer[] = [];
 	let bytes = 0;
 	for await (const chunk of incoming) {
 		bytes += (chunk as Buffer).length;
-		if (bytes > MAX_INBOUND_BYTES) throw new BodyTooLarge();
+		if (bytes > MAX_INBOUND_BYTES) {
+			throw new BodyTooLarge();
+		}
 		chunks.push(chunk as Buffer);
 	}
 
@@ -755,8 +821,12 @@ async function asRequest(incoming: IncomingMessage): Promise<Request> {
 }
 
 function unreadable(error: unknown): Response {
-	if (error instanceof SyntaxError) return invalidRequest("the request body is not JSON");
-	if (error instanceof MalformedRequest) return invalidRequest(error.message);
+	if (error instanceof SyntaxError) {
+		return invalidRequest("the request body is not JSON");
+	}
+	if (error instanceof MalformedRequest) {
+		return invalidRequest(error.message);
+	}
 	throw error;
 }
 
@@ -846,7 +916,9 @@ function unavailable(detail: string): Response {
 }
 
 function oversized(error: unknown): Response {
-	if (!(error instanceof BodyTooLarge)) throw error;
+	if (!(error instanceof BodyTooLarge)) {
+		throw error;
+	}
 
 	return problem(413, {
 		type: INVALID_REQUEST,
@@ -931,14 +1003,10 @@ if (import.meta.main) {
 
 	const clusterKey = secret("CLUSTER_KEY");
 
-	const ledger = new Ledger(
-		path,
-		clusterKey,
-		{
-			takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS", 600),
-			deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
-		},
-	);
+	const ledger = new Ledger(path, clusterKey, {
+		takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS", 600),
+		deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
+	});
 	const store = new Store(ledger, clusterKey, whole("MAX_PENDING", 5000));
 	const cluster = new Cluster(store.gossip, {
 		key: clusterKey,
@@ -969,7 +1037,9 @@ if (import.meta.main) {
 
 	let leaving = false;
 	const leave = () => {
-		if (leaving) process.exit(1);
+		if (leaving) {
+			process.exit(1);
+		}
 		leaving = true;
 		log.info("draining, and leaving once the tick in flight is done");
 		void service.stop().then(() => {

@@ -49,7 +49,9 @@ function withPadding(bytes: Uint8Array): Uint8Array {
 }
 
 function fillSchedule(schedule: Uint32Array, reader: DataView, block: number): void {
-	for (let at = 0; at < 16; at++) schedule[at] = reader.getUint32(block + at * 4, false);
+	for (let at = 0; at < 16; at++) {
+		schedule[at] = reader.getUint32(block + at * 4, false);
+	}
 
 	for (let at = 16; at < SCHEDULE_WORDS; at++) {
 		const recent = schedule[at - 15]!;
@@ -88,13 +90,17 @@ function compress(state: Uint32Array, schedule: Uint32Array): void {
 	}
 
 	const rolling = [a, b, c, d, e, f, g, h];
-	for (let at = 0; at < state.length; at++) state[at] = (state[at]! + rolling[at]!) | 0;
+	for (let at = 0; at < state.length; at++) {
+		state[at] = (state[at]! + rolling[at]!) | 0;
+	}
 }
 
 function asBytes(state: Uint32Array): Uint8Array {
 	const digest = new Uint8Array(state.length * 4);
 	const writer = new DataView(digest.buffer);
-	for (let at = 0; at < state.length; at++) writer.setUint32(at * 4, state[at]!, false);
+	for (let at = 0; at < state.length; at++) {
+		writer.setUint32(at * 4, state[at]!, false);
+	}
 
 	return digest;
 }

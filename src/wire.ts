@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
-
-import { publicHttps } from "../core/url.ts";
 import type { Quote } from "../core/lnurl.ts";
+import { publicHttps } from "../core/url.ts";
 import type { Kept } from "./ledger.ts";
 import type { PublicPayment, Status, Webhook } from "./payment.ts";
 import { MalformedRequest, type WalletFailure } from "./problem.ts";
@@ -246,10 +245,14 @@ function domainAskedTooOften(addresses: string[]): string | null {
 	const asked = new Map<string, number>();
 	for (const address of addresses) {
 		const at = address.lastIndexOf("@");
-		if (at < 0) continue;
+		if (at < 0) {
+			continue;
+		}
 		const domain = address.slice(at + 1).toLowerCase();
 		const seen = (asked.get(domain) ?? 0) + 1;
-		if (seen > MAX_PER_DOMAIN) return domain;
+		if (seen > MAX_PER_DOMAIN) {
+			return domain;
+		}
 		asked.set(domain, seen);
 	}
 
@@ -295,7 +298,9 @@ function readExpiry(value: unknown): number {
 }
 
 function readSealed(value: unknown): string | null {
-	if (value === undefined || value === null) return null;
+	if (value === undefined || value === null) {
+		return null;
+	}
 	if (typeof value !== "string" || value.length > MAX_SEALED_CHARS) {
 		throw new MalformedRequest(`sealed must be a string of at most ${MAX_SEALED_CHARS} characters`);
 	}
@@ -303,7 +308,9 @@ function readSealed(value: unknown): string | null {
 }
 
 function readTrigger(value: unknown): string | null {
-	if (value === undefined || value === null) return null;
+	if (value === undefined || value === null) {
+		return null;
+	}
 	if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
 		throw new MalformedRequest("trigger must be the hex sha256 of the secret you will watch with");
 	}
@@ -311,7 +318,9 @@ function readTrigger(value: unknown): string | null {
 }
 
 function readWebhook(value: unknown): Webhook | null {
-	if (value === undefined || value === null) return null;
+	if (value === undefined || value === null) {
+		return null;
+	}
 
 	const hook = asObject(value, "webhook must be an object");
 	const url = hook["url"];

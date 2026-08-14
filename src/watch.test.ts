@@ -6,13 +6,13 @@ import { signingKeyFromSeed, verifyHex } from "../core/ed25519.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
 import {
+	type Budget,
 	confirmWebhook,
 	nextDue,
 	pollDelayMs,
 	spend,
 	tick,
 	unixNow,
-	type Budget,
 	type Watcher,
 } from "./watch.ts";
 
@@ -61,7 +61,9 @@ function counting(answer: (url: string) => Response): { peak: () => number; rest
 	globalThis.fetch = (async (target: string | URL | Request) => {
 		live += 1;
 		peak = Math.max(peak, live);
-		if (live >= 2) bothInFlight();
+		if (live >= 2) {
+			bothInFlight();
+		}
 		await Promise.race([overlapped, sleep(NEVER_OVERLAPPED_MS)]);
 		live -= 1;
 
@@ -111,7 +113,11 @@ function queueing(work: Payment[], settle: (id: string, preimage: string) => Set
 		},
 	} as unknown as Store;
 
-	return { parked, handed, watcher: { store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY } satisfies Watcher };
+	return {
+		parked,
+		handed,
+		watcher: { store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY } satisfies Watcher,
+	};
 }
 
 function owing(work: Delivery[]) {
@@ -172,7 +178,9 @@ test("an unsettled payment goes back on the queue with a later due time", async 
 });
 
 test("a settled payment is handed to the store with its preimage", async () => {
-	const wire = intercepting((call) => (call.url === VERIFY_URL ? verified(true) : new Response("")));
+	const wire = intercepting((call) =>
+		call.url === VERIFY_URL ? verified(true) : new Response(""),
+	);
 	const { parked, handed, watcher } = queueing([payment()], settlesAs(false));
 
 	try {
@@ -248,9 +256,9 @@ test("a delivery is signed with the key the gateway publishes, and nothing of th
 		expect(stamp).toMatch(/^\d{10}$/);
 
 		const payload = new TextEncoder().encode(`${stamp}.${owed().body}`);
-		expect(await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload)).toBe(
-			true,
-		);
+		expect(
+			await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
+		).toBe(true);
 	} finally {
 		wire.restore();
 	}
@@ -286,7 +294,9 @@ test("a settlement the store refuses leaves the rest of the batch alone", async 
 	const doomed = payment({ id: "doomed" });
 	const survivor = payment({ id: "survivor" });
 	const { handed, watcher } = queueing([doomed, survivor], (id, preimage) => {
-		if (id === "doomed") throw new Error("payment doomed is not on the worklist");
+		if (id === "doomed") {
+			throw new Error("payment doomed is not on the worklist");
+		}
 
 		return { payment: payment({ status: "paid", preimage }), won: false };
 	});
@@ -304,7 +314,10 @@ test("a settlement the store refuses leaves the rest of the batch alone", async 
 
 test("the polls in one batch go out together, so a slow wallet does not hold up the rest", async () => {
 	const wire = counting(() => verified(false));
-	const { parked, watcher } = queueing([payment({ id: "one" }), payment({ id: "two" })], settlesAs(true));
+	const { parked, watcher } = queueing(
+		[payment({ id: "one" }), payment({ id: "two" })],
+		settlesAs(true),
+	);
 
 	try {
 		await tick(watcher);
@@ -317,7 +330,9 @@ test("the polls in one batch go out together, so a slow wallet does not hold up 
 });
 
 test("a poll and a webhook owed in the same tick go out together, not one after the other", async () => {
-	const wire = counting((url) => (url === VERIFY_URL ? verified(false) : new Response("", { status: 200 })));
+	const wire = counting((url) =>
+		url === VERIFY_URL ? verified(false) : new Response("", { status: 200 }),
+	);
 	const store = {
 		duePolls: () => [payment()],
 		dueDeliveries: () => [owed()],
@@ -365,7 +380,10 @@ test("an endpoint that asks for a pace is polled at it, and one that does not ke
 	const wire = intercepting(() =>
 		Response.json({ settled: false }, { headers: { "cache-control": "public, max-age=60" } }),
 	);
-	const { parked, watcher } = queueing([payment(), payment({ id: "bb".repeat(32) })], settlesAs(true));
+	const { parked, watcher } = queueing(
+		[payment(), payment({ id: "bb".repeat(32) })],
+		settlesAs(true),
+	);
 
 	try {
 		await tick(watcher);

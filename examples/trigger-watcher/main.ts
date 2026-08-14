@@ -1,10 +1,12 @@
 import { ThunderBridge, type TriggerEvent } from "thunder-bridge";
 
-const GATEWAY_URL = Deno.env.get("GATEWAY_URL") ??
-  "https://thunder-bridge-production.up.railway.app";
+const GATEWAY_URL =
+  Deno.env.get("GATEWAY_URL") ?? "https://thunder-bridge-production.up.railway.app";
 const WATCH_SECRET = Deno.env.get("WATCH_SECRET") ?? "";
 
-if (WATCH_SECRET === "") throw new Error("WATCH_SECRET is the same one the endpoint was given");
+if (WATCH_SECRET === "") {
+  throw new Error("WATCH_SECRET is the same one the endpoint was given");
+}
 
 const gateway = new ThunderBridge(GATEWAY_URL);
 

@@ -58,11 +58,18 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 			return null;
 		},
 	);
-	if (settlement?.pace) watcher.budget.pace.set(host, settlement.pace);
-	if (settlement?.ceiling) watcher.budget.ceiling.set(host, settlement.ceiling);
+	if (settlement?.pace) {
+		watcher.budget.pace.set(host, settlement.pace);
+	}
+	if (settlement?.ceiling) {
+		watcher.budget.ceiling.set(host, settlement.ceiling);
+	}
 
 	if (!settlement?.preimage) {
-		watcher.store.polled(payment.id, nextDue(payment, watcher.eagerDelayMs, paceAsked(watcher, host)));
+		watcher.store.polled(
+			payment.id,
+			nextDue(payment, watcher.eagerDelayMs, paceAsked(watcher, host)),
+		);
 		return;
 	}
 
@@ -106,7 +113,9 @@ async function notify(owed: Delivery, gatewayKey: SigningKey): Promise<boolean> 
 			headers: await signedHeaders(owed.body, gatewayKey),
 			body: owed.body,
 		});
-		if (!answer.ok) log.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
+		if (!answer.ok) {
+			log.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
+		}
 		return answer.ok;
 	} catch (error: unknown) {
 		log.warn(`webhook for ${owed.id} failed: ${String(error)}`);
@@ -145,7 +154,9 @@ async function consents(url: string, type: string, gatewayKey: SigningKey): Prom
 }
 
 function proves(body: string, nonce: string): boolean {
-	if (asJson(body)["nonce"] === nonce) return true;
+	if (asJson(body)["nonce"] === nonce) {
+		return true;
+	}
 
 	log.warn("a webhook answered a challenge without the nonce it was given");
 
@@ -180,7 +191,9 @@ export function nextDue(
 ): number | null {
 	const now = unixNow();
 	const waited = now - payment.createdAt;
-	if (now >= payment.expiresAt || waited >= WATCH_HORIZON_SECS) return null;
+	if (now >= payment.expiresAt || waited >= WATCH_HORIZON_SECS) {
+		return null;
+	}
 
 	return Math.min(now + Math.ceil(pollDelayMs(waited, eagerMs, askedMs) / 1000), payment.expiresAt);
 }
@@ -205,8 +218,12 @@ export function pollDelayMs(
 	eagerMs: number,
 	askedMs: number | null = null,
 ): number {
-	if (askedMs !== null) return askedMs;
-	if (waitedSecs < EAGER_WINDOW_SECS) return eagerMs;
+	if (askedMs !== null) {
+		return askedMs;
+	}
+	if (waitedSecs < EAGER_WINDOW_SECS) {
+		return eagerMs;
+	}
 	return waitedSecs * STALENESS * 1000;
 }
 

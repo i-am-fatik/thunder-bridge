@@ -17,8 +17,8 @@ function randomSecret(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-const GATEWAY_URL = Deno.env.get("GATEWAY_URL") ??
-  "https://thunder-bridge-production.up.railway.app";
+const GATEWAY_URL =
+  Deno.env.get("GATEWAY_URL") ?? "https://thunder-bridge-production.up.railway.app";
 const LN_ADDRESSES = (Deno.env.get("LN_ADDRESSES") ?? "")
   .split(",")
   .map((address) => address.trim())
@@ -88,13 +88,19 @@ async function sellOne(origin: string): Promise<Response> {
 
 async function unlockOnSettlement(request: Request): Promise<Response> {
   const challenge = await answerWebhookChallengeRequest(request, signs);
-  if (challenge) return challenge;
+  if (challenge) {
+    return challenge;
+  }
 
   const settled = await parseSettlementRequest(request, signs);
-  if (!settled) return new Response("bad signature", { status: 401 });
+  if (!settled) {
+    return new Response("bad signature", { status: 401 });
+  }
 
   const preimage = isProvablySettled(settled) ? settled.preimage : null;
-  if (preimage === null) return new Response("the recipient released no preimage", { status: 202 });
+  if (preimage === null) {
+    return new Response("the recipient released no preimage", { status: 202 });
+  }
 
   await kv.set(["unlocked", settled.id], preimage, { expireIn: UNLOCKED_FOR_MS });
 
@@ -103,23 +109,34 @@ async function unlockOnSettlement(request: Request): Promise<Response> {
 
 async function serveContent(id: string): Promise<Response> {
   const unlocked = await kv.get<string>(["unlocked", id]);
-  if (unlocked.value === null) return new Response("pay first", { status: 402 });
+  if (unlocked.value === null) {
+    return new Response("pay first", { status: 402 });
+  }
 
   return Response.json({ content: CONTENT, preimage: unlocked.value });
 }
 
 function unconfigured(): Response {
-  return Response.json({
-    error: "set LN_ADDRESSES to a comma-separated list of lightning addresses that speak LUD-21",
-  }, { status: 503 });
+  return Response.json(
+    {
+      error: "set LN_ADDRESSES to a comma-separated list of lightning addresses that speak LUD-21",
+    },
+    { status: 503 },
+  );
 }
 
 function route(request: Request): Response | Promise<Response> {
   const url = new URL(request.url);
 
-  if (LN_ADDRESSES.length === 0) return unconfigured();
-  if (url.pathname === ADDRESS_PATH) return serveAddress(request);
-  if (url.pathname === VERIFY_PATH) return serveVerify(request);
+  if (LN_ADDRESSES.length === 0) {
+    return unconfigured();
+  }
+  if (url.pathname === ADDRESS_PATH) {
+    return serveAddress(request);
+  }
+  if (url.pathname === VERIFY_PATH) {
+    return serveVerify(request);
+  }
   if (request.method === "POST" && url.pathname === "/invoice") {
     return sellOne(PUBLIC_URL ?? url.origin);
   }

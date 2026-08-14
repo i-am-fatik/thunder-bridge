@@ -1,3 +1,7 @@
+import { preimageMatchesHash } from "../../core/bolt11.js";
+import { callerKey, paymentNamedBy, signedAs } from "../../core/caller.js";
+import type { SigningKey } from "../../core/ed25519.js";
+import { sha256Hex } from "../../core/sha256.js";
 import {
   GatewayCheatError,
   IDEMPOTENCY_KEY_REUSED,
@@ -18,10 +22,6 @@ import type {
   WalletFailure,
   WatchPaymentParams,
 } from "./types.js";
-import { preimageMatchesHash } from "../../core/bolt11.js";
-import { callerKey, paymentNamedBy, signedAs } from "../../core/caller.js";
-import type { SigningKey } from "../../core/ed25519.js";
-import { sha256Hex } from "../../core/sha256.js";
 import { isProvablyPaid, proveOrigin } from "./verify.js";
 import {
   createRequestBody,
@@ -196,17 +196,23 @@ export class ThunderBridge {
       options?.trigger ? sha256Hex(unguessable(options.trigger)) : null,
     );
     const headers = await this.sending("/incoming-payments", sent);
-    if (options?.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
+    if (options?.idempotencyKey) {
+      headers["idempotency-key"] = options.idempotencyKey;
+    }
 
     const response = await fetch(`${this.baseUrl}/incoming-payments`, {
       method: "POST",
       headers,
       body: sent,
     });
-    if (!response.ok) throw await problemFrom(response);
+    if (!response.ok) {
+      throw await problemFrom(response);
+    }
 
     const payment = await paymentFrom(response);
-    if (this.verify) await proveOrigin(payment, params);
+    if (this.verify) {
+      await proveOrigin(payment, params);
+    }
     return payment;
   }
 
@@ -224,7 +230,9 @@ export class ThunderBridge {
       headers: await this.sending("/quotes", sent),
       body: sent,
     });
-    if (!response.ok) throw await problemFrom(response);
+    if (!response.ok) {
+      throw await problemFrom(response);
+    }
 
     const quote = quoteFromWire(await response.json().catch(() => null));
     if (quote === null) {
@@ -244,7 +252,9 @@ export class ThunderBridge {
    */
   async webhookKey(): Promise<string> {
     const response = await fetch(`${this.baseUrl}/webhook-key`);
-    if (!response.ok) throw await problemFrom(response);
+    if (!response.ok) {
+      throw await problemFrom(response);
+    }
 
     const body = (await response.json().catch(() => null)) as {
       algorithm?: unknown;
@@ -265,8 +275,12 @@ export class ThunderBridge {
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: await this.reading("GET", path),
     });
-    if (response.status === 404) return null;
-    if (!response.ok) throw await problemFrom(response);
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw await problemFrom(response);
+    }
     return this.checked(await paymentFrom(response));
   }
 
@@ -280,8 +294,12 @@ export class ThunderBridge {
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: await this.reading("GET", path),
     });
-    if (response.status === 404) return null;
-    if (!response.ok) throw await problemFrom(response);
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw await problemFrom(response);
+    }
 
     const watched = triggerEventFromWire(await response.json().catch(() => null));
     if (watched === null) {
@@ -308,7 +326,9 @@ export class ThunderBridge {
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: await this.reading("GET", path),
     });
-    if (!response.ok) throw await problemFrom(response);
+    if (!response.ok) {
+      throw await problemFrom(response);
+    }
 
     const body = (await response.json().catch(() => null)) as {
       payments?: unknown;
@@ -385,7 +405,9 @@ export class ThunderBridge {
 
       const abort = () => settle(() => reject(aborted()));
       const settle = (finish: () => void) => {
-        if (settled) return;
+        if (settled) {
+          return;
+        }
         settled = true;
         options?.signal?.removeEventListener("abort", abort);
         clearTimeout(retry);
@@ -394,7 +416,9 @@ export class ThunderBridge {
       };
 
       const again = () => {
-        if (settled) return;
+        if (settled) {
+          return;
+        }
         if (expiresAt === null && attempt >= UNANSWERED_ATTEMPTS) {
           settle(() => reject(new Error(`no gateway answered for payment ${id}`)));
           return;
@@ -407,7 +431,9 @@ export class ThunderBridge {
       };
 
       const connect = async () => {
-        if (settled) return;
+        if (settled) {
+          return;
+        }
         attempt += 1;
 
         let url = direct;
@@ -415,12 +441,17 @@ export class ThunderBridge {
           try {
             url = `${base}/ws/tickets/${await this.wsTicket({ payment_id: id })}`;
           } catch (refused: unknown) {
-            if (refused instanceof ProblemError) settle(() => reject(refused));
-            else again();
+            if (refused instanceof ProblemError) {
+              settle(() => reject(refused));
+            } else {
+              again();
+            }
             return;
           }
         }
-        if (settled) return;
+        if (settled) {
+          return;
+        }
 
         const opened = new WebSocket(url);
         socket = opened;
@@ -428,11 +459,15 @@ export class ThunderBridge {
           try {
             const frame: unknown = JSON.parse(String(event.data));
             const watched = triggerEventFromWire(frame);
-            if (watched === null) return;
+            if (watched === null) {
+              return;
+            }
 
             expiresAt = watched.expiresAt;
             attempt = 1;
-            if (!TERMINAL.has(watched.status)) return;
+            if (!TERMINAL.has(watched.status)) {
+              return;
+            }
             settle(() => resolve(frame));
           } catch (refused: unknown) {
             settle(() => reject(refused));
@@ -465,7 +500,9 @@ export class ThunderBridge {
    * settlement to refund.
    */
   async firstToSettle(ids: string[], options?: WaitOptions): Promise<TriggerEvent | null> {
-    if (ids.length === 0) return null;
+    if (ids.length === 0) {
+      return null;
+    }
 
     const stopLosers = new AbortController();
     const signal = options?.signal
@@ -478,7 +515,9 @@ export class ThunderBridge {
         let waiting = ids.length;
         const lost = () => {
           waiting -= 1;
-          if (waiting === 0) resolve(null);
+          if (waiting === 0) {
+            resolve(null);
+          }
         };
         for (const id of ids) {
           this.waitForWatched(id, { ...options, signal })
@@ -489,7 +528,9 @@ export class ThunderBridge {
             });
         }
       });
-      if (winner === null && refused !== null) throw refused;
+      if (winner === null && refused !== null) {
+        throw refused;
+      }
 
       return winner;
     } finally {
@@ -513,7 +554,9 @@ export class ThunderBridge {
       headers: await this.sending("/watched-payments", sent),
       body: sent,
     });
-    if (!response.ok) throw await problemFrom(response);
+    if (!response.ok) {
+      throw await problemFrom(response);
+    }
 
     const watched = triggerEventFromWire(await response.json().catch(() => null));
     if (watched === null) {
@@ -537,7 +580,9 @@ export class ThunderBridge {
    * because then the gateway names the payment and only it can
    */
   async nameFor(paymentHash: string): Promise<string | null> {
-    return this.secret === null ? null : paymentNamedBy((await this.speaking()).publicKeyHex, paymentHash);
+    return this.secret === null
+      ? null
+      : paymentNamedBy((await this.speaking()).publicKeyHex, paymentHash);
   }
 
   /**
@@ -556,7 +601,9 @@ export class ThunderBridge {
     let attempt = 0;
 
     const again = () => {
-      if (stopped || options.reconnect === false) return;
+      if (stopped || options.reconnect === false) {
+        return;
+      }
       retry = setTimeout(() => void connect(), backoffMs(firstDelay, attempt));
     };
 
@@ -572,7 +619,9 @@ export class ThunderBridge {
           return;
         }
       }
-      if (stopped) return;
+      if (stopped) {
+        return;
+      }
 
       socket = new WebSocket(url);
       socket.onopen = () => {
@@ -581,7 +630,9 @@ export class ThunderBridge {
       socket.onmessage = (event: MessageEvent) => {
         try {
           const settled = triggerEventFromWire(JSON.parse(String(event.data)));
-          if (settled !== null) options.onPayment(this.proven(settled));
+          if (settled !== null) {
+            options.onPayment(this.proven(settled));
+          }
         } catch (refused: unknown) {
           options.onError?.(refused);
         }
@@ -609,7 +660,9 @@ export class ThunderBridge {
       headers: await this.sending("/ws-tickets", sent),
       body: sent,
     });
-    if (!response.ok) throw await problemFrom(response);
+    if (!response.ok) {
+      throw await problemFrom(response);
+    }
 
     const minted = (await response.json().catch(() => null)) as { ticket?: unknown } | null;
     if (typeof minted?.ticket !== "string") {
@@ -625,11 +678,7 @@ export class ThunderBridge {
     return { "content-type": "application/json", ...(await this.reading("POST", path, body)) };
   }
 
-  private async reading(
-    method: string,
-    path: string,
-    body = "",
-  ): Promise<Record<string, string>> {
+  private async reading(method: string, path: string, body = ""): Promise<Record<string, string>> {
     return {
       ...(this.token === null ? {} : { authorization: `Bearer ${this.token}` }),
       ...(this.secret === null ? {} : await signedAs(await this.speaking(), method, path, body)),
@@ -646,7 +695,9 @@ export class ThunderBridge {
     const unproven =
       settled.status === "paid" &&
       (settled.preimage === null || !preimageMatchesHash(settled.preimage, settled.paymentHash));
-    if (this.verify && unproven) throw new GatewayCheatError("preimage_mismatch", settled.id);
+    if (this.verify && unproven) {
+      throw new GatewayCheatError("preimage_mismatch", settled.id);
+    }
 
     return settled;
   }
@@ -691,7 +742,9 @@ async function problemFrom(response: Response): Promise<Error> {
 }
 
 function refusals(wallets: unknown): WalletFailure[] {
-  if (!Array.isArray(wallets)) return [];
+  if (!Array.isArray(wallets)) {
+    return [];
+  }
   return wallets.filter((wallet: unknown): wallet is WalletFailure => {
     return typeof wallet === "object" && wallet !== null && "address" in wallet;
   });

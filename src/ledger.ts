@@ -2,15 +2,15 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import { decodeInvoice } from "../core/bolt11.ts";
-import * as log from "./log.ts";
 import { paymentNamedBy } from "../core/caller.ts";
+import * as log from "./log.ts";
 
 import {
-	withoutSecrets,
 	type Delivery,
 	type Payment,
 	type PublicPayment,
 	type Webhook,
+	withoutSecrets,
 } from "./payment.ts";
 import { deliveryToWire } from "./wire.ts";
 
@@ -316,7 +316,9 @@ export class Ledger {
 				"UPDATE schedule SET dueAt = ? WHERE id IN (SELECT id FROM schedule WHERE dueAt <= ? ORDER BY dueAt LIMIT ?) RETURNING id",
 			),
 			polled: this.db.prepare("UPDATE schedule SET dueAt = ? WHERE id = ?"),
-			justExpired: this.db.prepare("SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0"),
+			justExpired: this.db.prepare(
+				"SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0",
+			),
 			announce: this.db.prepare("UPDATE schedule SET announced = 1 WHERE expiresAt <= ?"),
 			prune: this.db.prepare("DELETE FROM schedule WHERE expiresAt <= ?"),
 			pruneAccepted: this.db.prepare("DELETE FROM accepted WHERE expiresAt <= ?"),
@@ -385,9 +387,7 @@ export class Ledger {
 					ON CONFLICT(key) DO UPDATE SET claimedAt = excluded.claimedAt, leaseUntil = excluded.leaseUntil`,
 			),
 			fulfillRequest: this.db.prepare("UPDATE requests SET paymentId = ? WHERE key = ?"),
-			releaseRequest: this.db.prepare(
-				"DELETE FROM requests WHERE key = ? AND paymentId IS NULL",
-			),
+			releaseRequest: this.db.prepare("DELETE FROM requests WHERE key = ? AND paymentId IS NULL"),
 			pruneRequests: this.db.prepare("DELETE FROM requests WHERE claimedAt <= ?"),
 			keepSealed: this.db.prepare(
 				`INSERT INTO kept (id, caller, sealed, status, settledAt, keptAt)
@@ -435,13 +435,17 @@ export class Ledger {
 		const held = this.db
 			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending'")
 			.all();
-		if (held.length === 0) return;
+		if (held.length === 0) {
+			return;
+		}
 
 		const orphans = this.db
 			.prepare("SELECT payment, dueAt FROM pending WHERE id NOT IN (SELECT id FROM accepted)")
 			.all() as (Row & { dueAt: number | null })[];
 
-		for (const row of orphans) this.keep(revive(row), row.dueAt ?? unixNow());
+		for (const row of orphans) {
+			this.keep(revive(row), row.dueAt ?? unixNow());
+		}
 
 		this.db.exec("DROP TABLE pending");
 	}
@@ -465,7 +469,9 @@ export class Ledger {
 
 	kept(id: string): Kept | null {
 		const row = this.statements.readKept.get(id) as KeptRow | undefined;
-		if (row === undefined) return null;
+		if (row === undefined) {
+			return null;
+		}
 
 		return {
 			id: row.id,
@@ -477,7 +483,9 @@ export class Ledger {
 	}
 
 	private paymentsFor(ids: string[]): Payment[] {
-		if (ids.length === 0) return [];
+		if (ids.length === 0) {
+			return [];
+		}
 
 		return groupById(this.statements.paymentsByIds.all(JSON.stringify(ids)) as AcceptedRow[]);
 	}
@@ -494,7 +502,9 @@ export class Ledger {
 			const taken = { ...(held ?? payment), webhooks };
 			const fresh =
 				!held || webhooks.length > held.webhooks.length ? this.acceptedFact(told) : null;
-			if (fresh) this.recordAccepted(fresh);
+			if (fresh) {
+				this.recordAccepted(fresh);
+			}
 
 			this.scheduleWatch(taken.id, taken.expiresAt, dueAt);
 
@@ -519,7 +529,9 @@ export class Ledger {
 	}
 
 	private scheduleWatch(id: string, expiresAt: number, dueAt: number): void {
-		if (this.settlement(id)) return;
+		if (this.settlement(id)) {
+			return;
+		}
 		this.statements.insertSchedule.run(id, expiresAt, dueAt);
 	}
 
@@ -555,10 +567,14 @@ export class Ledger {
 	replay(trigger: string, limit: number, window: number): PublicPayment[] {
 		const matched: PublicPayment[] = [];
 		for (const settled of this.recentlySettled(window)) {
-			if (settled.trigger !== trigger) continue;
+			if (settled.trigger !== trigger) {
+				continue;
+			}
 
 			matched.push(settled);
-			if (matched.length === limit) break;
+			if (matched.length === limit) {
+				break;
+			}
 		}
 
 		return matched.reverse();
@@ -638,7 +654,9 @@ export class Ledger {
 
 	undelivered(owed: Delivery): Retry {
 		const tried = this.statements.attempted.get(owed.origin, owed.seq) as Attempted | undefined;
-		if (!tried) return "abandoned";
+		if (!tried) {
+			return "abandoned";
+		}
 
 		const attempts = tried.attempts + 1;
 		const nextAt = unixNow() + this.tuning.deliveryBackoffSecs * attempts;
@@ -663,9 +681,15 @@ export class Ledger {
 		return this.transact<Claim>(() => {
 			const held = this.statements.heldRequest.get(key) as Held | undefined;
 			if (held) {
-				if (held.fingerprint !== fingerprint) return { state: "mismatch" };
-				if (held.paymentId) return { state: "done", paymentId: held.paymentId };
-				if (held.leaseUntil > now) return { state: "inflight" };
+				if (held.fingerprint !== fingerprint) {
+					return { state: "mismatch" };
+				}
+				if (held.paymentId) {
+					return { state: "done", paymentId: held.paymentId };
+				}
+				if (held.leaseUntil > now) {
+					return { state: "inflight" };
+				}
 			}
 			this.statements.claimRequest.run(key, fingerprint, now, now + leaseSecs);
 
@@ -693,7 +717,9 @@ export class Ledger {
 			seq: number;
 		}[]) {
 			const known = marks[row.source];
-			if (known) known[row.origin] = row.seq;
+			if (known) {
+				known[row.origin] = row.seq;
+			}
 		}
 		return marks;
 	}
@@ -708,7 +734,9 @@ export class Ledger {
 					theirs[source]?.[origin] ?? 0,
 					GAP_BATCH,
 				) as T[];
-				if (batch.length === GAP_BATCH) more = true;
+				if (batch.length === GAP_BATCH) {
+					more = true;
+				}
 				rows.push(...batch);
 			}
 			return rows;
@@ -730,14 +758,18 @@ export class Ledger {
 			const settled: PublicPayment[] = [];
 
 			for (const fact of inSeqOrder(facts.accepted ?? [])) {
-				if (this.known("accepted", fact)) continue;
+				if (this.known("accepted", fact)) {
+					continue;
+				}
 				this.provenAccepted(fact);
 				this.recordAccepted(fact);
 				this.scheduleWatch(fact.id, fact.expiresAt, this.watchAfter(fact.id));
 			}
 
 			for (const fact of inSeqOrder(facts.paid ?? [])) {
-				if (this.known("paid", fact)) continue;
+				if (this.known("paid", fact)) {
+					continue;
+				}
 				const payment = this.provenPaid(fact);
 				this.recordPaid(fact);
 				this.forget(fact.id);
@@ -745,7 +777,9 @@ export class Ledger {
 			}
 
 			for (const fact of inSeqOrder(facts.outbox ?? [])) {
-				if (this.known("outbox", fact)) continue;
+				if (this.known("outbox", fact)) {
+					continue;
+				}
 				this.verify(
 					"outbox",
 					[fact.origin, fact.seq, fact.id, fact.url, fact.body, fact.owedAt],
@@ -755,7 +789,9 @@ export class Ledger {
 			}
 
 			for (const fact of inSeqOrder(facts.delivered ?? [])) {
-				if (this.known("delivered", fact)) continue;
+				if (this.known("delivered", fact)) {
+					continue;
+				}
 				this.verify(
 					"delivered",
 					[fact.origin, fact.seq, fact.id, fact.url, fact.deliveredAt],
@@ -790,14 +826,18 @@ export class Ledger {
 		this.statements.pruneDelivered.run(now - graceSecs);
 		this.statements.pruneRequests.run(now - REQUEST_TTL_SECS);
 
-		for (const missing of this.statements.unowed.all() as Missing[]) this.owe(missing);
+		for (const missing of this.statements.unowed.all() as Missing[]) {
+			this.owe(missing);
+		}
 
 		return expired;
 	}
 
 	private owe(missing: Missing): void {
 		const settled = this.settlement(missing.id);
-		if (!settled) return;
+		if (!settled) {
+			return;
+		}
 
 		const owedAt = unixNow();
 		const body = JSON.stringify(deliveryToWire(settled, missing.settledAt ?? owedAt));
@@ -819,7 +859,9 @@ export class Ledger {
 	}
 
 	close(): void {
-		if (this.db.isOpen) this.db.close();
+		if (this.db.isOpen) {
+			this.db.close();
+		}
 	}
 
 	/**
@@ -837,10 +879,14 @@ export class Ledger {
 		const written = this.db.prepare("SELECT value FROM meta WHERE key = 'ledger-key'").get() as
 			| { value: string }
 			| undefined;
-		if (written?.value === held) return;
+		if (written?.value === held) {
+			return;
+		}
 
 		this.transact(() => {
-			if (written !== undefined) this.resignEveryFact();
+			if (written !== undefined) {
+				this.resignEveryFact();
+			}
 			this.db
 				.prepare(
 					"INSERT INTO meta (key, value) VALUES ('ledger-key', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -868,7 +914,9 @@ export class Ledger {
 				resigned += 1;
 			}
 		}
-		if (resigned > 0) log.info(`re-signed ${resigned} facts under the cluster key now held`);
+		if (resigned > 0) {
+			log.info(`re-signed ${resigned} facts under the cluster key now held`);
+		}
 	}
 
 	private migrate(): void {
@@ -881,7 +929,9 @@ export class Ledger {
 
 		this.dropOutdatedRequestCache();
 		this.db.exec(SCHEMA);
-		if (found !== SCHEMA_VERSION) this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+		if (found !== SCHEMA_VERSION) {
+			this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+		}
 	}
 
 	private schemaVersion(): number {
@@ -981,7 +1031,9 @@ export class Ledger {
 		const got = Buffer.from(mac, "hex");
 		const want = Buffer.from(macWith(this.key, source, fields), "hex");
 		const holds = want.length === got.length && timingSafeEqual(want, got);
-		if (!holds) throw new Error(`a ${source} fact arrived without the cluster key`);
+		if (!holds) {
+			throw new Error(`a ${source} fact arrived without the cluster key`);
+		}
 	}
 
 	/**
@@ -990,8 +1042,13 @@ export class Ledger {
 	 * anything of theirs, and one nobody signed for is named by a key this cluster
 	 * holds
 	 */
-	private namesItsOwnHash(id: string, payment: { caller: string | null; paymentHash: string }): boolean {
-		if (payment.caller !== null) return id === paymentNamedBy(payment.caller, payment.paymentHash);
+	private namesItsOwnHash(
+		id: string,
+		payment: { caller: string | null; paymentHash: string },
+	): boolean {
+		if (payment.caller !== null) {
+			return id === paymentNamedBy(payment.caller, payment.paymentHash);
+		}
 
 		return id === paymentId(this.key, payment.paymentHash);
 	}
@@ -1058,7 +1115,9 @@ function asStored<T extends PublicPayment>(record: string): T {
 
 function macWith(key: Uint8Array, source: Source, fields: (string | number | null)[]): string {
 	const hmac = createHmac("sha256", key).update(source);
-	for (const field of fields) hmac.update("\x00").update(field === null ? "\x01" : String(field));
+	for (const field of fields) {
+		hmac.update("\x00").update(field === null ? "\x01" : String(field));
+	}
 
 	return hmac.digest("hex");
 }
@@ -1084,7 +1143,9 @@ function proves(preimage: string | null, paymentHash: string): void {
 
 function groupById(rows: AcceptedRow[]): Payment[] {
 	const held = new Map<string, Payment[]>();
-	for (const row of rows) held.set(row.id, [...(held.get(row.id) ?? []), revive(row)]);
+	for (const row of rows) {
+		held.set(row.id, [...(held.get(row.id) ?? []), revive(row)]);
+	}
 
 	return [...held.values()].map(oneFromEvery);
 }

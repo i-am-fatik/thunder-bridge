@@ -29,8 +29,12 @@ export async function verifyWebhookSignature(
   timestamp: string,
   options: WebhookOptions = {},
 ): Promise<boolean> {
-  if (!recent(timestamp, options.toleranceSecs ?? DEFAULT_TOLERANCE_SECS)) return false;
-  if (!signature.startsWith(GATEWAY_KEY_PREFIX)) return false;
+  if (!recent(timestamp, options.toleranceSecs ?? DEFAULT_TOLERANCE_SECS)) {
+    return false;
+  }
+  if (!signature.startsWith(GATEWAY_KEY_PREFIX)) {
+    return false;
+  }
 
   return await verifyHex(
     credential.publicKey.toLowerCase(),
@@ -47,7 +51,9 @@ export async function parseWebhook(
   timestamp: string,
   options: WebhookOptions = {},
 ): Promise<Payment | null> {
-  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) return null;
+  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) {
+    return null;
+  }
   const text = typeof body === "string" ? body : new TextDecoder().decode(body);
   try {
     return paymentFromWire(JSON.parse(text));
@@ -67,7 +73,9 @@ export async function parseWebhookRequest(
 ): Promise<Payment | null> {
   const signature = request.headers.get(SIGNATURE_HEADER);
   const timestamp = request.headers.get(TIMESTAMP_HEADER);
-  if (signature === null || timestamp === null) return null;
+  if (signature === null || timestamp === null) {
+    return null;
+  }
   return parseWebhook(await request.text(), signature, credential, timestamp, options);
 }
 
@@ -83,7 +91,9 @@ export async function parseWatchedWebhook(
   timestamp: string,
   options: WebhookOptions = {},
 ): Promise<TriggerEvent | null> {
-  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) return null;
+  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) {
+    return null;
+  }
   const text = typeof body === "string" ? body : new TextDecoder().decode(body);
   try {
     return triggerEventFromWire(JSON.parse(text));
@@ -100,7 +110,9 @@ export async function parseWatchedWebhookRequest(
 ): Promise<TriggerEvent | null> {
   const signature = request.headers.get(SIGNATURE_HEADER);
   const timestamp = request.headers.get(TIMESTAMP_HEADER);
-  if (signature === null || timestamp === null) return null;
+  if (signature === null || timestamp === null) {
+    return null;
+  }
   return parseWatchedWebhook(await request.text(), signature, credential, timestamp, options);
 }
 
@@ -116,7 +128,9 @@ export async function parseSettlement(
   timestamp: string,
   options: WebhookOptions = {},
 ): Promise<Settlement | null> {
-  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) return null;
+  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) {
+    return null;
+  }
 
   try {
     return settlementFromWire(JSON.parse(textOf(body)));
@@ -133,7 +147,9 @@ export async function parseSettlementRequest(
 ): Promise<Settlement | null> {
   const signature = request.headers.get(SIGNATURE_HEADER);
   const timestamp = request.headers.get(TIMESTAMP_HEADER);
-  if (signature === null || timestamp === null) return null;
+  if (signature === null || timestamp === null) {
+    return null;
+  }
 
   return await parseSettlement(await request.text(), signature, credential, timestamp, options);
 }
@@ -144,7 +160,9 @@ export async function parseSettlementRequest(
  * payment hash the delivery itself names
  */
 export function isProvablySettled(settled: Settlement): boolean {
-  if (settled.status !== "paid" || settled.preimage === null) return false;
+  if (settled.status !== "paid" || settled.preimage === null) {
+    return false;
+  }
 
   return preimageMatchesHash(settled.preimage, settled.paymentHash);
 }
@@ -161,7 +179,9 @@ export async function answerWebhookChallenge(
   timestamp: string,
   options: WebhookOptions = {},
 ): Promise<string | null> {
-  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) return null;
+  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) {
+    return null;
+  }
 
   const nonce = challenged(typeof body === "string" ? body : new TextDecoder().decode(body));
 
@@ -179,7 +199,9 @@ export async function answerWebhookChallengeRequest(
 ): Promise<Response | null> {
   const signature = request.headers.get(SIGNATURE_HEADER);
   const timestamp = request.headers.get(TIMESTAMP_HEADER);
-  if (signature === null || timestamp === null) return null;
+  if (signature === null || timestamp === null) {
+    return null;
+  }
 
   const answer = await answerWebhookChallenge(
     await request.clone().text(),
@@ -205,7 +227,9 @@ function challenged(text: string): string | null {
 function nonceOf(text: string, type: string): string | null {
   try {
     const said = JSON.parse(text) as Record<string, unknown>;
-    if (said["type"] !== type || typeof said["nonce"] !== "string") return null;
+    if (said["type"] !== type || typeof said["nonce"] !== "string") {
+      return null;
+    }
 
     return said["nonce"];
   } catch {
@@ -230,7 +254,9 @@ export function answerVerifyChallenge(body: string): string | null {
 
 /** {@link answerVerifyChallenge} against a `Request`, leaving its body unread */
 export async function answerVerifyChallengeRequest(request: Request): Promise<Response | null> {
-  if (request.method !== "POST") return null;
+  if (request.method !== "POST") {
+    return null;
+  }
 
   const answer = answerVerifyChallenge(await request.clone().text());
 
@@ -241,7 +267,9 @@ export async function answerVerifyChallengeRequest(request: Request): Promise<Re
 
 function recent(timestamp: string, toleranceSecs: number): boolean {
   const sent = Number(timestamp);
-  if (!Number.isFinite(sent)) return false;
+  if (!Number.isFinite(sent)) {
+    return false;
+  }
   return Math.abs(Math.floor(Date.now() / 1000) - sent) <= toleranceSecs;
 }
 

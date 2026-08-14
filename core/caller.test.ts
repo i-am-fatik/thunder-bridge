@@ -46,7 +46,9 @@ test("a secret keeps the identity it had, because moving it renames every client
 test("the secret itself never travels", async () => {
 	const headers = await spoke();
 
-	for (const [, value] of headers) expect(value).not.toContain(SECRET);
+	for (const [, value] of headers) {
+		expect(value).not.toContain(SECRET);
+	}
 });
 
 test("a captured request replayed at another route proves nothing", async () => {

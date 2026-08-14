@@ -57,7 +57,9 @@ export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
 	for (let hop = 0; hop <= HOPS_FOLLOWED; hop += 1) {
 		const at = await addressesToReach(target);
 		const response = await send(target, carried, signal, at);
-		if (!REDIRECTS.includes(response.status)) return await answerOf(response);
+		if (!REDIRECTS.includes(response.status)) {
+			return await answerOf(response);
+		}
 
 		const location = response.headers.get("location");
 		if (location === null) {
@@ -81,7 +83,9 @@ export async function resolvesNothingPrivate(url: string): Promise<boolean> {
 }
 
 export async function addressesToReach(url: string): Promise<Verified[]> {
-	if (!publicHttps(url)) throw new Error(`${url} is not a public https URL`);
+	if (!publicHttps(url)) {
+		throw new Error(`${url} is not a public https URL`);
+	}
 	const found = await resolved(url);
 	if (found.length === 0 || !found.every((one) => publicAddress(one.address))) {
 		throw new Error(`${url} resolves to an address we do not reach`);
@@ -105,13 +109,17 @@ async function resolved(url: string): Promise<Verified[]> {
 async function answerOf(response: Response): Promise<Answer> {
 	const { status, ok, headers } = response;
 	const reader = response.body?.getReader();
-	if (!reader) return { status, ok, body: "", truncated: false, headers };
+	if (!reader) {
+		return { status, ok, body: "", truncated: false, headers };
+	}
 
 	const read: Uint8Array[] = [];
 	let bytes = 0;
 	while (bytes <= BODY_LIMIT_BYTES) {
 		const { done, value } = await reader.read();
-		if (done) return { status, ok, body: text(read), truncated: false, headers };
+		if (done) {
+			return { status, ok, body: text(read), truncated: false, headers };
+		}
 		read.push(value);
 		bytes += value.length;
 	}
@@ -129,7 +137,9 @@ function withoutBody(sent: Sent): Sent {
 
 function withoutCredentials(sent: Sent): Sent {
 	const headers = { ...sent.headers };
-	for (const named of CREDENTIALS) delete headers[named];
+	for (const named of CREDENTIALS) {
+		delete headers[named];
+	}
 
 	return { ...sent, headers };
 }
@@ -137,7 +147,9 @@ function withoutCredentials(sent: Sent): Sent {
 function text(chunks: Uint8Array[]): string {
 	const decoder = new TextDecoder();
 	let decoded = "";
-	for (const chunk of chunks) decoded += decoder.decode(chunk, { stream: true });
+	for (const chunk of chunks) {
+		decoded += decoder.decode(chunk, { stream: true });
+	}
 
 	return decoded + decoder.decode();
 }

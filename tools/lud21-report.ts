@@ -67,8 +67,7 @@ export function whatMoved(now: Survey, before: Survey | null): Moved {
 		denylistStillRight,
 		denylistNowWrong,
 		denylistUnrefuted: VERIFY_WITHOUT_PREIMAGE.filter(
-			(domain) =>
-				!denylistStillRight.includes(domain) && !denylistNowWrong.includes(domain),
+			(domain) => !denylistStillRight.includes(domain) && !denylistNowWrong.includes(domain),
 		),
 	};
 }
@@ -110,7 +109,9 @@ export function render(now: Survey, before: Survey | null, moved: Moved): string
 	lines.push("");
 	lines.push(`- refused and confirmed to release no preimage: ${list(moved.denylistStillRight)}`);
 	lines.push(`- refused but answering like LUD-21 now: ${list(moved.denylistNowWrong)}`);
-	lines.push(`- refused and unrefuted, no address on it turned up: ${list(moved.denylistUnrefuted)}`);
+	lines.push(
+		`- refused and unrefuted, no address on it turned up: ${list(moved.denylistUnrefuted)}`,
+	);
 
 	return lines.join("\n");
 }

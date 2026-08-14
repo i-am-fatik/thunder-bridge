@@ -5,19 +5,27 @@ type Level = keyof typeof LOUDNESS;
 const quietestKept = chosen();
 
 export function debug(message: string): void {
-	if (LOUDNESS.debug >= quietestKept) console.log(message);
+	if (LOUDNESS.debug >= quietestKept) {
+		console.log(message);
+	}
 }
 
 export function info(message: string): void {
-	if (LOUDNESS.info >= quietestKept) console.log(message);
+	if (LOUDNESS.info >= quietestKept) {
+		console.log(message);
+	}
 }
 
 export function warn(message: string): void {
-	if (LOUDNESS.warn >= quietestKept) console.warn(message);
+	if (LOUDNESS.warn >= quietestKept) {
+		console.warn(message);
+	}
 }
 
 export function error(message: string): void {
-	if (LOUDNESS.error >= quietestKept) console.error(message);
+	if (LOUDNESS.error >= quietestKept) {
+		console.error(message);
+	}
 }
 
 function chosen(): number {

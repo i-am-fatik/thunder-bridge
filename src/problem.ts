@@ -2,9 +2,9 @@ import type { WalletFailure, WalletReason } from "../core/refusal.ts";
 
 export {
 	NoWalletAvailable,
-	WalletRefused,
 	type WalletFailure,
 	type WalletReason,
+	WalletRefused,
 } from "../core/refusal.ts";
 
 export const INVALID_REQUEST = "urn:problem-type:thunder-bridge:invalid-request";
@@ -33,7 +33,11 @@ export class BodyTooLarge extends Error {}
 
 export function statusForWallets(wallets: WalletFailure[]): number {
 	const codes = wallets.map((wallet) => STATUS[wallet.reason]);
-	if (codes.includes(502)) return 502;
-	if (codes.includes(422)) return 422;
+	if (codes.includes(502)) {
+		return 502;
+	}
+	if (codes.includes(422)) {
+		return 422;
+	}
 	return 400;
 }

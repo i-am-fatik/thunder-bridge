@@ -13,9 +13,12 @@
 		"start": "node src/index.ts",
 		"dev": "node --watch src/index.ts",
 		"test": "vitest run",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check",
+		"format": "biome check --write"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "^2.5.8",
 		"@types/node": "^24.13.3",
 		"@types/ws": "^8.18.1",
 		"typescript": "^5",

@@ -89,9 +89,13 @@ function fromOneRelay(url: string): Promise<string[]> {
 					done();
 					return;
 				}
-				if (frame[0] !== "EVENT") return;
+				if (frame[0] !== "EVENT") {
+					return;
+				}
 				const address = lud16Of((frame[2] as { content?: string }).content ?? "");
-				if (address) found.add(address);
+				if (address) {
+					found.add(address);
+				}
 			} catch {}
 		});
 		socket.addEventListener("error", () => {
@@ -122,7 +126,9 @@ export function byDomain(addresses: string[]): Map<string, string[]> {
 async function jsonFrom<T>(url: string): Promise<T | null> {
 	try {
 		const answer = await ask(url);
-		if (!answer.ok) return null;
+		if (!answer.ok) {
+			return null;
+		}
 		return JSON.parse(answer.body) as T;
 	} catch {
 		return null;
@@ -173,11 +179,15 @@ export async function measure(address: string): Promise<Measured> {
 }
 
 export function verdictOf(measured: Measured[]): Verdict | "unsettled" {
-	if (measured.some((one) => one.verdict === "usable")) return "usable";
+	if (measured.some((one) => one.verdict === "usable")) {
+		return "usable";
+	}
 	if (measured.some((one) => one.verdict === "verify-without-preimage")) {
 		return "verify-without-preimage";
 	}
-	if (measured.every((one) => one.verdict === "no-verify")) return "no-verify";
+	if (measured.every((one) => one.verdict === "no-verify")) {
+		return "no-verify";
+	}
 	return "unsettled";
 }
 

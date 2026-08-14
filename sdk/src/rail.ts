@@ -185,7 +185,7 @@ export function lightningRail(config: LightningRailConfig): Rail {
         lnAddresses: config.lnAddresses,
         amountMsat: await config.amountMsat(order),
         webhookUrl: config.webhookUrl,
-        },
+      },
       { idempotencyKey: config.idempotencyKey?.(order), trigger: config.trigger },
     );
 

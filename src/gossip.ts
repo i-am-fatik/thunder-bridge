@@ -2,9 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import c from "compact-encoding";
 import Protomux from "protomux";
-
-import * as log from "./log.ts";
 import type { Facts, Watermarks } from "./ledger.ts";
+import * as log from "./log.ts";
 
 const PROTOCOL = "thunder-cluster";
 
@@ -23,7 +22,9 @@ export type Gossip = {
 type Introduction = { self: string; proof: string };
 
 export function announce(gossip: Gossip, note: Note): void {
-	for (const send of gossip.peers.values()) send(note);
+	for (const send of gossip.peers.values()) {
+		send(note);
+	}
 }
 
 export function resync(gossip: Gossip): void {
@@ -46,10 +47,14 @@ export function attach(gossip: Gossip, stream: unknown): void {
 			note.send({ have: gossip.watermarks() });
 		},
 		onclose: () => {
-			if (peer) gossip.peers.delete(peer);
+			if (peer) {
+				gossip.peers.delete(peer);
+			}
 		},
 	});
-	if (!channel) return;
+	if (!channel) {
+		return;
+	}
 
 	const note = channel.addMessage({
 		encoding: c.json,
@@ -71,8 +76,11 @@ function receive(gossip: Gossip, note: Note, reply: { send(note: Note): void }):
 		reply.send(gossip.since(note.have));
 	} else if ("facts" in note) {
 		gossip.onFacts(note.facts);
-		if (note.more) reply.send({ have: gossip.watermarks() });
-		else gossip.onConverged();
+		if (note.more) {
+			reply.send({ have: gossip.watermarks() });
+		} else {
+			gossip.onConverged();
+		}
 	}
 }
 
@@ -81,7 +89,9 @@ function proofOf(key: Uint8Array, self: string): string {
 }
 
 function introduces(keys: Uint8Array[], them: Introduction): boolean {
-	if (typeof them?.self !== "string" || typeof them.proof !== "string") return false;
+	if (typeof them?.self !== "string" || typeof them.proof !== "string") {
+		return false;
+	}
 	const got = Buffer.from(them.proof, "hex");
 
 	return keys.some((key) => {

@@ -114,7 +114,9 @@ test("a payment parked with no due time is never handed out again", () => {
 test("only as many payments are taken as the batch asks for", () => {
 	const { store, stop } = openStore();
 	try {
-		for (let n = 0; n < 5; n += 1) store.insert(payment(n));
+		for (let n = 0; n < 5; n += 1) {
+			store.insert(payment(n));
+		}
 
 		const handed = [...store.duePolls(2, 30), ...store.duePolls(2, 30), ...store.duePolls(2, 30)];
 
@@ -407,7 +409,11 @@ test("a peer that names no accepted facts is still heard on the ones it does nam
 		one.store.paid(waiting.id, preimage(0));
 		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
 
-		two.store.gossip.onFacts({ paid: facts.paid, outbox: facts.outbox, delivered: facts.delivered });
+		two.store.gossip.onFacts({
+			paid: facts.paid,
+			outbox: facts.outbox,
+			delivered: facts.delivered,
+		});
 
 		expect(two.store.get(waiting.id)?.status).toBe("paid");
 		expect(two.store.info().rows.accepted).toBe(0);

@@ -111,7 +111,9 @@ async function mint(config: TriggerConfig, url: URL, address: string): Promise<R
   const nonce = url.searchParams.get("n") ?? "";
   const signature = url.searchParams.get("sig") ?? "";
   const expected = await sign(config.secret, address, amountMsat, nonce);
-  if (!equalInConstantTime(signature, expected)) return refuse("this callback was not signed here");
+  if (!equalInConstantTime(signature, expected)) {
+    return refuse("this callback was not signed here");
+  }
 
   const wanted = url.searchParams.get("amount");
   if (wanted !== null && Number(wanted) !== amountMsat) {
@@ -162,7 +164,9 @@ async function mintBlind(
       sealed: locked ? await seal(locked.secret, JSON.stringify(locked.data(minted))) : undefined,
     });
   } catch (refused: unknown) {
-    if (!alreadyWatched(refused)) throw refused;
+    if (!alreadyWatched(refused)) {
+      throw refused;
+    }
   }
 
   return { bolt11: resolved.bolt11, verifyUrl: resolved.verifyUrl };
@@ -179,7 +183,9 @@ function sign(secret: string, address: string, amountMsat: number, nonce: string
 function randomNonce(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
   let hex = "";
-  for (const byte of bytes) hex += byte.toString(16).padStart(2, "0");
+  for (const byte of bytes) {
+    hex += byte.toString(16).padStart(2, "0");
+  }
 
   return hex;
 }

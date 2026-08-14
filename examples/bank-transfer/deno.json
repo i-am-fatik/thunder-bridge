@@ -5,8 +5,5 @@
   },
   "imports": {
     "thunder-bridge": "npm:thunder-bridge@1.1.0"
-  },
-  "fmt": {
-    "lineWidth": 100
   }
 }

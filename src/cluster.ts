@@ -3,9 +3,8 @@ import { connect, createServer, type Server, type Socket } from "node:net";
 
 import SecretStream from "@hyperswarm/secret-stream";
 import Hyperswarm from "hyperswarm";
-
+import { attach, type Gossip, resync } from "./gossip.ts";
 import * as log from "./log.ts";
-import { attach, resync, type Gossip } from "./gossip.ts";
 
 const RESYNC_INTERVAL_MS = 30_000;
 const RECONNECT_DELAY_MS = 1000;
@@ -29,15 +28,23 @@ export class Cluster {
 		this.gossip = gossip;
 		this.listener = options.listenPort > 0 ? this.listen(options.listenPort) : null;
 		this.swarm = options.swarm ? this.join(options.key) : null;
-		for (const peer of options.peers) this.dial(peer);
+		for (const peer of options.peers) {
+			this.dial(peer);
+		}
 		this.timers.add(setInterval(() => resync(gossip), RESYNC_INTERVAL_MS).unref());
 	}
 
 	close(): void {
-		if (this.closed) return;
+		if (this.closed) {
+			return;
+		}
 		this.closed = true;
-		for (const timer of this.timers) clearTimeout(timer);
-		for (const socket of this.sockets) socket.destroy();
+		for (const timer of this.timers) {
+			clearTimeout(timer);
+		}
+		for (const socket of this.sockets) {
+			socket.destroy();
+		}
 		this.listener?.close();
 		void this.swarm?.destroy();
 	}
@@ -57,7 +64,9 @@ export class Cluster {
 	}
 
 	private dial(peer: string): void {
-		if (this.closed) return;
+		if (this.closed) {
+			return;
+		}
 		const [host, port] = peer.split(":");
 		const socket = connect({ host, port: Number(port) });
 		socket.on("close", () => this.redial(peer));

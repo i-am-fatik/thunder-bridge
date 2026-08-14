@@ -2,15 +2,13 @@ import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-import { callerKey, paymentNamedBy } from "../core/caller.ts";
-
 import { expect, test } from "vitest";
+import { callerKey, paymentNamedBy } from "../core/caller.ts";
 
 import type { UnsavedPayment } from "./payment.ts";
 import type { Store } from "./store.ts";
 
-import { CLUSTER_KEY, freePort, openStore, until, type TestOptions } from "./testing.ts";
+import { CLUSTER_KEY, freePort, openStore, type TestOptions, until } from "./testing.ts";
 
 const TAKEOVER_TIMEOUT_MS = 25_000;
 
@@ -47,7 +45,9 @@ function payment(nth: number): UnsavedPayment {
 
 function signedAsCluster(source: string, fields: (string | number | null)[]): string {
 	const hmac = createHmac("sha256", CLUSTER_KEY).update(source);
-	for (const field of fields) hmac.update("\x00").update(field === null ? "\x01" : String(field));
+	for (const field of fields) {
+		hmac.update("\x00").update(field === null ? "\x01" : String(field));
+	}
 
 	return hmac.digest("hex");
 }
@@ -135,7 +135,9 @@ test("every instance takes on every pending payment, whoever created it", async 
 	const cluster = await connected();
 	try {
 		const made: string[] = [];
-		for (let n = 0; n < 20; n += 1) made.push(cluster.first.insert(spread(n)).id);
+		for (let n = 0; n < 20; n += 1) {
+			made.push(cluster.first.insert(spread(n)).id);
+		}
 
 		const seen = (store: Store) => made.filter((one) => store.get(one) !== null).length;
 		await until(() => seen(cluster.second) === 20, "the pending set to gossip across");
@@ -183,8 +185,7 @@ test("both instances say they are in sync and agree on what they hold", async ()
 			"the accepted marks to match",
 		);
 		await until(
-			() =>
-				cluster.first.info().convergedAt !== null && cluster.second.info().convergedAt !== null,
+			() => cluster.first.info().convergedAt !== null && cluster.second.info().convergedAt !== null,
 			"both instances to hear a reply that came back short",
 		);
 
@@ -226,7 +227,9 @@ test("a payment of my own is polled at once, however much a peer handed over", a
 	const cluster = await connected();
 	try {
 		const theirs: string[] = [];
-		for (let n = 0; n < 20; n += 1) theirs.push(cluster.first.insert(spread(n)).id);
+		for (let n = 0; n < 20; n += 1) {
+			theirs.push(cluster.first.insert(spread(n)).id);
+		}
 		await until(
 			() => theirs.every((one) => cluster.second.get(one) !== null),
 			"the worklist to gossip across",
@@ -461,7 +464,10 @@ test("a payment named after its caller replicates, and the peer checks the name 
 		const mine = cluster.first.insert({ ...payment(5), caller: owner });
 
 		expect(mine.id).toBe(paymentNamedBy(owner, payment(5).paymentHash));
-		await until(() => cluster.second.get(mine.id) !== null, "the caller's payment to gossip across");
+		await until(
+			() => cluster.second.get(mine.id) !== null,
+			"the caller's payment to gossip across",
+		);
 
 		const settled = cluster.first.paid(mine.id, preimage(5));
 		expect(settled.won).toBe(true);

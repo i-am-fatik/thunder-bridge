@@ -30,6 +30,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npx tsc --noEmit
+      - name: a body somebody wrote without braces, anywhere in the repository
+        run: npm run lint
       - name: one version for the gateway and the client it talks to
         run: |
           stated() { awk '/^info:/ { inside = 1 } inside && /^  version:/ { print $2; exit }' "$1"; }

@@ -10,9 +10,7 @@ const SHAPE = new RegExp(
 );
 
 /** What a ticket permits, and the only thing it permits */
-export type Subject =
-	| { kind: "trigger"; trigger: string }
-	| { kind: "payment"; paymentId: string };
+export type Subject = { kind: "trigger"; trigger: string } | { kind: "payment"; paymentId: string };
 
 export type Ticket = { ticket: string; expiresAt: number; jti: string };
 
@@ -44,17 +42,23 @@ export async function read(
 	now: number,
 ): Promise<(Subject & { jti: string }) | null> {
 	const shaped = SHAPE.exec(ticket);
-	if (shaped === null) return null;
+	if (shaped === null) {
+		return null;
+	}
 
 	const kind = shaped[1]!;
 	const name = shaped[2]!;
 	const expiresAt = Number(shaped[3]!);
 	const jti = shaped[4]!;
 	const mac = shaped[5]!;
-	if (expiresAt <= now) return null;
+	if (expiresAt <= now) {
+		return null;
+	}
 
 	const claim = ticket.slice(0, ticket.lastIndexOf("."));
-	if (!equalInConstantTime(mac, await hmacHex(key, claim))) return null;
+	if (!equalInConstantTime(mac, await hmacHex(key, claim))) {
+		return null;
+	}
 
 	return kind === TRIGGER
 		? { kind: "trigger", trigger: name, jti }

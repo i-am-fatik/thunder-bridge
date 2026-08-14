@@ -27,7 +27,9 @@ export class Gateways {
   private readonly onRefused: (baseUrl: string, refusal: unknown) => void;
 
   constructor(baseUrls: string[], options?: GatewaysOptions) {
-    if (baseUrls.length === 0) throw new Error("name at least one gateway to watch at");
+    if (baseUrls.length === 0) {
+      throw new Error("name at least one gateway to watch at");
+    }
 
     this.urls = [...baseUrls];
     this.each = baseUrls.map((baseUrl) => new ThunderBridge(baseUrl, options));
@@ -45,7 +47,9 @@ export class Gateways {
    * watched
    */
   async watchPayment(params: WatchPaymentParams): Promise<TriggerEvent> {
-    const asked = await Promise.allSettled(this.each.map((gateway) => gateway.watchPayment(params)));
+    const asked = await Promise.allSettled(
+      this.each.map((gateway) => gateway.watchPayment(params)),
+    );
     const taken: TriggerEvent[] = [];
     const refusals: unknown[] = [];
 
@@ -57,7 +61,9 @@ export class Gateways {
       refusals.push(answer.reason);
       this.onRefused(this.urls[at]!, answer.reason);
     }
-    if (taken[0] === undefined) throw refusals[0];
+    if (taken[0] === undefined) {
+      throw refusals[0];
+    }
 
     return taken[0];
   }
@@ -81,13 +87,17 @@ export class Gateways {
         let waiting = this.each.length;
         const lost = () => {
           waiting -= 1;
-          if (waiting === 0) resolve(null);
+          if (waiting === 0) {
+            resolve(null);
+          }
         };
         for (const gateway of this.each) {
           gateway
             .waitForWatched(id, { ...options, signal })
             .then((watched) => {
-              if (watched.status === "paid") return resolve(watched);
+              if (watched.status === "paid") {
+                return resolve(watched);
+              }
               unpaid.push(watched);
               lost();
             })
@@ -97,8 +107,12 @@ export class Gateways {
             });
         }
       });
-      if (settled !== null) return settled;
-      if (unpaid.length > 0) return unpaid[0]!;
+      if (settled !== null) {
+        return settled;
+      }
+      if (unpaid.length > 0) {
+        return unpaid[0]!;
+      }
 
       throw refused;
     } finally {

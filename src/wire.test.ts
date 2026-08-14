@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import type { Payment } from "./payment.ts";
 import { MalformedRequest } from "./problem.ts";
-import { readCreateRequest, paymentToWire } from "./wire.ts";
+import { paymentToWire, readCreateRequest } from "./wire.ts";
 
 function payment(): Payment {
 	return {
@@ -35,7 +35,9 @@ function refusal(body: unknown): string {
 	try {
 		readCreateRequest(body);
 	} catch (error: unknown) {
-		if (error instanceof MalformedRequest) return error.message;
+		if (error instanceof MalformedRequest) {
+			return error.message;
+		}
 		throw error;
 	}
 	throw new Error("the request was accepted");

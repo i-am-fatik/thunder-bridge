@@ -2,9 +2,9 @@ import {
   bankRail,
   bankVerifyEndpoint,
   bitstamp,
+  type Credit,
   coinbase,
   coinmate,
-  type Credit,
   fioStatement,
   kraken,
   lightningRail,
@@ -58,14 +58,18 @@ const OFFERS_LIGHTNING = LN_ADDRESSES.length > 0;
 const FIO_PACE_MS = FIO_WINDOW_MS / FIO_TOKENS.length;
 const [CURRENCY, AMOUNT_MINOR] = readPrice(PRICE);
 
-const priceOf = medianOf(VENUES.map((venue) => {
-  const open = TICKERS[venue];
-  if (!open) {
-    throw new Error(`no price venue called ${venue}, pick from ${Object.keys(TICKERS).join(", ")}`);
-  }
+const priceOf = medianOf(
+  VENUES.map((venue) => {
+    const open = TICKERS[venue];
+    if (!open) {
+      throw new Error(
+        `no price venue called ${venue}, pick from ${Object.keys(TICKERS).join(", ")}`,
+      );
+    }
 
-  return open();
-}));
+    return open();
+  }),
+);
 
 if (!IBAN || FIO_TOKENS.length === 0 || !GATEWAY.username) {
   console.log("IBAN, FIO_TOKEN and a GATEWAY_URL carrying its token are unset, every route is 503");
@@ -93,17 +97,28 @@ const acrossInvocations: Statement = async (sinceUnix) => {
   const stored = await kv.get<Remembered>(REMEMBERED);
   const last = stored.value ?? { at: 0, credits: [], turns: {} };
   const now = Date.now();
-  if (now - last.at < FIO_PACE_MS) return last.credits;
+  if (now - last.at < FIO_PACE_MS) {
+    return last.credits;
+  }
 
   const turn = longestUnusedToken(last.turns);
-  if (now - (last.turns[turn] ?? 0) < FIO_WINDOW_MS) return last.credits;
+  if (now - (last.turns[turn] ?? 0) < FIO_WINDOW_MS) {
+    return last.credits;
+  }
 
   const turns = { ...last.turns, [turn]: now };
-  const claimed = await kv.atomic().check(stored).set(REMEMBERED, { ...last, turns }).commit();
-  if (!claimed.ok) return last.credits;
+  const claimed = await kv
+    .atomic()
+    .check(stored)
+    .set(REMEMBERED, { ...last, turns })
+    .commit();
+  if (!claimed.ok) {
+    return last.credits;
+  }
 
   const credits = await fioStatement({ token: FIO_TOKENS[turn]!, minIntervalSecs: 0 })(sinceUnix);
-  await kv.atomic()
+  await kv
+    .atomic()
     .check({ key: REMEMBERED, versionstamp: claimed.versionstamp })
     .set(REMEMBERED, { at: now, credits, turns })
     .commit();
@@ -114,7 +129,9 @@ const acrossInvocations: Statement = async (sinceUnix) => {
 function longestUnusedToken(turns: Record<number, number>): number {
   let longest = 0;
   for (let token = 1; token < FIO_TOKENS.length; token += 1) {
-    if ((turns[token] ?? 0) < (turns[longest] ?? 0)) longest = token;
+    if ((turns[token] ?? 0) < (turns[longest] ?? 0)) {
+      longest = token;
+    }
   }
 
   return longest;
@@ -136,7 +153,9 @@ function railsFor(origin: string): Rail[] {
       trigger: TRIGGER_SECRET,
     }),
   ];
-  if (!OFFERS_LIGHTNING) return rails;
+  if (!OFFERS_LIGHTNING) {
+    return rails;
+  }
 
   return [
     ...rails,
@@ -177,7 +196,9 @@ async function sellOne(origin: string): Promise<Response> {
 
 async function serveContent(legs: string[]): Promise<Response> {
   const paid = await paidLeg(legs);
-  if (paid === null) return new Response("pay first, either way", { status: 402 });
+  if (paid === null) {
+    return new Response("pay first, either way", { status: 402 });
+  }
   if (paid.preimage === null || !preimageMatchesHash(paid.preimage, paid.paymentHash)) {
     return new Response("that preimage settles nothing", { status: 502 });
   }
@@ -188,7 +209,9 @@ async function serveContent(legs: string[]): Promise<Response> {
 async function paidLeg(legs: string[]): Promise<TriggerEvent | null> {
   for (const id of legs) {
     const watched = await gateway.getWatched(id);
-    if (watched?.status === "paid") return watched;
+    if (watched?.status === "paid") {
+      return watched;
+    }
   }
 
   return null;
@@ -196,7 +219,9 @@ async function paidLeg(legs: string[]): Promise<TriggerEvent | null> {
 
 function readPrice(priced: string): [string, number] {
   const [amount, currency] = priced.trim().split(/\s+/);
-  if (!amount || !currency) throw new Error(`PRICE is "<amount> <ISO 4217 code>", got ${priced}`);
+  if (!amount || !currency) {
+    throw new Error(`PRICE is "<amount> <ISO 4217 code>", got ${priced}`);
+  }
 
   const minor = Math.round(Number(amount) * minorScaleOf(currency));
   const decimals = (amount.split(".")[1] ?? "").length;
@@ -208,16 +233,23 @@ function readPrice(priced: string): [string, number] {
 }
 
 function unconfigured(): Response {
-  return Response.json({
-    error: "set IBAN, FIO_TOKEN and GATEWAY_URL as https://<token>@your-gateway",
-  }, { status: 503 });
+  return Response.json(
+    {
+      error: "set IBAN, FIO_TOKEN and GATEWAY_URL as https://<token>@your-gateway",
+    },
+    { status: 503 },
+  );
 }
 
 function route(request: Request): Response | Promise<Response> {
   const url = new URL(request.url);
 
-  if (!IBAN || FIO_TOKENS.length === 0 || !GATEWAY.username) return unconfigured();
-  if (url.pathname === VERIFY_PATH) return proveOnStatement(request);
+  if (!IBAN || FIO_TOKENS.length === 0 || !GATEWAY.username) {
+    return unconfigured();
+  }
+  if (url.pathname === VERIFY_PATH) {
+    return proveOnStatement(request);
+  }
   if (request.method === "POST" && url.pathname === "/order") {
     return sellOne(PUBLIC_URL ?? url.origin);
   }
