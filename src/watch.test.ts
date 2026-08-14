@@ -445,6 +445,23 @@ test("a pace nobody could have meant is clamped rather than obeyed", async () =>
 	}
 });
 
+test("a host asking to be polled without pause is given a second, which is the floor", async () => {
+	for (const asked of ["max-age=0", "max-age=0, must-revalidate", "no-cache, max-age=0"]) {
+		const wire = intercepting(() =>
+			Response.json({ settled: false }, { headers: { "cache-control": asked } }),
+		);
+		const { watcher } = queueing([payment()], settlesAs(true));
+
+		try {
+			await tick(watcher);
+
+			expect(watcher.budget.pace.get("coinos.io")).toBe(1);
+		} finally {
+			wire.restore();
+		}
+	}
+});
+
 test("a payment is never left staler than a tenth of its own age", () => {
 	expect(pollDelayMs(0, 5000)).toBe(5000);
 	expect(pollDelayMs(299, 5000)).toBe(5000);
