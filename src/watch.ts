@@ -16,7 +16,7 @@ const NONCE_BYTES = 32;
 export const CHALLENGE = "webhook-challenge";
 export const VERIFY_CHALLENGE = "verify-challenge";
 
-export const WATCH_HORIZON_SECS = 259_200;
+export const WATCH_HORIZON_SECS = 2_592_000;
 
 export type Budget = {
 	perSecond: number;

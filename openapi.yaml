@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Thunder Bridge
-  version: 1.1.0
+  version: 1.2.0
   license:
     name: MIT
     identifier: MIT
@@ -462,9 +462,9 @@ paths:
         on settlement can be watched here. The SDK's `bankTransfer` uses that to put a bank
         transfer on the same footing.
 
-        This gateway watches for at most three days, and makes that promise to every
+        This gateway watches for at most thirty days, and makes that promise to every
         payment equally. An `expires_at` further off is refused with `400` rather than
-        accepted and dropped later, so ask for a window inside three days and re-register on
+        accepted and dropped later, so ask for a window inside thirty days and re-register on
         a "still waiting" click if the payer needs longer.
 
         A hash already watched answers `409` and discloses nothing about what is stored,
@@ -799,7 +799,7 @@ webhooks:
         add and no secret involved: what this proves is that the host agreed to receive the
         traffic, not who it is. Echoing a nonce to whoever asked grants them nothing.
 
-        Why it exists: the gateway polls a URL for up to three days on a caller's word, and a
+        Why it exists: the gateway polls a URL for up to thirty days on a caller's word, and a
         caller who names somebody else's wallet spends that host's patience on this gateway's
         address, which then costs every other client of this instance. Naming your own
         endpoint moves that cost onto you, where it belongs.
@@ -1152,7 +1152,7 @@ components:
           format: date-time
           description: |
             The invoice's own expiry. Polling stops here, so a value already in the past is
-            refused, and so is one more than three days off, which is as long as this gateway
+            refused, and so is one more than thirty days off, which is as long as this gateway
             watches anything.
         trigger:
           $ref: "#/components/schemas/trigger"

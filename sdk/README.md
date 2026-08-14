@@ -304,7 +304,7 @@ your rate limit.
 The gateway also asks the URL once, before it accepts the watch, and refuses with
 `424` if it does not answer this shape. So deploy the endpoint first and register
 second. That is what stops anyone pointing a gateway at a server that never asked to
-be polled for three days.
+be polled for thirty days.
 
 ## What is still trusted
 

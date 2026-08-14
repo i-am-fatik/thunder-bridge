@@ -1334,15 +1334,15 @@ test("a blind watch is refused when there is nothing left to watch or nothing to
 	app.stop();
 });
 
-test("a watch reaching past the three days the gateway promises is refused, and stores nothing", async () => {
+test("a watch reaching past the thirty days the gateway promises is refused, and stores nothing", async () => {
 	const app = await running();
 
 	const tooFar = await postWatch(app, {
 		...WATCHABLE,
-		expires_at: new Date(Date.now() + 4 * 86_400_000).toISOString(),
+		expires_at: new Date(Date.now() + 31 * 86_400_000).toISOString(),
 	});
 	expect(tooFar.status).toBe(400);
-	expect(String(((await tooFar.json()) as Problem)["detail"])).toContain("3 days");
+	expect(String(((await tooFar.json()) as Problem)["detail"])).toContain("30 days");
 
 	expect((await postWatch(app, WATCHABLE)).status).toBe(201);
 

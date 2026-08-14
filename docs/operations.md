@@ -205,7 +205,7 @@ per-host ceiling never binds.
 On the watched path that arrangement is now the only one, and `VERIFY_CHALLENGE` is why.
 A `verify_url` a caller named is challenged before anything is polled and has to echo the
 nonce, which no wallet will do. The reason is not politeness. This gateway polls a URL
-for three days on a caller's word, and one caller pointing it at a big wallet gets that
+for thirty days on a caller's word, and one caller pointing it at a big wallet gets that
 wallet's rate limit applied to this instance's address, which every other client here
 shares. Moving the last hop to the caller's own endpoint moves that cost onto the caller.
 An instance whose callers are all known can set `VERIFY_CHALLENGE=0` and go back to
