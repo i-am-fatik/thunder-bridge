@@ -333,6 +333,15 @@ that has proved every release so far, a real payment with real money. The mitiga
 is not a smaller release, it is proving each piece against the live gateway from the
 branch before the cutover, the way both rails were proved.
 
+Version 1.0 on both sides held for a day. The client alone went to 1.1.0, because
+1.0.0 exported no way to mint the invoice it tells clients to mint themselves and an
+added export is a minor. A repository whose gateway says 1.0.0 and whose client says
+1.1.0 makes every reader ask which of the two numbers the release is, so they are level
+again at 1.1.0 and the version check in CI reads all four lines rather than the
+gateway's two. The next release moves both sides or neither, which costs a gateway
+build for a change only the client made, and buys a number that means the same thing
+wherever it is read.
+
 The order to build it in, because the dependencies are real: request signing and the
 key that identifies a caller, then client named ids on top of it, then the blob and
 the retention window, then the deletion of the shared webhook secret and the new

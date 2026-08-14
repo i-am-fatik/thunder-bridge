@@ -30,14 +30,19 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npx tsc --noEmit
-      - name: two version lines for one gateway
+      - name: one version for the gateway and the client it talks to
         run: |
-          spec=$(awk '/^info:/ { inside = 1 } inside && /^  version:/ { print $2; exit }' openapi.yaml)
-          package=$(node -p "require('./package.json').version")
-          test "$spec" = "$package" || {
-            echo "openapi.yaml says $spec and package.json says $package"
-            exit 1
-          }
+          stated() { awk '/^info:/ { inside = 1 } inside && /^  version:/ { print $2; exit }' "$1"; }
+          gateway_spec=$(stated openapi.yaml)
+          gateway_package=$(node -p "require('./package.json').version")
+          client_spec=$(stated sdk/openapi.yaml)
+          client_package=$(node -p "require('./sdk/package.json').version")
+          for other in "$gateway_package" "$client_spec" "$client_package"; do
+            test "$gateway_spec" = "$other" || {
+              echo "one release, four version lines: $gateway_spec $gateway_package $client_spec $client_package"
+              exit 1
+            }
+          done
 
   client:
     name: a regression in the SDK, or a package nobody can consume
