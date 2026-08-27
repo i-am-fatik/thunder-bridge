@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
   schedule:
@@ -27,7 +27,13 @@ jobs:
         with:
           node-version: 24.19
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            sdk/package-lock.json
       - run: npm ci
+      - name: the built client the tools suites import, which no checkout carries
+        working-directory: sdk
+        run: npm ci && npm run build
       - run: npm test
       - run: npx tsc --noEmit
       - name: a body somebody wrote without braces, anywhere in the repository
