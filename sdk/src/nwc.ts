@@ -331,16 +331,15 @@ async function overFirstRelayThatAnswers(
   request: NostrEvent,
   timeoutMs: number,
 ): Promise<NostrEvent> {
-  const endsAt = Date.now() + timeoutMs;
+  const deadline = AbortSignal.timeout(timeoutMs);
   let lastFailure: unknown = null;
 
   for (const relay of connection.relays) {
-    const left = endsAt - Date.now();
-    if (left <= 0) {
+    if (deadline.aborted) {
       break;
     }
     try {
-      return await overRelay(relay, connection, request, left);
+      return await overRelay(relay, connection, request, deadline);
     } catch (failure: unknown) {
       lastFailure = failure;
     }
@@ -353,18 +352,19 @@ function overRelay(
   relay: string,
   connection: NwcConnection,
   request: NostrEvent,
-  timeoutMs: number,
+  deadline: AbortSignal,
 ): Promise<NostrEvent> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(relay);
     const subscription = request.id.slice(0, 16);
-    const expired = setTimeout(() => {
+    const expired = () => {
       close();
-      reject(new Error(`${relay} did not answer within ${timeoutMs}ms`));
-    }, timeoutMs);
+      reject(new Error(`${relay} did not answer before the deadline`));
+    };
+    deadline.addEventListener("abort", expired);
 
     function close() {
-      clearTimeout(expired);
+      deadline.removeEventListener("abort", expired);
       socket.close();
     }
 
