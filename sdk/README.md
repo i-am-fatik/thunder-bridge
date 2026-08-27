@@ -132,6 +132,7 @@ whatever runtime you keep state in.
 | `bankRail(config)` | a `Rail` selling for a bank transfer, reading back through any `Statement` |
 | `lightningRail(config)` | a `Rail` where the gateway mints the invoice, so it learns the address and the amount |
 | `blindLightningRail(config)` | a `Rail` that resolves the address itself and tells the gateway only a hash. From `thunder-bridge/server` |
+| `nwcRail(config)` | a `Rail` that mints on a wallet of your own over NIP-47, for a wallet with no LUD-21 address to be watched at. From `thunder-bridge/server` |
 
 `Rail` is `(order: Order) => Promise<Leg>`. Everything that differs between rails
 is bound once when the rail is built, so the only thing passed per sale is which
@@ -293,6 +294,40 @@ is only ever talking to servers that asked to be talked to. It costs you a servi
 that has to stay up: a browser-only integration cannot do this, and should keep
 letting the gateway poll the wallet.
 
+### A wallet with no LUD-21 address at all
+
+`nwcRail` is the same arrangement with the far side swapped. Your wallet answers
+over [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) instead of
+over an address, so a recipient whose provider publishes no `verify` - or publishes
+one with no preimage, which is worse - is watchable anyway.
+
+```ts
+import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "thunder-bridge/server";
+
+const connection = nwcConnection(process.env.NWC_URI);
+
+app.get("/verify/nwc", (context) =>
+  nwcVerifyEndpoint({ connection, secret: NWC_SECRET })(context.req.raw),
+);
+
+const rail = nwcRail({
+  gateway,
+  connection,
+  amountMsat: (order) => order.amountMinor * 40,
+  verifyThrough: { endpoint: "https://shop.example/verify/nwc", secret: NWC_SECRET },
+});
+```
+
+`make_invoice` mints it, `lookup_invoice` reads the preimage back, and the payment
+hash is sealed into the query for the reason the wallet's URL is sealed above: it
+is what stops a stranger driving your wallet through your own handler. Only the
+hash travels, so the gateway never holds the connection, the relay or the wallet
+key, and every answer is refused unless the wallet's own key signed it.
+
+Take the connection string scoped. ZEUS, Alby Hub and Blink all issue one per app
+with its own permissions and budget, and this needs `make_invoice` and
+`lookup_invoice` and nothing else - never `pay_invoice`.
+
 ### How often the gateway asks
 
 Your endpoint decides, not the gateway. `bankVerifyEndpoint` answers with
@@ -301,10 +336,59 @@ payment on your host. Set `pollEverySecs` to whatever your bank's own refresh ma
 sensible: reading a statement that moves once an hour every five seconds only burns
 your rate limit.
 
+How long one answer may take is the other half of the pacing. The gateway abandons a
+poll after 15 seconds, and `askTimeoutMs` is one deadline over the whole connection
+rather than one per relay, so a connection listing four relays still answers inside
+that window.
+
 The gateway also asks the URL once, before it accepts the watch, and refuses with
 `424` if it does not answer this shape. So deploy the endpoint first and register
 second. That is what stops anyone pointing a gateway at a server that never asked to
 be polled for thirty days.
+
+## Paying through an operator who fronts the liquidity
+
+A recipient with no inbound liquidity cannot be paid at all. An operator with a node
+can stand in the middle without holding anything: it takes the recipient's own
+invoice, mints a **hold invoice on the same payment hash** for the amount plus a fee,
+and can settle its own only by revealing the preimage it learned from paying the
+recipient. Claiming and delivering are one act, so there is no moment where it keeps
+the money and walks away.
+
+This SDK does not wrap. `proveWrapped` checks a wrap somebody else offers, and the
+NIP-47 primitives an operator would build one from, `nwcHoldInvoice` and `nwcPay`,
+are on `thunder-bridge/server` with nothing here driving them.
+
+```ts
+import { invoiceFrom } from "thunder-bridge/server";
+import { proveWrapped, wrapFeeCeiling } from "thunder-bridge";
+
+const real = await invoiceFrom(["you@blink.sv"], 21_000_000);
+const wrapped = await myOperator.wrap(real.bolt11);
+
+proveWrapped(wrapped, real.bolt11);
+```
+
+`proveWrapped` compares two invoices and asks nobody anything, so it runs in a
+browser. It refuses a wrap on another hash, one that cannot cover what the recipient
+asked, one charging over the allowance, and one that outlives the invoice it has to
+forward to.
+
+The allowance is the **client's ceiling**, not a fee the operator names per payment,
+so it sits deliberately above any list price: `1%` by default with a floor of one
+satoshi. An operator running this charges `0.75%`, which leaves room for a wrap a
+shade over list to still go through. Set `proportion` under an operator's price and
+you refuse that operator, which is the point of it being yours.
+`wrapFeeCeiling(amountMsat, allowance)` is the same number if you want to show it.
+
+There is no settlement check to add. Both invoices carry one payment hash, so the
+preimage that settles the wrap is the one the recipient released, and
+`proveSettlement` already reads it from the recipient's own server. The gateway needs
+no change either: it watches that hash and polls the recipient's verify URL, and a
+wrap is invisible to it.
+
+What this does not cover: an operator that accepts the payment and stalls until the
+HTLC times out. Your money comes back, and it was locked meanwhile.
 
 ## What is still trusted
 
@@ -501,11 +585,13 @@ on that route and not a JSON one.
 import express from "express";
 import { parseWebhook } from "thunder-bridge";
 
+const signs = { publicKey: await gateway.webhookKey() };
+
 app.post("/hooks/paid", express.raw({ type: "application/json" }), async (request, response) => {
   const payment = await parseWebhook(
     request.body,
     request.get("x-signature") ?? "",
-    secret,
+    signs,
     request.get("x-timestamp") ?? "",
   );
   response.sendStatus(payment === null ? 401 : 200);

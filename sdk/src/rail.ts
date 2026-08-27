@@ -3,6 +3,7 @@ import { NoWalletAvailable } from "../../core/refusal.js";
 import { bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
+import { type NwcConnection, nwcInvoice, nwcVerifyUrl } from "./nwc.js";
 import { encodeForQr } from "./qr.js";
 import { relayedVerifyUrl } from "./relay.js";
 
@@ -137,6 +138,38 @@ export interface BlindLightningRailConfig {
   name?: string;
 }
 
+export interface NwcRailConfig {
+  /** The gateway that watches an invoice your own wallet minted */
+  gateway: ThunderBridge;
+
+  /** Your wallet over NIP-47, from `nwcConnection`. It never reaches the gateway */
+  connection: NwcConnection;
+
+  /** What this order costs in millisatoshi */
+  amountMsat: (order: Order) => number | Promise<number>;
+
+  /**
+   * Where your own `nwcVerifyEndpoint` is mounted, and the secret it unseals
+   * with. The gateway is handed this URL rather than a wallet's, so it polls you
+   * and learns neither the connection nor which wallet is behind it
+   */
+  verifyThrough: { endpoint: string; secret: string };
+
+  /** What the payer reads on the invoice, and what your wallet files it under */
+  description?: (order: Order) => string;
+
+  /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
+  trigger?: string;
+
+  /** Only a watched leg has anywhere to carry this */
+  sealed?: (order: Order) => string | Promise<string>;
+
+  webhookUrl?: string;
+
+  /** What `Leg.rail` reads, for a shop running more than one wallet */
+  name?: string;
+}
+
 /**
  * Sell for a bank transfer. The money moves straight to your account and the
  * gateway is told a hash, a URL and an expiry, never the amount or the reference.
@@ -230,6 +263,42 @@ export function blindLightningRail(config: BlindLightningRailConfig): Rail {
       scan: resolved.bolt11,
       qr: encodeForQr(resolved.bolt11),
       expiresAt: resolved.expiresAt,
+    };
+  };
+}
+
+/**
+ * Sell for Lightning against a wallet of your own over NIP-47, for a wallet that
+ * has no LUD-21 address to be watched at. Your node mints the invoice and releases
+ * the preimage, so the proof comes from one hop nearer than any hosted address can
+ * manage, and the gateway sees a hash and a URL of yours.
+ */
+export function nwcRail(config: NwcRailConfig): Rail {
+  return async (order) => {
+    const invoice = await nwcInvoice(
+      config.connection,
+      await config.amountMsat(order),
+      config.description?.(order) ?? order.reference,
+    );
+    const watched = await config.gateway.watchPayment({
+      paymentHash: invoice.paymentHash,
+      verifyUrl: await nwcVerifyUrl(
+        config.verifyThrough.endpoint,
+        invoice.paymentHash,
+        config.verifyThrough.secret,
+      ),
+      expiresAt: invoice.expiresAt,
+      trigger: config.trigger,
+      sealed: await config.sealed?.(order),
+      webhookUrl: config.webhookUrl,
+    });
+
+    return {
+      id: watched.id,
+      rail: config.name ?? LIGHTNING,
+      scan: invoice.bolt11,
+      qr: encodeForQr(invoice.bolt11),
+      expiresAt: invoice.expiresAt,
     };
   };
 }
