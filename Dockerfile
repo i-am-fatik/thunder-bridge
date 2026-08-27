@@ -6,10 +6,9 @@ COPY package.json package-lock.json tsconfig.json vitest.config.ts ./
 RUN npm ci
 COPY core ./core
 COPY src ./src
-COPY tools ./tools
 COPY openapi.yaml ./
 RUN npm test && npx tsc --noEmit \
-	&& rm -rf core/*.test.ts src/*.test.ts src/testing.ts vitest.config.ts tools \
+	&& rm -rf core/*.test.ts src/*.test.ts src/testing.ts vitest.config.ts \
 	&& mkdir -p /data
 RUN npm prune --omit=dev \
 	&& find node_modules -type d -name prebuilds -exec sh -c \
