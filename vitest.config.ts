@@ -5,5 +5,6 @@ export default defineConfig({
 		include: ["core/**/*.test.ts", "src/**/*.test.ts", "tools/**/*.test.ts"],
 		testTimeout: 40_000,
 		pool: "forks",
+		fileParallelism: false,
 	},
 });
