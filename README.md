@@ -186,12 +186,20 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
 
 ## Limits
 
-- **The recipient must implement LUD-21.** BTCPay v2.3.8+, Alby, coinos, Blink,
-  stacker.news, Minibits and the Spark-hosted wallets do. Wallet of Satoshi,
-  Strike, Cash App, ZBD and Primal do not, and their users are refused at
-  creation. Measured coverage is in
+- **The recipient must implement LUD-21.** Blink is the easiest recipient to
+  point somebody at: non-custodial accounts shipped 2026-06-24 on Spark, the
+  address stays `username@blink.sv` whether the account holds its own keys or
+  not, and that domain answers `verify` at `lnurl.blink.sv`. BTCPay v2.3.8+ on a
+  node of your own, Alby, coinos, stacker.news, Minibits, Blitz and the
+  Spark-hosted wallets answer too. Wallet of Satoshi, Strike, Cash App, ZBD and
+  Primal do not, and their users are refused at creation. Measured coverage is in
   [docs/lud21-coverage.md](docs/lud21-coverage.md), re-measured against live
   wallets on the first of each month rather than read off anyone's changelog.
+- **Unless you own the wallet, in which case use NWC instead.** `nwcRail` mints on
+  a wallet of your own over NIP-47 and serves the gateway a `nwcVerifyEndpoint` of
+  yours, so a recipient with no LUD-21 address anywhere is watched anyway and the
+  preimage comes from their own node rather than from a hosted address service.
+  The gateway still speaks nothing but https, and the connection never reaches it.
 - **No fee, and no privacy layer.** Nothing flows through this service, and the
   payer sees the recipient's real invoice and node.
 - **No BOLT12.** Fetching an invoice from an offer needs a node.
