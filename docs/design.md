@@ -364,14 +364,15 @@ on `http://169.254.169.254/` on hop two and hand back the cloud metadata service
 Following the chain by hand is the only way the guard sees the destination that
 is finally reached.
 
-Checking the resolved address rather than the name is one layer, not the whole
-answer: the name is resolved again by the connection, so a record that flips
-between the two is not caught here. What it does buy is that a name openly
-pointing inside is refused before a socket opens, and the https requirement means
-an attacker also needs a certificate the internal service will serve. Refusing
-when *any* address is private, rather than when all of them are, costs
-availability in one case worth knowing: a wallet whose DNS answers with a stray
-private record alongside good ones is refused entirely.
+Checking the resolved address rather than the name is one layer, and the
+transport is the other: this gateway connects to the address the guard verified
+instead of letting the name resolve a second time, so a record that flips
+between the check and the connection is caught. The check also buys that a name
+openly pointing inside is refused before a socket opens, and the https
+requirement means an attacker also needs a certificate the internal service
+will serve. Refusing when *any* address is private, rather than when all of
+them are, costs availability in one case worth knowing: a wallet whose DNS
+answers with a stray private record alongside good ones is refused entirely.
 
 Credentials do not travel across an origin, and a redirect that does not say
 where to is refused rather than retried, both because the next caller of this
