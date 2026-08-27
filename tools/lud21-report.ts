@@ -117,7 +117,7 @@ export function render(now: Survey, before: Survey | null, moved: Moved): string
 }
 
 if (import.meta.main) {
-	const now = read(process.argv[2]);
+	const now = read(process.argv[2] ?? "");
 	if (now === null) {
 		console.error(`${process.argv[2]} is not a survey`);
 		process.exit(2);
