@@ -78,7 +78,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@noble/ciphers": "2.1.1",
+    "@noble/ciphers": "2.3.0",
     "@noble/curves": "2.3.0",
     "@noble/hashes": "2.3.0",
     "uqr": "^0.1.2"
