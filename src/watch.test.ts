@@ -358,7 +358,9 @@ test("the next poll never lands after the invoice has expired", () => {
 		expect(nextDue(payment({ createdAt: now - 600, expiresAt: now + 3600 }), 5000)).toBe(now + 60);
 		expect(nextDue(payment({ createdAt: now - 600, expiresAt: now + 10 }), 5000)).toBe(now + 10);
 		expect(nextDue(payment({ createdAt: now, expiresAt: now }), 5000)).toBeNull();
-		expect(nextDue(payment({ createdAt: now - 2_592_000, expiresAt: now + 3600 }), 5000)).toBeNull();
+		expect(
+			nextDue(payment({ createdAt: now - 2_592_000, expiresAt: now + 3600 }), 5000),
+		).toBeNull();
 	} finally {
 		vi.useRealTimers();
 	}
