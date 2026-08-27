@@ -93,8 +93,8 @@ payments keep the old naming, and it is the caller that decides which, not the r
 The rest of `paymentId` and the id half of `CLUSTER_KEYS_RETIRED` do go.
 There is no data migration and no window that reads both forms either, because the
 release is one coordinated cutover and a gateway can be drained first. Nothing is
-minted, the watches in flight settle or expire within three days, and the new build
-starts on a ledger that holds no old ids at all. A drain is cheaper than
+minted, the watches in flight settle or expire inside the watch horizon, and the new
+build starts on a ledger that holds no old ids at all. A drain is cheaper than
 compatibility code, and it leaves none behind.
 
 One honest cost. Several gateways now hold records under one name, so they have to

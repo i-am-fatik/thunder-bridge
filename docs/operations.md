@@ -56,7 +56,7 @@ So a release that touches the delivery body is cut over rather than deployed:
 Watches already registered are a slower version of the same question. They keep being
 polled and they settle into the new shape, so they are fine as long as their receivers
 moved to the new client. Ones whose receivers did not are the payments that go quiet.
-Three days is the longest any watch lives, so a cutover with no overlap means waiting
+Thirty days is the longest any watch lives, so a cutover with no overlap means waiting
 that out, and a cutover without waiting means telling those clients first.
 
 ## Roll back
