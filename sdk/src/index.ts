@@ -18,7 +18,7 @@ export type {
 } from "./client.js";
 export { ThunderBridge } from "./client.js";
 export { minorScaleOf, minorUnitsOf } from "./currency.js";
-export type { GatewayCheatCode, IdempotencyConflict } from "./errors.js";
+export type { GatewayCheatCode, IdempotencyConflict, WrapRefusalCode } from "./errors.js";
 export {
   GatewayCheatError,
   IDEMPOTENCY_KEY_REUSED,
@@ -30,6 +30,7 @@ export {
   ProblemError,
   REQUEST_IN_FLIGHT,
   UnverifiedRecipientError,
+  WrapRefusedError,
 } from "./errors.js";
 export type { FioConfig } from "./fio.js";
 export { fioStatement } from "./fio.js";
@@ -63,7 +64,14 @@ export type {
   WalletReason,
   WatchPaymentParams,
 } from "./types.js";
-export { isProvablyPaid, proveOrigin, proveSettlement } from "./verify.js";
+export type { WrapAllowance } from "./verify.js";
+export {
+  isProvablyPaid,
+  proveOrigin,
+  proveSettlement,
+  proveWrapped,
+  wrapFeeCeiling,
+} from "./verify.js";
 export type { WebhookCredential, WebhookOptions } from "./webhook.js";
 export {
   answerVerifyChallenge,

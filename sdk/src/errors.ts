@@ -32,6 +32,33 @@ export class GatewayCheatError extends Error {
 }
 
 /**
+ * The way a wrapping operator was caught out. Every code is the wrapped invoice
+ * failing to bind to the recipient's own, which is the only thing that makes
+ * paying the wrap the same act as paying the recipient
+ */
+export type WrapRefusalCode =
+  | "undecodable"
+  | "hash_mismatch"
+  | "amount_below_recipient"
+  | "fee_above_allowance"
+  | "recipient_expires_first";
+
+/**
+ * Thrown when a wrapped invoice does not bind to the recipient's. Paying it
+ * would be paying the operator on its word rather than on the shared payment
+ * hash, which is the whole of what makes wrapping safe
+ */
+export class WrapRefusedError extends Error {
+  readonly code: WrapRefusalCode;
+
+  constructor(code: WrapRefusalCode, detail: string) {
+    super(`wrapped invoice refused: ${code}, ${detail}`);
+    this.name = "WrapRefusedError";
+    this.code = code;
+  }
+}
+
+/**
  * Thrown when the recipient's own server could not be reached to check the
  * invoice against, a CORS-blocked browser or a provider that is down, this is
  * not proof the gateway cheated and it is not proof it did not

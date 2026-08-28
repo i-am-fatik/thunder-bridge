@@ -17,17 +17,31 @@
   "types": "./dist/index.d.ts",
   "typesVersions": {
     "*": {
-      "server": ["./dist/server.d.ts"]
+      "server": [
+        "./dist/server.d.ts"
+      ]
     }
   },
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./server": {
-      "import": { "types": "./dist/server.d.ts", "default": "./dist/server.js" },
-      "require": { "types": "./dist/server.d.cts", "default": "./dist/server.cjs" }
+      "import": {
+        "types": "./dist/server.d.ts",
+        "default": "./dist/server.js"
+      },
+      "require": {
+        "types": "./dist/server.d.cts",
+        "default": "./dist/server.cjs"
+      }
     }
   },
   "files": [
@@ -64,6 +78,9 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@noble/ciphers": "2.3.0",
+    "@noble/curves": "2.3.0",
+    "@noble/hashes": "2.3.0",
     "uqr": "^0.1.2"
   }
 }

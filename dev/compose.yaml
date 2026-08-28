@@ -1,0 +1,88 @@
+name: wrap-regtest
+services:
+  chain:
+    image: polarlightning/bitcoind:30.0
+    container_name: wrap-chain
+    hostname: chain
+    environment:
+      USERID: ${USERID:-501}
+      GROUPID: ${GROUPID:-20}
+    command: >-
+      bitcoind -server=1 -regtest=1 -rpcuser=polaruser -rpcpassword=polarpass
+      -debug=1 -zmqpubrawblock=tcp://0.0.0.0:28334
+      -zmqpubrawtx=tcp://0.0.0.0:28335 -zmqpubhashblock=tcp://0.0.0.0:28336
+      -txindex=1 -dnsseed=0 -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0
+      -rpcport=18443 -rest -listen=1 -listenonion=0 -fallbackfee=0.0002
+      -blockfilterindex=1 -peerblockfilters=1
+    volumes:
+      - ./volumes/chain:/home/bitcoin/.bitcoin
+    ports:
+      - '18453:18443'
+
+  payer:
+    image: polarlightning/lnd:0.20.0-beta
+    container_name: wrap-payer
+    hostname: payer
+    depends_on: [chain]
+    environment:
+      USERID: ${USERID:-501}
+      GROUPID: ${GROUPID:-20}
+    command: >-
+      lnd --noseedbackup --debuglevel=info --trickledelay=5000 --alias=payer
+      --externalip=payer --tlsextradomain=payer --tlsextradomain=wrap-payer
+      --tlsextradomain=host.docker.internal --listen=0.0.0.0:9735
+      --rpclisten=0.0.0.0:10009 --restlisten=0.0.0.0:8080 --bitcoin.active
+      --bitcoin.regtest --bitcoin.node=bitcoind --bitcoind.rpchost=wrap-chain
+      --bitcoind.rpcuser=polaruser --bitcoind.rpcpass=polarpass
+      --bitcoind.zmqpubrawblock=tcp://wrap-chain:28334
+      --bitcoind.zmqpubrawtx=tcp://wrap-chain:28335
+    restart: always
+    volumes:
+      - ./volumes/payer:/home/lnd/.lnd
+    ports:
+      - '10011:10009'
+      - '8091:8080'
+
+  wrapper:
+    image: polarlightning/lnd:0.20.0-beta
+    container_name: wrap-wrapper
+    hostname: wrapper
+    depends_on: [chain]
+    environment:
+      USERID: ${USERID:-501}
+      GROUPID: ${GROUPID:-20}
+    command: >-
+      lnd --noseedbackup --debuglevel=info --trickledelay=5000 --alias=wrapper
+      --externalip=wrapper --tlsextradomain=wrapper --tlsextradomain=wrap-wrapper
+      --tlsextradomain=host.docker.internal --listen=0.0.0.0:9735
+      --rpclisten=0.0.0.0:10009 --restlisten=0.0.0.0:8080 --bitcoin.active
+      --bitcoin.regtest --bitcoin.node=bitcoind --bitcoind.rpchost=wrap-chain
+      --bitcoind.rpcuser=polaruser --bitcoind.rpcpass=polarpass
+      --bitcoind.zmqpubrawblock=tcp://wrap-chain:28334
+      --bitcoind.zmqpubrawtx=tcp://wrap-chain:28335
+    restart: always
+    volumes:
+      - ./volumes/wrapper:/home/lnd/.lnd
+    ports:
+      - '10012:10009'
+      - '8092:8080'
+
+  payee:
+    image: polarlightning/clightning:25.12
+    container_name: wrap-payee
+    hostname: payee
+    depends_on: [chain]
+    environment:
+      USERID: ${USERID:-501}
+      GROUPID: ${GROUPID:-20}
+    command: >-
+      lightningd --alias=payee --addr=payee --addr=0.0.0.0:9735
+      --network=regtest --bitcoin-rpcuser=polaruser
+      --bitcoin-rpcpassword=polarpass --bitcoin-rpcconnect=wrap-chain
+      --bitcoin-rpcport=18443 --log-level=info --dev-bitcoind-poll=2
+      --dev-fast-gossip --log-file=- --developer
+    restart: always
+    volumes:
+      - ./volumes/payee:/home/clightning/.lightning
+    ports:
+      - '9846:9735'

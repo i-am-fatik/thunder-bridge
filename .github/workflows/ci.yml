@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
   schedule:
@@ -25,9 +25,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.19
+          node-version: 26.6
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            sdk/package-lock.json
       - run: npm ci
+      - name: the built client the tools suites import, which no checkout carries
+        working-directory: sdk
+        run: npm ci && npm run build
       - run: npm test
       - run: npx tsc --noEmit
       - name: a body somebody wrote without braces, anywhere in the repository
@@ -57,7 +63,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.19
+          node-version: 26.6
           cache: npm
           cache-dependency-path: sdk/package-lock.json
       - run: npm ci
@@ -74,7 +80,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.19
+          node-version: 26.6
       - run: npm audit --audit-level=moderate
       - run: npm audit --audit-level=moderate
         working-directory: sdk

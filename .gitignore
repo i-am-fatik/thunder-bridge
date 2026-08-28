@@ -4,3 +4,6 @@ data/
 .env
 .DS_Store
 .idea/
+dev/volumes/
+wrap-lab.ledger.json
+wrap-lab.ledger.json.writing

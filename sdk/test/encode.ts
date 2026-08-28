@@ -8,6 +8,7 @@ export interface InvoiceFields {
   amountMsat?: number;
   descriptionHash?: string;
   description?: string;
+  expirySecs?: number;
   network?: string;
 }
 
@@ -32,9 +33,17 @@ export function bolt11(fields: InvoiceFields): string {
     ...(descriptionWords.length > 0
       ? [13, descriptionWords.length >> 5, descriptionWords.length & 31, ...descriptionWords]
       : []),
+    ...expiryFields(fields.expirySecs),
     ...Array<number>(SIGNATURE_WORDS).fill(0),
   ];
   return `${hrp}1${toChars([...data, ...checksum(hrp, data)])}`;
+}
+
+function expiryFields(expirySecs: number | undefined): number[] {
+  if (expirySecs === undefined) return [];
+  const words: number[] = [];
+  for (let left = expirySecs; left > 0; left = Math.floor(left / 32)) words.unshift(left % 32);
+  return [6, words.length >> 5, words.length & 31, ...words];
 }
 
 function amountUnits(amountMsat: number | undefined): string {

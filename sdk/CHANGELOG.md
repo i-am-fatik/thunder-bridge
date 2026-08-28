@@ -13,6 +13,192 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 1.2.0
+
+A recipient with no LUD-21 address anywhere is watchable now, because their own node
+answers over NIP-47 instead of a provider answering for them.
+
+### Added
+
+- `nwcRail` and `nwcVerifyEndpoint` on `thunder-bridge/server`, with `nwcConnection`,
+  `nwcInvoice`, `nwcSettlement`, `nwcHoldInvoice`, `nwcPay` and `askWallet` beside
+  them. Your wallet mints over NIP-47 and an endpoint of yours answers the LUD-21
+  shape out of `lookup_invoice`, so the gateway is handed a URL of yours and learns
+  neither the connection string, the relay, nor which wallet is behind it. The payment
+  hash is sealed into that URL the way `relayedVerifyUrl` seals a wallet's, which is
+  what stops a stranger driving your wallet through your own handler.
+
+  Every answer is refused unless the wallet's own key signed it, and the NIP-44 half is
+  checked against the specification's own vectors rather than against a round trip with
+  ourselves: 35 conversation keys, 32 message-key sets, 24 padding lengths and every
+  case the vectors call invalid.
+
+  `askTimeoutMs` is one deadline over the whole connection rather than one per relay,
+  ten seconds by default, because a gateway abandons a poll after fifteen and a
+  connection listing several relays has to answer inside that.
+
+  Take the connection string scoped. This needs `make_invoice` and `lookup_invoice`
+  and nothing else, never `pay_invoice`.
+
+- `proveWrapped` and `wrapFeeCeiling` on the main entry, for a payer handed an invoice
+  by an operator fronting the liquidity on a hold invoice. It refuses a wrap on another
+  payment hash, one that cannot cover what the recipient asked, one charging over the
+  allowance, and one that outlives the invoice it has to forward to. Two invoices
+  compared and nothing asked of anybody, so it runs in a browser. `WrapRefusedError`
+  names which of the four failed.
+
+  The allowance is a ceiling you set, one percent with a floor of one satoshi by
+  default, rather than a fee an operator names per payment. What it cannot cover is an
+  operator that accepts and stalls to the HTLC timeout: the money comes back, and it
+  was locked meanwhile.
+
+### Changed
+
+- A watch may run to thirty days, up from three. A wallet writing a thirty day invoice
+  was refused outright, which is the wrong answer to an invoice that is merely long.
+  Needs a gateway at 1.2.0 or later.
+
+- `@noble/ciphers`, `@noble/curves` and `@noble/hashes` are runtime dependencies now,
+  reached only from `thunder-bridge/server`. The main entry still carries no Node
+  built-in and none of this, measured on the built bundle rather than read off the
+  source.
+
+## 1.1.0
+
+`invoiceFrom`, so a client told to mint for itself has something to mint with.
+
+### Added
+
+- `invoiceFrom(lnAddresses, amountMsat)` on `thunder-bridge/server`. 1.0.0 tells a
+  client to mint its own invoice and exported no way to do it: `blindLightningRail` was
+  the only door and it hands back neither the payment hash nor the verify URL, so a
+  client could not then prove the invoice came from the address it asked for. It was
+  already there privately. Server side, because it resolves hostnames and refuses a
+  private one, and it throws `NoWalletAvailableError` when no address on the list will
+  serve.
+
+Numbered 1.1.0 rather than the 1.0.1 the commit names, because an added export is a
+minor. Nothing was ever published as 1.0.1.
+
+## 1.0.0
+
+A caller proves who it is by signing, and a payment belongs to the key that made it.
+Every client changes.
+
+### Removed
+
+- `webhookSecret`, everywhere it appeared: `createPayment`, `watchPayment`, `bankRail`,
+  `lightningRail`, `blindLightningRail` and `bankTransfer`. A gateway holding your
+  secret was the one thing it held that it never needed, so a delivery is signed by its
+  own cluster key and nothing else. Read that key from `/webhook-key`.
+
+- The shared-secret form of `WebhookCredential`, which is now `{ publicKey: string }`
+  alone. Every `verifyWebhookSignature`, `parseWebhook` and `parseWebhookRequest` call
+  takes the object.
+
+### Added
+
+- `secret` on `ThunderBridge`, your caller key, which makes every call speak as you. A
+  payment belongs to the key that made it, so one instance serving several clients
+  gives each of them their own view of the worklist.
+
+- `nameFor(paymentHash)`, what a payment is called, worked out before any gateway has
+  heard of it and the same at all of them. `id_not_mine` joins `GatewayCheatCode` for a
+  gateway answering with a payment that was made by another key.
+
+- `Gateways`, one payment watched at several gateways, which is what makes any one of
+  them replaceable. `onRefused` says which would not take it.
+
+- `parseSettlement`, `parseSettlementRequest` and `isProvablySettled`, with the
+  `Settlement` type. A delivery carries less now, so what it does carry is checked for
+  the only property that matters: it says paid and it holds a preimage that hashes to
+  the payment hash the delivery itself names.
+
+### Changed
+
+- `createPayment` is refused by an instance that does not mint, and not minting is the
+  default. Minting is the one path that hands the operator the address and the amount,
+  so an operator turns it on deliberately. Mint with `invoiceFrom` from 1.1.0 and
+  register through `watchPayment`, or ask the operator for `MINTING=1` and accept that
+  they see both.
+
+Needs a gateway at 1.0.0 or later.
+
+## 0.8.10
+
+A hostname that resolves to nothing stopped being waved through the outbound guard.
+
+### Fixed
+
+- Every outbound hop refused a private address and let an unresolvable name past, so a
+  name nobody answers reached the fetch rather than being refused. A host whose
+  publicness cannot be shown is not reached, which is the deliberate posture and now
+  the actual behaviour. It reaches everything on the server entry that resolves an
+  address, `blindLightningRail` and `lightningVerifyEndpoint` among them.
+
+The guard hands the addresses it verified to the transport, and pinning the connection
+to them is the gateway's own transport rather than this package's. A record that flips
+between the check and the connection is still not caught here.
+
+## 0.8.9
+
+A verify URL the caller named has to agree before a gateway will poll it.
+
+### Added
+
+- `answerVerifyChallenge` and `answerVerifyChallengeRequest`, the nonce echo a verify
+  endpoint of yours answers before the gateway accepts the watch. It is the same shape
+  a webhook already answers, and it proves consent rather than identity: the point is
+  that the polling leaves from a host that agreed to receive it.
+
+  A gateway at 0.9.0 or later refuses a watch whose verify URL will not answer, so an
+  endpoint of your own served by an earlier client is refused by one.
+  `bankVerifyEndpoint` and `lightningVerifyEndpoint` answer it for you, and a rail
+  where the gateway mints is untouched because the gateway found that URL itself.
+
+### Fixed
+
+- An address could smuggle a path of its own into the well-known URL, so whoever named
+  the address chose what got fetched. The name and the domain are taken apart and
+  rebuilt rather than pasted.
+
+## 0.8.8
+
+A verify endpoint of your own for Lightning, so the gateway polls you and never the
+wallet.
+
+### Added
+
+- `lightningVerifyEndpoint` and `relayedVerifyUrl` on `thunder-bridge/server`, with
+  `LightningVerifyConfig` and `Relayed`. The gateway is handed a URL of yours with the
+  wallet's sealed inside it, so the wallet's rate limit lands on your host instead of
+  on an instance shared with other clients. It costs a server that stays up and one
+  extra round trip.
+
+- `pollEverySecs` on `bankVerifyEndpoint`, sent as `Cache-Control: max-age`, thirty by
+  default and clamped to an hour. The pace is the endpoint's to name rather than the
+  gateway's to guess, and a statement that moves once an hour should say so.
+
+Nothing was published as 0.8.7, and `pollEverySecs` arrived under that number.
+
+## 0.8.6
+
+A webhook proves it wants the traffic, and is then retried for as long as its payment
+lives.
+
+### Added
+
+- `answerWebhookChallenge` and `answerWebhookChallengeRequest`. A handler tries this
+  first and parses second, because the challenge arrives on the same path a delivery
+  does and returns `null` when this one was not a challenge.
+
+- `WebhookCredential`, so a delivery can be checked against the gateway's own public
+  key from `/webhook-key` instead of a secret you registered with it. `PaymentKind`
+  came with it, `minted` or `watched`, saying whether the gateway resolved the address
+  itself or was handed an invoice to watch.
+
+Nothing was published as 0.8.5, and both of those arrived under that number.
+
 ## 0.8.4
 
 A bank transfer can now be told to a server. Until this release the only way to hear
