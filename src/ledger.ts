@@ -2,21 +2,35 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import { decodeInvoice } from "../core/bolt11.ts";
+import { paymentNamedBy } from "../core/caller.ts";
+import * as log from "./log.ts";
 
 import {
-	withoutSecrets,
 	type Delivery,
 	type Payment,
 	type PublicPayment,
 	type Webhook,
+	withoutSecrets,
 } from "./payment.ts";
-import { paymentToWire } from "./wire.ts";
+import { deliveryToWire } from "./wire.ts";
 
 export type Claim =
 	| { state: "mine" }
 	| { state: "inflight" }
 	| { state: "mismatch" }
 	| { state: "done"; paymentId: string };
+
+/**
+ * What is left of a payment once the gateway has forgotten it: the client's own
+ * ciphertext, whose key it was, and how it ended
+ */
+export type Kept = {
+	id: string;
+	caller: string | null;
+	sealed: string;
+	status: "paid" | "expired";
+	settledAt: number | null;
+};
 
 const SCHEMA = `
 	CREATE TABLE IF NOT EXISTS meta (
@@ -63,7 +77,6 @@ const SCHEMA = `
 		seq INTEGER NOT NULL,
 		id TEXT NOT NULL,
 		url TEXT NOT NULL,
-		secret TEXT,
 		body TEXT NOT NULL,
 		owedAt INTEGER NOT NULL,
 		mac TEXT NOT NULL,
@@ -101,9 +114,19 @@ const SCHEMA = `
 		leaseUntil INTEGER NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS requests_by_age ON requests (claimedAt);
+
+	CREATE TABLE IF NOT EXISTS kept (
+		id TEXT PRIMARY KEY,
+		caller TEXT,
+		sealed TEXT NOT NULL,
+		status TEXT NOT NULL,
+		settledAt INTEGER,
+		keptAt INTEGER NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS kept_by_age ON kept (keptAt);
 `;
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const RETRY_FLOOR_SECS = 3600;
 const TAKEOVER_SPREAD = 8;
@@ -138,7 +161,6 @@ export type OutboxFact = {
 	seq: number;
 	id: string;
 	url: string;
-	secret: string | null;
 	body: string;
 	owedAt: number;
 	mac: string;
@@ -171,7 +193,7 @@ export type Retry = "scheduled" | "abandoned";
 const COLUMNS: Record<Source, string> = {
 	accepted: "origin, seq, id, payment, acceptedAt, expiresAt, mac",
 	paid: "origin, seq, id, payment, settledAt, mac",
-	outbox: "origin, seq, id, url, secret, body, owedAt, mac",
+	outbox: "origin, seq, id, url, body, owedAt, mac",
 	delivered: "origin, seq, id, url, deliveredAt, mac",
 };
 
@@ -179,7 +201,15 @@ type Row = { payment: string };
 
 type AcceptedRow = Row & { id: string };
 
-type Missing = { id: string; url: string; secret: string | null };
+type KeptRow = {
+	id: string;
+	caller: string | null;
+	sealed: string;
+	status: string;
+	settledAt: number | null;
+};
+
+type Missing = { id: string; url: string; settledAt: number | null };
 
 type Held = { fingerprint: string; paymentId: string | null; leaseUntil: number };
 
@@ -189,6 +219,7 @@ type Statements = {
 	read: StatementSync;
 	all: StatementSync;
 	count: StatementSync;
+	countFor: StatementSync;
 	paymentsByIds: StatementSync;
 	listing: StatementSync;
 	factCounts: Record<Source, StatementSync>;
@@ -221,6 +252,9 @@ type Statements = {
 	fulfillRequest: StatementSync;
 	releaseRequest: StatementSync;
 	pruneRequests: StatementSync;
+	keepSealed: StatementSync;
+	readKept: StatementSync;
+	pruneKept: StatementSync;
 	watermarks: StatementSync;
 	watermark: StatementSync;
 	advance: StatementSync;
@@ -233,17 +267,15 @@ export class Ledger {
 	readonly origin: string;
 	private readonly db: DatabaseSync;
 	private readonly key: Uint8Array;
-	private readonly retired: Uint8Array[];
 	private readonly tuning: Tuning;
 	private readonly statements: Statements;
 
-	constructor(path: string, key: Uint8Array, tuning: Tuning, retired: Uint8Array[] = []) {
+	constructor(path: string, key: Uint8Array, tuning: Tuning) {
 		this.db = new DatabaseSync(path);
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec("PRAGMA foreign_keys = ON");
 		this.migrate();
 		this.key = key;
-		this.retired = retired;
 		this.tuning = tuning;
 
 		this.db
@@ -252,6 +284,7 @@ export class Ledger {
 		this.origin = (
 			this.db.prepare("SELECT value FROM meta WHERE key = 'origin'").get() as { value: string }
 		).value;
+		this.resignUnderTheKeyWeHold();
 
 		this.statements = {
 			read: this.db.prepare("SELECT id, payment FROM accepted WHERE id = ? ORDER BY origin, seq"),
@@ -259,6 +292,12 @@ export class Ledger {
 				"SELECT accepted.id AS id, accepted.payment AS payment FROM accepted JOIN schedule ON schedule.id = accepted.id ORDER BY accepted.id, accepted.origin, accepted.seq",
 			),
 			count: this.db.prepare("SELECT count(*) AS rows FROM schedule"),
+			countFor: this.db.prepare(`
+				SELECT count(DISTINCT accepted.id) AS rows
+				FROM accepted
+				JOIN schedule ON schedule.id = accepted.id
+				WHERE json_extract(accepted.payment, '$.caller') IS ?
+			`),
 			paymentsByIds: this.db.prepare(
 				"SELECT id, payment FROM accepted WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id, origin, seq",
 			),
@@ -277,14 +316,16 @@ export class Ledger {
 				"UPDATE schedule SET dueAt = ? WHERE id IN (SELECT id FROM schedule WHERE dueAt <= ? ORDER BY dueAt LIMIT ?) RETURNING id",
 			),
 			polled: this.db.prepare("UPDATE schedule SET dueAt = ? WHERE id = ?"),
-			justExpired: this.db.prepare("SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0"),
+			justExpired: this.db.prepare(
+				"SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0",
+			),
 			announce: this.db.prepare("UPDATE schedule SET announced = 1 WHERE expiresAt <= ?"),
 			prune: this.db.prepare("DELETE FROM schedule WHERE expiresAt <= ?"),
 			pruneAccepted: this.db.prepare("DELETE FROM accepted WHERE expiresAt <= ?"),
 			unowed: this.db.prepare(`
 				SELECT DISTINCT accepted.id AS id,
 					json_extract(hook.value, '$.url') AS url,
-					json_extract(hook.value, '$.secret') AS secret
+					paid.settledAt AS settledAt
 				FROM accepted
 				JOIN paid ON paid.id = accepted.id
 				JOIN json_each(accepted.payment, '$.webhooks') AS hook
@@ -307,7 +348,7 @@ export class Ledger {
 				"INSERT INTO paid (origin, seq, id, payment, settledAt, mac) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
 			),
 			insertOutbox: this.db.prepare(
-				"INSERT INTO outbox (origin, seq, id, url, secret, body, owedAt, mac, dueAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
+				"INSERT INTO outbox (origin, seq, id, url, body, owedAt, mac, dueAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
 			),
 			insertDelivered: this.db.prepare(
 				"INSERT INTO delivered (origin, seq, id, url, deliveredAt, mac) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
@@ -317,7 +358,7 @@ export class Ledger {
 					SELECT rowid FROM outbox WHERE dueAt <= ?
 						AND NOT EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url)
 					ORDER BY dueAt LIMIT ?
-				) RETURNING origin, seq, id, url, secret, body`,
+				) RETURNING origin, seq, id, url, body`,
 			),
 			attempted: this.db.prepare(
 				"SELECT attempts, owedAt FROM outbox WHERE origin = ? AND seq = ?",
@@ -346,10 +387,26 @@ export class Ledger {
 					ON CONFLICT(key) DO UPDATE SET claimedAt = excluded.claimedAt, leaseUntil = excluded.leaseUntil`,
 			),
 			fulfillRequest: this.db.prepare("UPDATE requests SET paymentId = ? WHERE key = ?"),
-			releaseRequest: this.db.prepare(
-				"DELETE FROM requests WHERE key = ? AND paymentId IS NULL",
-			),
+			releaseRequest: this.db.prepare("DELETE FROM requests WHERE key = ? AND paymentId IS NULL"),
 			pruneRequests: this.db.prepare("DELETE FROM requests WHERE claimedAt <= ?"),
+			keepSealed: this.db.prepare(
+				`INSERT INTO kept (id, caller, sealed, status, settledAt, keptAt)
+					SELECT accepted.id,
+						json_extract(accepted.payment, '$.caller'),
+						json_extract(accepted.payment, '$.sealed'),
+						CASE WHEN paid.id IS NULL THEN 'expired' ELSE 'paid' END,
+						paid.settledAt,
+						?
+					FROM accepted
+					LEFT JOIN paid ON paid.id = accepted.id
+					WHERE json_extract(accepted.payment, '$.sealed') IS NOT NULL
+						AND (accepted.expiresAt <= ? OR paid.settledAt <= ?)
+					ON CONFLICT(id) DO NOTHING`,
+			),
+			readKept: this.db.prepare(
+				"SELECT id, caller, sealed, status, settledAt FROM kept WHERE id = ? LIMIT 1",
+			),
+			pruneKept: this.db.prepare("DELETE FROM kept WHERE keptAt <= ?"),
 			watermarks: this.db.prepare("SELECT source, origin, seq FROM progress"),
 			watermark: this.db.prepare("SELECT seq FROM progress WHERE source = ? AND origin = ?"),
 			advance: this.db.prepare(
@@ -378,13 +435,17 @@ export class Ledger {
 		const held = this.db
 			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending'")
 			.all();
-		if (held.length === 0) return;
+		if (held.length === 0) {
+			return;
+		}
 
 		const orphans = this.db
 			.prepare("SELECT payment, dueAt FROM pending WHERE id NOT IN (SELECT id FROM accepted)")
 			.all() as (Row & { dueAt: number | null })[];
 
-		for (const row of orphans) this.keep(revive(row), row.dueAt ?? unixNow());
+		for (const row of orphans) {
+			this.keep(revive(row), row.dueAt ?? unixNow());
+		}
 
 		this.db.exec("DROP TABLE pending");
 	}
@@ -397,8 +458,34 @@ export class Ledger {
 		return (this.statements.count.get() as { rows: number }).rows;
 	}
 
+	/**
+	 * How many payments this caller has waiting here. A caller who signed nothing
+	 * shares one bucket with every other anonymous caller, which is the only
+	 * honest way to count someone who will not say who they are
+	 */
+	countFor(caller: string | null): number {
+		return (this.statements.countFor.get(caller) as { rows: number }).rows;
+	}
+
+	kept(id: string): Kept | null {
+		const row = this.statements.readKept.get(id) as KeptRow | undefined;
+		if (row === undefined) {
+			return null;
+		}
+
+		return {
+			id: row.id,
+			caller: row.caller,
+			sealed: row.sealed,
+			status: row.status === "paid" ? "paid" : "expired",
+			settledAt: row.settledAt,
+		};
+	}
+
 	private paymentsFor(ids: string[]): Payment[] {
-		if (ids.length === 0) return [];
+		if (ids.length === 0) {
+			return [];
+		}
 
 		return groupById(this.statements.paymentsByIds.all(JSON.stringify(ids)) as AcceptedRow[]);
 	}
@@ -415,7 +502,9 @@ export class Ledger {
 			const taken = { ...(held ?? payment), webhooks };
 			const fresh =
 				!held || webhooks.length > held.webhooks.length ? this.acceptedFact(told) : null;
-			if (fresh) this.recordAccepted(fresh);
+			if (fresh) {
+				this.recordAccepted(fresh);
+			}
 
 			this.scheduleWatch(taken.id, taken.expiresAt, dueAt);
 
@@ -440,7 +529,9 @@ export class Ledger {
 	}
 
 	private scheduleWatch(id: string, expiresAt: number, dueAt: number): void {
-		if (this.settlement(id)) return;
+		if (this.settlement(id)) {
+			return;
+		}
 		this.statements.insertSchedule.run(id, expiresAt, dueAt);
 	}
 
@@ -470,16 +561,20 @@ export class Ledger {
 
 	settlement(id: string): PublicPayment | null {
 		const row = this.statements.settlement.get(id) as Row | undefined;
-		return row ? (JSON.parse(row.payment) as PublicPayment) : null;
+		return row ? asStored<PublicPayment>(row.payment) : null;
 	}
 
 	replay(trigger: string, limit: number, window: number): PublicPayment[] {
 		const matched: PublicPayment[] = [];
 		for (const settled of this.recentlySettled(window)) {
-			if (settled.trigger !== trigger) continue;
+			if (settled.trigger !== trigger) {
+				continue;
+			}
 
 			matched.push(settled);
-			if (matched.length === limit) break;
+			if (matched.length === limit) {
+				break;
+			}
 		}
 
 		return matched.reverse();
@@ -497,15 +592,15 @@ export class Ledger {
 
 	private recentlySettled(window: number): PublicPayment[] {
 		const rows = this.statements.recentlyPaid.all(window) as Row[];
-		return rows.map((row) => JSON.parse(row.payment) as PublicPayment);
+		return rows.map((row) => asStored<PublicPayment>(row.payment));
 	}
 
 	settle(pending: Payment, preimage: string): { settled: PublicPayment; facts: Facts } {
 		proves(preimage, pending.paymentHash);
 		const settled: Payment = { ...pending, status: "paid", preimage };
 		const record = JSON.stringify(withoutSecrets(settled));
-		const body = JSON.stringify(paymentToWire(settled));
 		const now = unixNow();
+		const body = JSON.stringify(deliveryToWire(settled, now));
 
 		return this.transact(() => {
 			const seq = this.nextSeq("paid");
@@ -559,7 +654,9 @@ export class Ledger {
 
 	undelivered(owed: Delivery): Retry {
 		const tried = this.statements.attempted.get(owed.origin, owed.seq) as Attempted | undefined;
-		if (!tried) return "abandoned";
+		if (!tried) {
+			return "abandoned";
+		}
 
 		const attempts = tried.attempts + 1;
 		const nextAt = unixNow() + this.tuning.deliveryBackoffSecs * attempts;
@@ -584,9 +681,15 @@ export class Ledger {
 		return this.transact<Claim>(() => {
 			const held = this.statements.heldRequest.get(key) as Held | undefined;
 			if (held) {
-				if (held.fingerprint !== fingerprint) return { state: "mismatch" };
-				if (held.paymentId) return { state: "done", paymentId: held.paymentId };
-				if (held.leaseUntil > now) return { state: "inflight" };
+				if (held.fingerprint !== fingerprint) {
+					return { state: "mismatch" };
+				}
+				if (held.paymentId) {
+					return { state: "done", paymentId: held.paymentId };
+				}
+				if (held.leaseUntil > now) {
+					return { state: "inflight" };
+				}
 			}
 			this.statements.claimRequest.run(key, fingerprint, now, now + leaseSecs);
 
@@ -614,7 +717,9 @@ export class Ledger {
 			seq: number;
 		}[]) {
 			const known = marks[row.source];
-			if (known) known[row.origin] = row.seq;
+			if (known) {
+				known[row.origin] = row.seq;
+			}
 		}
 		return marks;
 	}
@@ -629,7 +734,9 @@ export class Ledger {
 					theirs[source]?.[origin] ?? 0,
 					GAP_BATCH,
 				) as T[];
-				if (batch.length === GAP_BATCH) more = true;
+				if (batch.length === GAP_BATCH) {
+					more = true;
+				}
 				rows.push(...batch);
 			}
 			return rows;
@@ -651,14 +758,18 @@ export class Ledger {
 			const settled: PublicPayment[] = [];
 
 			for (const fact of inSeqOrder(facts.accepted ?? [])) {
-				if (this.known("accepted", fact)) continue;
+				if (this.known("accepted", fact)) {
+					continue;
+				}
 				this.provenAccepted(fact);
 				this.recordAccepted(fact);
 				this.scheduleWatch(fact.id, fact.expiresAt, this.watchAfter(fact.id));
 			}
 
 			for (const fact of inSeqOrder(facts.paid ?? [])) {
-				if (this.known("paid", fact)) continue;
+				if (this.known("paid", fact)) {
+					continue;
+				}
 				const payment = this.provenPaid(fact);
 				this.recordPaid(fact);
 				this.forget(fact.id);
@@ -666,17 +777,21 @@ export class Ledger {
 			}
 
 			for (const fact of inSeqOrder(facts.outbox ?? [])) {
-				if (this.known("outbox", fact)) continue;
+				if (this.known("outbox", fact)) {
+					continue;
+				}
 				this.verify(
 					"outbox",
-					[fact.origin, fact.seq, fact.id, fact.url, fact.secret, fact.body, fact.owedAt],
+					[fact.origin, fact.seq, fact.id, fact.url, fact.body, fact.owedAt],
 					fact.mac,
 				);
 				this.recordOutbox(fact, this.takeoverAt(fact));
 			}
 
 			for (const fact of inSeqOrder(facts.delivered ?? [])) {
-				if (this.known("delivered", fact)) continue;
+				if (this.known("delivered", fact)) {
+					continue;
+				}
 				this.verify(
 					"delivered",
 					[fact.origin, fact.seq, fact.id, fact.url, fact.deliveredAt],
@@ -689,12 +804,20 @@ export class Ledger {
 		});
 	}
 
-	sweep(graceSecs: number): Payment[] {
+	/**
+	 * A sealed blob outlives the payment it belonged to, for as long as the
+	 * instance was told to keep it. Everything the gateway could read goes at the
+	 * grace, and what stays is ciphertext, its owner and when it settled, so a
+	 * client can read its own history back from any gateway that watched it
+	 */
+	sweep(graceSecs: number, keepSealedSecs: number): Payment[] {
 		const now = unixNow();
 		const expired = this.paymentsFor(
 			(this.statements.justExpired.all(now) as { id: string }[]).map((one) => one.id),
 		);
 		this.statements.announce.run(now);
+		this.statements.keepSealed.run(now, now - graceSecs, now - graceSecs);
+		this.statements.pruneKept.run(now - keepSealedSecs);
 		this.statements.prune.run(now - graceSecs);
 		this.statements.pruneAccepted.run(now - graceSecs);
 		this.statements.pruneSettled.run(now - graceSecs);
@@ -703,17 +826,22 @@ export class Ledger {
 		this.statements.pruneDelivered.run(now - graceSecs);
 		this.statements.pruneRequests.run(now - REQUEST_TTL_SECS);
 
-		for (const missing of this.statements.unowed.all() as Missing[]) this.owe(missing);
+		for (const missing of this.statements.unowed.all() as Missing[]) {
+			this.owe(missing);
+		}
 
 		return expired;
 	}
 
 	private owe(missing: Missing): void {
 		const settled = this.settlement(missing.id);
-		if (!settled) return;
+		if (!settled) {
+			return;
+		}
 
-		const body = JSON.stringify(paymentToWire(settled));
-		this.recordOutbox(this.owedFact(missing.id, missing, body, unixNow()), 0);
+		const owedAt = unixNow();
+		const body = JSON.stringify(deliveryToWire(settled, missing.settledAt ?? owedAt));
+		this.recordOutbox(this.owedFact(missing.id, missing, body, owedAt), 0);
 	}
 
 	private owedFact(id: string, hook: Webhook, body: string, owedAt: number): OutboxFact {
@@ -724,15 +852,71 @@ export class Ledger {
 			seq,
 			id,
 			url: hook.url,
-			secret: hook.secret,
 			body,
 			owedAt,
-			mac: this.sign("outbox", [this.origin, seq, id, hook.url, hook.secret, body, owedAt]),
+			mac: this.sign("outbox", [this.origin, seq, id, hook.url, body, owedAt]),
 		};
 	}
 
 	close(): void {
-		if (this.db.isOpen) this.db.close();
+		if (this.db.isOpen) {
+			this.db.close();
+		}
+	}
+
+	/**
+	 * A rotation is a rotation. The ledger remembers which key signed it, by a
+	 * fingerprint that proves the key without holding it, and a boot under a new key
+	 * re-signs every fact in one transaction. Nothing keeps the old value working
+	 * afterwards, which is the whole difference between rotating a key and merely
+	 * adding one.
+	 *
+	 * The pass is bounded by what a ledger keeps, which is an hour past settlement
+	 * plus the window for sealed blobs, so it is not a migration of history
+	 */
+	private resignUnderTheKeyWeHold(): void {
+		const held = createHmac("sha256", this.key).update("ledger-key").digest("hex");
+		const written = this.db.prepare("SELECT value FROM meta WHERE key = 'ledger-key'").get() as
+			| { value: string }
+			| undefined;
+		if (written?.value === held) {
+			return;
+		}
+
+		this.transact(() => {
+			if (written !== undefined) {
+				this.resignEveryFact();
+			}
+			this.db
+				.prepare(
+					"INSERT INTO meta (key, value) VALUES ('ledger-key', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+				)
+				.run(held);
+		});
+	}
+
+	private resignEveryFact(): void {
+		let resigned = 0;
+		for (const source of SOURCES) {
+			const columns = COLUMNS[source].split(", ");
+			const rows = this.db.prepare(`SELECT ${COLUMNS[source]} FROM ${source}`).all() as Record<
+				string,
+				string | number | null
+			>[];
+
+			for (const row of rows) {
+				const fields = columns
+					.filter((column) => column !== "mac")
+					.map((column) => row[column] ?? null);
+				this.db
+					.prepare(`UPDATE ${source} SET mac = ? WHERE origin = ? AND seq = ?`)
+					.run(macWith(this.key, source, fields), String(row["origin"]), Number(row["seq"]));
+				resigned += 1;
+			}
+		}
+		if (resigned > 0) {
+			log.info(`re-signed ${resigned} facts under the cluster key now held`);
+		}
 	}
 
 	private migrate(): void {
@@ -745,7 +929,9 @@ export class Ledger {
 
 		this.dropOutdatedRequestCache();
 		this.db.exec(SCHEMA);
-		if (found !== SCHEMA_VERSION) this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+		if (found !== SCHEMA_VERSION) {
+			this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+		}
 	}
 
 	private schemaVersion(): number {
@@ -808,7 +994,6 @@ export class Ledger {
 			fact.seq,
 			fact.id,
 			fact.url,
-			fact.secret,
 			fact.body,
 			fact.owedAt,
 			fact.mac,
@@ -844,19 +1029,28 @@ export class Ledger {
 
 	private verify(source: Source, fields: (string | number | null)[], mac: string): void {
 		const got = Buffer.from(mac, "hex");
-		const holds = this.everyKeyHeld().some((key) => {
-			const want = Buffer.from(macWith(key, source, fields), "hex");
-			return want.length === got.length && timingSafeEqual(want, got);
-		});
-		if (!holds) throw new Error(`a ${source} fact arrived without the cluster key`);
+		const want = Buffer.from(macWith(this.key, source, fields), "hex");
+		const holds = want.length === got.length && timingSafeEqual(want, got);
+		if (!holds) {
+			throw new Error(`a ${source} fact arrived without the cluster key`);
+		}
 	}
 
-	private everyKeyHeld(): Uint8Array[] {
-		return [this.key, ...this.retired];
-	}
+	/**
+	 * A fact has to be named after what it settles. A payment its caller signed for
+	 * is named after that caller, which any instance can check without holding
+	 * anything of theirs, and one nobody signed for is named by a key this cluster
+	 * holds
+	 */
+	private namesItsOwnHash(
+		id: string,
+		payment: { caller: string | null; paymentHash: string },
+	): boolean {
+		if (payment.caller !== null) {
+			return id === paymentNamedBy(payment.caller, payment.paymentHash);
+		}
 
-	private namesItsOwnHash(id: string, paymentHash: string): boolean {
-		return this.everyKeyHeld().some((key) => id === paymentId(key, paymentHash));
+		return id === paymentId(this.key, payment.paymentHash);
 	}
 
 	private provenAccepted(fact: AcceptedFact): void {
@@ -866,8 +1060,8 @@ export class Ledger {
 			fact.mac,
 		);
 
-		const payment = JSON.parse(fact.payment) as Payment;
-		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment.paymentHash)) {
+		const payment = asStored<Payment>(fact.payment);
+		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment)) {
 			throw new Error(`accepted fact ${fact.id} does not name the invoice it watches`);
 		}
 		if (payment.expiresAt !== fact.expiresAt) {
@@ -882,8 +1076,8 @@ export class Ledger {
 	private provenPaid(fact: PaidFact): PublicPayment {
 		this.verify("paid", [fact.origin, fact.seq, fact.id, fact.payment, fact.settledAt], fact.mac);
 
-		const payment = JSON.parse(fact.payment) as PublicPayment;
-		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment.paymentHash)) {
+		const payment = asStored<PublicPayment>(fact.payment);
+		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment)) {
 			throw new Error(`paid fact ${fact.id} does not name the invoice it settles`);
 		}
 		proves(payment.preimage, payment.paymentHash);
@@ -907,9 +1101,23 @@ export function paymentId(key: Uint8Array, paymentHash: string): string {
 	return createHmac("sha256", key).update("payment-id").update(paymentHash).digest("hex");
 }
 
+/**
+ * A payment as the ledger holds it. A record written before a field existed simply
+ * has no key for it, and `JSON.parse` hands that back as `undefined` however the
+ * type reads, so every field added since is normalised here rather than at each of
+ * the places that reads one
+ */
+function asStored<T extends PublicPayment>(record: string): T {
+	const payment = JSON.parse(record) as T;
+
+	return { ...payment, caller: payment.caller ?? null };
+}
+
 function macWith(key: Uint8Array, source: Source, fields: (string | number | null)[]): string {
 	const hmac = createHmac("sha256", key).update(source);
-	for (const field of fields) hmac.update("\x00").update(field === null ? "\x01" : String(field));
+	for (const field of fields) {
+		hmac.update("\x00").update(field === null ? "\x01" : String(field));
+	}
 
 	return hmac.digest("hex");
 }
@@ -935,7 +1143,9 @@ function proves(preimage: string | null, paymentHash: string): void {
 
 function groupById(rows: AcceptedRow[]): Payment[] {
 	const held = new Map<string, Payment[]>();
-	for (const row of rows) held.set(row.id, [...(held.get(row.id) ?? []), revive(row)]);
+	for (const row of rows) {
+		held.set(row.id, [...(held.get(row.id) ?? []), revive(row)]);
+	}
 
 	return [...held.values()].map(oneFromEvery);
 }
@@ -948,15 +1158,13 @@ function oneFromEvery(accepted: Payment[]): Payment {
 }
 
 function mergedWebhooks(known: Webhook[], added: Webhook[]): Webhook[] {
-	const fresh = added.filter(
-		(hook) => !known.some((have) => have.url === hook.url && have.secret === hook.secret),
-	);
+	const fresh = added.filter((hook) => !known.some((have) => have.url === hook.url));
 
 	return [...known, ...fresh];
 }
 
 function revive(row: Row): Payment {
-	return withStatus(JSON.parse(row.payment) as Payment);
+	return withStatus(asStored<Payment>(row.payment));
 }
 
 function withStatus(payment: Payment): Payment {

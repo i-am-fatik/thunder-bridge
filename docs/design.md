@@ -92,8 +92,8 @@ window a payer is actually in front of the invoice. After that, a payment an hou
 old is rechecked within six minutes, one a day old within 2.4 hours, one three
 days old within 7.2 hours.
 
-Three days is where it stops. `WATCH_HORIZON_SECS` is the whole promise this
-gateway makes, and it makes the same one for every payment: 131 polls, 60 of them
+Thirty days is where it stops. `WATCH_HORIZON_SECS` is the whole promise this
+gateway makes, and it makes the same one for every payment: 155 polls, 60 of them
 in the first five minutes. `POST /watched-payments` refuses an `expires_at`
 further off than that rather than accepting a watch it will not honour, which is
 also what stops one POST parking a row nothing will ever poll or prune.
@@ -103,14 +103,16 @@ touched stays flat no matter how many payments are pending, and a crowded
 provider cannot slow the polls aimed at a quiet one. Politeness is owed to each
 server separately, not to their sum.
 
-The rule costs two things, both admitted rather than hidden. After a day the gap
-is about 2.4 hours, so a payer who settles on day two can wait that long to be
-noticed, which is fine for an unattended paywall and not for a shop. And a wallet
-that issues a 30 day invoice leaves it payable for 27 days after this gateway has
-stopped looking, so a payer who settles then is not noticed here at all. The way
-out of both is not a gateway change but a "check now" button that reads the
-recipient's own source directly, or a shorter `expiresAt` re-registered on a
-"still waiting" click.
+The rule costs one thing, admitted rather than hidden. After a day the gap is
+about 2.4 hours, so a payer who settles on day two can wait that long to be
+noticed, which is fine for an unattended paywall and not for a shop. The way out
+is not a gateway change but a "check now" button that reads the recipient's own
+source directly, or a shorter `expiresAt` re-registered on a "still waiting"
+click.
+
+An invoice that would outlive the horizon is refused at creation rather than
+watched partway and abandoned, so there is no window where the gateway has
+stopped looking at a payment it took on.
 
 ## Many instances, no leader
 
@@ -362,14 +364,15 @@ on `http://169.254.169.254/` on hop two and hand back the cloud metadata service
 Following the chain by hand is the only way the guard sees the destination that
 is finally reached.
 
-Checking the resolved address rather than the name is one layer, not the whole
-answer: the name is resolved again by the connection, so a record that flips
-between the two is not caught here. What it does buy is that a name openly
-pointing inside is refused before a socket opens, and the https requirement means
-an attacker also needs a certificate the internal service will serve. Refusing
-when *any* address is private, rather than when all of them are, costs
-availability in one case worth knowing: a wallet whose DNS answers with a stray
-private record alongside good ones is refused entirely.
+Checking the resolved address rather than the name is one layer, and the
+transport is the other: this gateway connects to the address the guard verified
+instead of letting the name resolve a second time, so a record that flips
+between the check and the connection is caught. The check also buys that a name
+openly pointing inside is refused before a socket opens, and the https
+requirement means an attacker also needs a certificate the internal service
+will serve. Refusing when *any* address is private, rather than when all of
+them are, costs availability in one case worth knowing: a wallet whose DNS
+answers with a stray private record alongside good ones is refused entirely.
 
 Credentials do not travel across an origin, and a redirect that does not say
 where to is refused rather than retried, both because the next caller of this

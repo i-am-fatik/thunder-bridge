@@ -1,5 +1,5 @@
-import { request, type RequestOptions } from "node:https";
 import type { IncomingHttpHeaders, IncomingMessage } from "node:http";
+import { type RequestOptions, request } from "node:https";
 import { Readable } from "node:stream";
 
 import type { Send, Verified } from "../core/outbound.ts";
@@ -10,7 +10,9 @@ const CARRIES_NO_BODY = [204, 205, 304];
 export const pinnedToTheAddressWeVerified: Send = (url, sent, signal, at) => {
 	const asked = new URL(url);
 	const first = at[0];
-	if (first === undefined) throw new Error(`${url} resolved to nothing worth connecting to`);
+	if (first === undefined) {
+		throw new Error(`${url} resolved to nothing worth connecting to`);
+	}
 
 	return new Promise<Response>((settle, fail) => {
 		if (signal.aborted) {
@@ -33,7 +35,9 @@ export const pinnedToTheAddressWeVerified: Send = (url, sent, signal, at) => {
 		call.on("close", () => signal.removeEventListener("abort", give));
 		call.on("error", fail);
 
-		if (sent.body !== undefined) call.write(sent.body);
+		if (sent.body !== undefined) {
+			call.write(sent.body);
+		}
 		call.end();
 	});
 };
@@ -53,8 +57,14 @@ function reaching(
 		headers: { ...sent.headers, host: asked.host },
 		agent: false,
 		lookup: (_name, options, done) => {
-			if (options.all === true) done(null, at.map((one) => ({ ...one })));
-			else done(null, first.address, first.family);
+			if (options.all === true) {
+				done(
+					null,
+					at.map((one) => ({ ...one })),
+				);
+			} else {
+				done(null, first.address, first.family);
+			}
 		},
 	};
 }
@@ -62,8 +72,13 @@ function reaching(
 function headersOf(raw: IncomingHttpHeaders): Headers {
 	const headers = new Headers();
 	for (const [name, value] of Object.entries(raw)) {
-		if (Array.isArray(value)) for (const one of value) headers.append(name, one);
-		else if (value !== undefined) headers.set(name, value);
+		if (Array.isArray(value)) {
+			for (const one of value) {
+				headers.append(name, one);
+			}
+		} else if (value !== undefined) {
+			headers.set(name, value);
+		}
 	}
 
 	return headers;

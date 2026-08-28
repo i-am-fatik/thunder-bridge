@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:24.19-slim AS check
+FROM --platform=$BUILDPLATFORM node:26.6-slim AS check
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /app
@@ -6,17 +6,16 @@ COPY package.json package-lock.json tsconfig.json vitest.config.ts ./
 RUN npm ci
 COPY core ./core
 COPY src ./src
-COPY tools ./tools
 COPY openapi.yaml ./
 RUN npm test && npx tsc --noEmit \
-	&& rm -rf core/*.test.ts src/*.test.ts src/testing.ts vitest.config.ts tools \
+	&& rm -rf core/*.test.ts src/*.test.ts src/testing.ts vitest.config.ts \
 	&& mkdir -p /data
 RUN npm prune --omit=dev \
 	&& find node_modules -type d -name prebuilds -exec sh -c \
 	'for d in "$1"/*; do case "$(basename "$d")" in linux-*) ;; *) rm -rf "$d";; esac; done' _ {} \; \
 	&& find node_modules -name "*.bare" -delete
 
-FROM node:24.19-slim
+FROM node:26.6-slim
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /app

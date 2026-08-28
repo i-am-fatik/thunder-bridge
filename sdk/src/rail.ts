@@ -3,6 +3,7 @@ import { NoWalletAvailable } from "../../core/refusal.js";
 import { bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
+import { type NwcConnection, nwcInvoice, nwcVerifyUrl } from "./nwc.js";
 import { encodeForQr } from "./qr.js";
 import { relayedVerifyUrl } from "./relay.js";
 
@@ -75,8 +76,6 @@ export interface BankRailConfig {
 
   webhookUrl?: string;
 
-  webhookSecret?: string;
-
   /** Register on a gateway you do not own anyway, on the terms `bankTransfer` sets out */
   allowPublicGateway?: boolean;
 
@@ -105,8 +104,6 @@ export interface LightningRailConfig {
 
   webhookUrl?: string;
 
-  webhookSecret?: string;
-
   /** What `Leg.rail` reads, for a shop running more than one wallet */
   name?: string;
 }
@@ -129,8 +126,6 @@ export interface BlindLightningRailConfig {
 
   webhookUrl?: string;
 
-  webhookSecret?: string;
-
   /**
    * Where your own `lightningVerifyEndpoint` is mounted, and the secret it
    * unseals with. Set both and the gateway is handed your URL rather than the
@@ -138,6 +133,38 @@ export interface BlindLightningRailConfig {
    * which provider the recipient uses. Leave them out and it polls the wallet
    */
   relayVerifyThrough?: { endpoint: string; secret: string };
+
+  /** What `Leg.rail` reads, for a shop running more than one wallet */
+  name?: string;
+}
+
+export interface NwcRailConfig {
+  /** The gateway that watches an invoice your own wallet minted */
+  gateway: ThunderBridge;
+
+  /** Your wallet over NIP-47, from `nwcConnection`. It never reaches the gateway */
+  connection: NwcConnection;
+
+  /** What this order costs in millisatoshi */
+  amountMsat: (order: Order) => number | Promise<number>;
+
+  /**
+   * Where your own `nwcVerifyEndpoint` is mounted, and the secret it unseals
+   * with. The gateway is handed this URL rather than a wallet's, so it polls you
+   * and learns neither the connection nor which wallet is behind it
+   */
+  verifyThrough: { endpoint: string; secret: string };
+
+  /** What the payer reads on the invoice, and what your wallet files it under */
+  description?: (order: Order) => string;
+
+  /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
+  trigger?: string;
+
+  /** Only a watched leg has anywhere to carry this */
+  sealed?: (order: Order) => string | Promise<string>;
+
+  webhookUrl?: string;
 
   /** What `Leg.rail` reads, for a shop running more than one wallet */
   name?: string;
@@ -166,7 +193,6 @@ export function bankRail(config: BankRailConfig): Rail {
       sealed: await config.sealed?.(order),
       variableSymbol: config.variableSymbol?.(order),
       webhookUrl: config.webhookUrl,
-      webhookSecret: config.webhookSecret,
       allowPublicGateway: config.allowPublicGateway,
     });
 
@@ -192,7 +218,6 @@ export function lightningRail(config: LightningRailConfig): Rail {
         lnAddresses: config.lnAddresses,
         amountMsat: await config.amountMsat(order),
         webhookUrl: config.webhookUrl,
-        webhookSecret: config.webhookSecret,
       },
       { idempotencyKey: config.idempotencyKey?.(order), trigger: config.trigger },
     );
@@ -230,7 +255,6 @@ export function blindLightningRail(config: BlindLightningRailConfig): Rail {
       trigger: config.trigger,
       sealed: await config.sealed?.(order),
       webhookUrl: config.webhookUrl,
-      webhookSecret: config.webhookSecret,
     });
 
     return {
@@ -243,7 +267,52 @@ export function blindLightningRail(config: BlindLightningRailConfig): Rail {
   };
 }
 
-async function invoiceFrom(lnAddresses: string[], amountMsat: number): Promise<Resolved> {
+/**
+ * Sell for Lightning against a wallet of your own over NIP-47, for a wallet that
+ * has no LUD-21 address to be watched at. Your node mints the invoice and releases
+ * the preimage, so the proof comes from one hop nearer than any hosted address can
+ * manage, and the gateway sees a hash and a URL of yours.
+ */
+export function nwcRail(config: NwcRailConfig): Rail {
+  return async (order) => {
+    const invoice = await nwcInvoice(
+      config.connection,
+      await config.amountMsat(order),
+      config.description?.(order) ?? order.reference,
+    );
+    const watched = await config.gateway.watchPayment({
+      paymentHash: invoice.paymentHash,
+      verifyUrl: await nwcVerifyUrl(
+        config.verifyThrough.endpoint,
+        invoice.paymentHash,
+        config.verifyThrough.secret,
+      ),
+      expiresAt: invoice.expiresAt,
+      trigger: config.trigger,
+      sealed: await config.sealed?.(order),
+      webhookUrl: config.webhookUrl,
+    });
+
+    return {
+      id: watched.id,
+      rail: config.name ?? LIGHTNING,
+      scan: invoice.bolt11,
+      qr: encodeForQr(invoice.bolt11),
+      expiresAt: invoice.expiresAt,
+    };
+  };
+}
+
+/**
+ * A provable invoice from the first address on the list that will issue one, which
+ * is what a client mints for itself rather than asking a gateway to. Everything the
+ * gateway needs to watch it comes back with everything you need to prove it came
+ * from the address you asked for, so you can hand over the first and keep the second.
+ *
+ * Server side: it resolves hostnames and refuses a private one, which no browser can
+ * do. Throws `NoWalletAvailableError` when no address on the list would serve
+ */
+export async function invoiceFrom(lnAddresses: string[], amountMsat: number): Promise<Resolved> {
   try {
     return await resolve(lnAddresses, amountMsat);
   } catch (refused: unknown) {

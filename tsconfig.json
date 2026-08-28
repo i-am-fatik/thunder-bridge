@@ -15,5 +15,5 @@
 		"skipLibCheck": true,
 		"verbatimModuleSyntax": true
 	},
-	"include": ["core", "src"]
+	"include": ["core", "src", "tools"]
 }

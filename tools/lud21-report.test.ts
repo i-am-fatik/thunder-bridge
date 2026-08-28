@@ -1,12 +1,16 @@
 import { expect, test } from "vitest";
 
-import { whatMoved, type Survey } from "./lud21-report.ts";
+import { type Survey, whatMoved } from "./lud21-report.ts";
 
 function surveyed(verdicts: Record<string, string>, surveyedAt = "2026-08-12"): Survey {
 	const domains = Object.fromEntries(
 		Object.entries(verdicts).map(([domain, verdict]) => [
 			domain,
-			{ verdict, denylisted: ["zeuspay.com", "zeusnuts.com", "ecash.love"].includes(domain), measured: [] },
+			{
+				verdict,
+				denylisted: ["zeuspay.com", "zeusnuts.com", "ecash.love"].includes(domain),
+				measured: [],
+			},
 		]),
 	);
 	return { surveyedAt, addresses: Object.keys(domains).length, domains };

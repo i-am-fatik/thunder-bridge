@@ -1,7 +1,6 @@
 import { expect, test, vi } from "vitest";
-
-import { cannotReleaseAPreimage, quote, resolve, toLnurl } from "./lnurl.ts";
 import { NoWalletAvailable, statusForWallets } from "../src/problem.ts";
+import { cannotReleaseAPreimage, quote, resolve, toLnurl } from "./lnurl.ts";
 
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
 
@@ -22,7 +21,9 @@ async function refusedBy(addresses: string[], amountMsat = 21_000): Promise<NoWa
 	try {
 		await resolve(addresses, amountMsat);
 	} catch (no: unknown) {
-		if (no instanceof NoWalletAvailable) return no;
+		if (no instanceof NoWalletAvailable) {
+			return no;
+		}
 		throw no;
 	}
 	throw new Error(`${addresses.join(", ")} resolved when it should have refused`);
@@ -107,9 +108,7 @@ function answering(routes: Record<string, unknown>, seen: string[] = []): () => 
 	globalThis.fetch = ((target: string | URL | Request) => {
 		seen.push(String(target));
 		const body = routes[String(target)];
-		return Promise.resolve(
-			body ? Response.json(body) : new Response("no route", { status: 404 }),
-		);
+		return Promise.resolve(body ? Response.json(body) : new Response("no route", { status: 404 }));
 	}) as typeof fetch;
 	return () => {
 		globalThis.fetch = real;
@@ -186,7 +185,10 @@ test("an amount the wallet will not take is its own reason", async () => {
 
 test("a quote reports the wallet's range and never asks it for an invoice", async () => {
 	const seen: string[] = [];
-	const restore = answering({ ...servedBy(), [`${CALLBACK}?amount=21000`]: { pr: ISSUED_INVOICE } }, seen);
+	const restore = answering(
+		{ ...servedBy(), [`${CALLBACK}?amount=21000`]: { pr: ISSUED_INVOICE } },
+		seen,
+	);
 	try {
 		const served = await quote(["charter@coinos.io"], 21_000);
 
@@ -233,7 +235,9 @@ test("a quote for an amount nobody takes refuses exactly as a create does", asyn
 		await quote(["charter@coinos.io"], 21_000);
 		throw new Error("the quote was served when it should have refused");
 	} catch (no: unknown) {
-		if (!(no instanceof NoWalletAvailable)) throw no;
+		if (!(no instanceof NoWalletAvailable)) {
+			throw no;
+		}
 		expect(no.wallets).toEqual([{ address: "charter@coinos.io", reason: "amount-not-accepted" }]);
 	} finally {
 		restore();
@@ -263,7 +267,8 @@ test("an invoice that does not match the metadata is refused, not minted", async
 });
 
 test("an endpoint bech32-encodes to the LNURL string LUD-01 spells out", () => {
-	const url = "https://service.com/api?q=3fc3645b439ce8e7f2553a69e5267081d96dcd340693afabe04be7b0ccd178df";
+	const url =
+		"https://service.com/api?q=3fc3645b439ce8e7f2553a69e5267081d96dcd340693afabe04be7b0ccd178df";
 
 	expect(toLnurl(url)).toBe(
 		"LNURL1DP68GURN8GHJ7UM9WFMXJCM99E3K7MF0V9CXJ0M385EKVCENXC6R2C35XVUKXEFCV5MKVV34X5EKZD3EV56NYD3HXQURZEPEXEJXXEPNXSCRVWFNV9NXZCN9XQ6XYEFHVGCXXCMYXYMNSERXFQ5FNS",

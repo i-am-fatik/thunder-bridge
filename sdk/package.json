@@ -1,6 +1,6 @@
 {
   "name": "thunder-bridge",
-  "version": "0.8.10",
+  "version": "1.2.0",
   "description": "Trustless JavaScript client for the Thunder Bridge Lightning payment gateway. Proves the invoice came from your own wallet before the payer sees it.",
   "author": "i-am-fatik",
   "homepage": "https://agora.gripe/en/tools/thunder-bridge",
@@ -17,17 +17,31 @@
   "types": "./dist/index.d.ts",
   "typesVersions": {
     "*": {
-      "server": ["./dist/server.d.ts"]
+      "server": [
+        "./dist/server.d.ts"
+      ]
     }
   },
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./server": {
-      "import": { "types": "./dist/server.d.ts", "default": "./dist/server.js" },
-      "require": { "types": "./dist/server.d.cts", "default": "./dist/server.cjs" }
+      "import": {
+        "types": "./dist/server.d.ts",
+        "default": "./dist/server.js"
+      },
+      "require": {
+        "types": "./dist/server.d.cts",
+        "default": "./dist/server.cjs"
+      }
     }
   },
   "files": [
@@ -42,12 +56,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
-    "format": "biome format --write src test",
+    "format": "biome check --write src test",
     "check:pkg": "npx --yes publint && npx --yes @arethetypeswrong/cli --pack .",
     "prepublishOnly": "npm run build && npx --yes publint"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
+    "@biomejs/biome": "^2.5.8",
     "@types/node": "^24.13.3",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0",
@@ -64,6 +78,9 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@noble/ciphers": "2.3.0",
+    "@noble/curves": "2.3.0",
+    "@noble/hashes": "2.3.0",
     "uqr": "^0.1.2"
   }
 }

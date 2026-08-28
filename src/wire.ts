@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-
-import { publicHttps } from "../core/url.ts";
 import type { Quote } from "../core/lnurl.ts";
+import { publicHttps } from "../core/url.ts";
+import type { Kept } from "./ledger.ts";
 import type { PublicPayment, Status, Webhook } from "./payment.ts";
 import { MalformedRequest, type WalletFailure } from "./problem.ts";
 
@@ -11,7 +11,6 @@ const MAX_ADDRESSES = 16;
 const MAX_PER_DOMAIN = 3;
 const MAX_ADDRESS_CHARS = 320;
 const MAX_SEALED_CHARS = 4096;
-const MAX_SECRET_CHARS = 256;
 
 export type Amount = { value: string; asset_code: string; asset_scale: number };
 
@@ -28,6 +27,22 @@ export type IncomingPayment = {
 	expires_at: string;
 	created_at: string;
 	sealed?: string;
+};
+
+export type Delivered = {
+	id: string;
+	status: Status;
+	payment_hash: string;
+	preimage: string | null;
+	settled_at: string;
+};
+
+export type KeptRecord = {
+	id: string;
+	kind: "kept";
+	status: "paid" | "expired";
+	settled_at?: string;
+	sealed: string;
 };
 
 export type WatchRequest = {
@@ -79,6 +94,36 @@ export function paymentToWire(payment: PublicPayment): IncomingPayment {
 		expires_at: toTimestamp(payment.expiresAt),
 		created_at: toTimestamp(payment.createdAt),
 		...(payment.sealed === null ? {} : { sealed: payment.sealed }),
+	};
+}
+
+/**
+ * What a delivery says. Enough to act on and to check without asking anybody: the
+ * name, how it ended, and the preimage against the hash it has to match. Not the
+ * verify url the client already knows, and not the client's own sealed record,
+ * which would make the size of a retry depend on what the client put in it
+ */
+export function deliveryToWire(payment: PublicPayment, settledAt: number): Delivered {
+	return {
+		id: payment.id,
+		status: payment.status,
+		payment_hash: payment.paymentHash,
+		preimage: payment.preimage,
+		settled_at: toTimestamp(settledAt),
+	};
+}
+
+/**
+ * What is left once the gateway has forgotten the payment: the client's own
+ * ciphertext and how it ended. No hash, no url, no invoice, because it kept none
+ */
+export function keptToWire(kept: Kept): KeptRecord {
+	return {
+		id: kept.id,
+		kind: "kept",
+		status: kept.status,
+		...(kept.settledAt === null ? {} : { settled_at: toTimestamp(kept.settledAt) }),
+		sealed: kept.sealed,
 	};
 }
 
@@ -200,10 +245,14 @@ function domainAskedTooOften(addresses: string[]): string | null {
 	const asked = new Map<string, number>();
 	for (const address of addresses) {
 		const at = address.lastIndexOf("@");
-		if (at < 0) continue;
+		if (at < 0) {
+			continue;
+		}
 		const domain = address.slice(at + 1).toLowerCase();
 		const seen = (asked.get(domain) ?? 0) + 1;
-		if (seen > MAX_PER_DOMAIN) return domain;
+		if (seen > MAX_PER_DOMAIN) {
+			return domain;
+		}
 		asked.set(domain, seen);
 	}
 
@@ -249,7 +298,9 @@ function readExpiry(value: unknown): number {
 }
 
 function readSealed(value: unknown): string | null {
-	if (value === undefined || value === null) return null;
+	if (value === undefined || value === null) {
+		return null;
+	}
 	if (typeof value !== "string" || value.length > MAX_SEALED_CHARS) {
 		throw new MalformedRequest(`sealed must be a string of at most ${MAX_SEALED_CHARS} characters`);
 	}
@@ -257,7 +308,9 @@ function readSealed(value: unknown): string | null {
 }
 
 function readTrigger(value: unknown): string | null {
-	if (value === undefined || value === null) return null;
+	if (value === undefined || value === null) {
+		return null;
+	}
 	if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
 		throw new MalformedRequest("trigger must be the hex sha256 of the secret you will watch with");
 	}
@@ -265,7 +318,9 @@ function readTrigger(value: unknown): string | null {
 }
 
 function readWebhook(value: unknown): Webhook | null {
-	if (value === undefined || value === null) return null;
+	if (value === undefined || value === null) {
+		return null;
+	}
 
 	const hook = asObject(value, "webhook must be an object");
 	const url = hook["url"];
@@ -273,11 +328,11 @@ function readWebhook(value: unknown): Webhook | null {
 		throw new MalformedRequest("webhook.url must be a public https URL");
 	}
 
-	const secret = hook["secret"];
-	if (secret !== undefined && (typeof secret !== "string" || secret.length > MAX_SECRET_CHARS)) {
+	if (hook["secret"] !== undefined) {
 		throw new MalformedRequest(
-			`webhook.secret must be a string of at most ${MAX_SECRET_CHARS} characters`,
+			"webhook.secret is gone, a delivery is signed with the key this gateway publishes at /webhook-key",
 		);
 	}
-	return { url, secret: secret ?? null };
+
+	return { url };
 }

@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import type { Payment } from "./payment.ts";
 import { MalformedRequest } from "./problem.ts";
-import { readCreateRequest, paymentToWire } from "./wire.ts";
+import { paymentToWire, readCreateRequest } from "./wire.ts";
 
 function payment(): Payment {
 	return {
@@ -18,7 +18,8 @@ function payment(): Payment {
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
 		sealed: null,
-		webhooks: [{ url: "https://example.com/hook", secret: "hunter2" }],
+		caller: null,
+		webhooks: [{ url: "https://example.com/hook" }],
 	};
 }
 
@@ -34,7 +35,9 @@ function refusal(body: unknown): string {
 	try {
 		readCreateRequest(body);
 	} catch (error: unknown) {
-		if (error instanceof MalformedRequest) return error.message;
+		if (error instanceof MalformedRequest) {
+			return error.message;
+		}
 		throw error;
 	}
 	throw new Error("the request was accepted");
@@ -93,11 +96,8 @@ test("an amount past the safe integer range is refused rather than rounded", () 
 });
 
 test("a webhook arrives nested, and a private url never does", () => {
-	const nested = asked({ webhook: { url: "https://example.com/hook", secret: "hunter2" } });
-	expect(readCreateRequest(nested).webhook).toEqual({
-		url: "https://example.com/hook",
-		secret: "hunter2",
-	});
+	const nested = asked({ webhook: { url: "https://example.com/hook" } });
+	expect(readCreateRequest(nested).webhook).toEqual({ url: "https://example.com/hook" });
 
 	expect(readCreateRequest(asked()).webhook).toBeNull();
 	expect(refusal(asked({ webhook: { url: "http://169.254.169.254/latest" } }))).toContain(
@@ -114,9 +114,12 @@ test("an empty or oversized address list is refused", () => {
 test("every field that is kept has a length, so nothing unbounded is stored or signed", () => {
 	const long = "a".repeat(400);
 	expect(refusal(asked({ ln_addresses: [`${long}@coinos.io`] }))).toContain("320 characters");
+});
+
+test("a webhook secret is refused rather than ignored, so nobody thinks it is holding one", () => {
 	expect(
-		refusal(asked({ webhook: { url: "https://example.com/hook", secret: long } })),
-	).toContain("256 characters");
+		refusal(asked({ webhook: { url: "https://example.com/hook", secret: "hunter2" } })),
+	).toContain("webhook.secret is gone");
 });
 
 test("a list may not stack one domain, because that is a fan-out at somebody's server", () => {

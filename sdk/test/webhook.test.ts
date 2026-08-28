@@ -1,6 +1,6 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { signingKeyFromSeed } from "../../core/ed25519.js";
+import { type SigningKey, signingKeyFromSeed } from "../../core/ed25519.js";
 import type { Payment } from "../src/types";
 import {
   answerWebhookChallenge,
@@ -8,12 +8,16 @@ import {
   parseWatchedWebhook,
   parseWatchedWebhookRequest,
   parseWebhook,
+  parseSettlement,
+  parseSettlementRequest,
   parseWebhookRequest,
+  isProvablySettled,
   verifyWebhookSignature,
+  type WebhookCredential,
 } from "../src/webhook";
 
-const SECRET = "whsec_bd41a4f0c8e94d0fa1b7";
-const OTHER_SECRET = "whsec_0000000000000000ffff";
+const KEY = signingKeyFromSeed(new Uint8Array(32).fill(9));
+const OTHER = signingKeyFromSeed(new Uint8Array(32).fill(1));
 
 const PAYMENT: Payment = {
   id: "pay_7f3c9d21",
@@ -45,61 +49,54 @@ function now(): string {
   return String(Math.floor(Date.now() / 1000));
 }
 
-function hmacHex(body: string, secret: string, timestamp: string): string {
-  return createHmac("sha256", secret).update(`${timestamp}.${body}`, "utf8").digest("hex");
+async function signedBy(
+  body: string,
+  timestamp: string,
+  key: Promise<SigningKey> = KEY,
+): Promise<string> {
+  const signing = await key;
+
+  return `ed25519=${await signing.sign(new TextEncoder().encode(`${timestamp}.${body}`))}`;
 }
 
-function header(body: string, secret: string, timestamp: string): string {
-  return `sha256=${hmacHex(body, secret, timestamp)}`;
+async function published(key: Promise<SigningKey> = KEY): Promise<WebhookCredential> {
+  return { publicKey: (await key).publicKeyHex };
 }
 
 describe("verifyWebhookSignature", () => {
-  it("accepts the signature the gateway sends, carrying its sha256= prefix", async () => {
+  it("accepts the signature the gateway sends, carrying its ed25519= prefix", async () => {
     const stamp = now();
     await expect(
-      verifyWebhookSignature(BODY, header(BODY, SECRET, stamp), SECRET, stamp),
+      verifyWebhookSignature(BODY, await signedBy(BODY, stamp), await published(), stamp),
     ).resolves.toBe(true);
-  });
-
-  it("accepts the same signature with the sha256= prefix stripped off", async () => {
-    const stamp = now();
-    await expect(
-      verifyWebhookSignature(BODY, hmacHex(BODY, SECRET, stamp), SECRET, stamp),
-    ).resolves.toBe(true);
-  });
-
-  it("accepts a signature whose hex digits arrived uppercased", async () => {
-    const stamp = now();
-    const upper = `sha256=${hmacHex(BODY, SECRET, stamp).toUpperCase()}`;
-    await expect(verifyWebhookSignature(BODY, upper, SECRET, stamp)).resolves.toBe(true);
   });
 
   it("rejects a body tampered with by a single byte", async () => {
     const stamp = now();
     const tampered = BODY.replace('"value":"21000000"', '"value":"21000001"');
     await expect(
-      verifyWebhookSignature(tampered, header(BODY, SECRET, stamp), SECRET, stamp),
+      verifyWebhookSignature(tampered, await signedBy(BODY, stamp), await published(), stamp),
     ).resolves.toBe(false);
   });
 
-  it("rejects a signature computed under a different secret", async () => {
+  it("rejects a signature made under a different key", async () => {
     const stamp = now();
     await expect(
-      verifyWebhookSignature(BODY, header(BODY, OTHER_SECRET, stamp), SECRET, stamp),
+      verifyWebhookSignature(BODY, await signedBy(BODY, stamp, OTHER), await published(), stamp),
     ).resolves.toBe(false);
   });
 
   it("rejects a replay of a body and signature captured long enough ago", async () => {
     const stale = String(Math.floor(Date.now() / 1000) - 3600);
     await expect(
-      verifyWebhookSignature(BODY, header(BODY, SECRET, stale), SECRET, stale),
+      verifyWebhookSignature(BODY, await signedBy(BODY, stale), await published(), stale),
     ).resolves.toBe(false);
   });
 
   it("accepts that same old delivery when the caller widens the tolerance", async () => {
     const stale = String(Math.floor(Date.now() / 1000) - 3600);
     await expect(
-      verifyWebhookSignature(BODY, header(BODY, SECRET, stale), SECRET, stale, {
+      verifyWebhookSignature(BODY, await signedBy(BODY, stale), await published(), stale, {
         toleranceSecs: 7200,
       }),
     ).resolves.toBe(true);
@@ -109,44 +106,32 @@ describe("verifyWebhookSignature", () => {
     const stamp = now();
     const moved = String(Number(stamp) - 60);
     await expect(
-      verifyWebhookSignature(BODY, header(BODY, SECRET, stamp), SECRET, moved),
+      verifyWebhookSignature(BODY, await signedBy(BODY, stamp), await published(), moved),
     ).resolves.toBe(false);
   });
 
   it("rejects a timestamp that is not a number at all", async () => {
     const stamp = now();
     await expect(
-      verifyWebhookSignature(BODY, header(BODY, SECRET, stamp), SECRET, "yesterday"),
+      verifyWebhookSignature(BODY, await signedBy(BODY, stamp), await published(), "yesterday"),
     ).resolves.toBe(false);
-  });
-
-  it("returns false instead of throwing when the signature is truncated", async () => {
-    const stamp = now();
-    const cut = `sha256=${hmacHex(BODY, SECRET, stamp).slice(0, 40)}`;
-    await expect(verifyWebhookSignature(BODY, cut, SECRET, stamp)).resolves.toBe(false);
-  });
-
-  it("returns false instead of throwing when the signature is longer than a sha256 digest", async () => {
-    const stamp = now();
-    const long = `sha256=${hmacHex(BODY, SECRET, stamp)}deadbeef`;
-    await expect(verifyWebhookSignature(BODY, long, SECRET, stamp)).resolves.toBe(false);
   });
 
   it("verifies a Uint8Array body exactly as it verifies the same bytes as a string", async () => {
     const stamp = now();
-    const signature = header(BODY, SECRET, stamp);
+    const signature = await signedBy(BODY, stamp);
     const bytes = new TextEncoder().encode(BODY);
-    await expect(verifyWebhookSignature(bytes, signature, SECRET, stamp)).resolves.toBe(true);
-    await expect(verifyWebhookSignature(bytes, signature, OTHER_SECRET, stamp)).resolves.toBe(
-      false,
-    );
+    await expect(verifyWebhookSignature(bytes, signature, await published(), stamp)).resolves.toBe(true);
+    await expect(
+      verifyWebhookSignature(bytes, signature, await published(OTHER), stamp),
+    ).resolves.toBe(false);
   });
 });
 
 describe("parseWebhook", () => {
   it("returns the parsed payment when the signature holds", async () => {
     const stamp = now();
-    await expect(parseWebhook(BODY, header(BODY, SECRET, stamp), SECRET, stamp)).resolves.toEqual(
+    await expect(parseWebhook(BODY, await signedBy(BODY, stamp), await published(), stamp)).resolves.toEqual(
       PAYMENT,
     );
   });
@@ -154,7 +139,7 @@ describe("parseWebhook", () => {
   it("returns null and never parses the body when the signature does not hold", async () => {
     const stamp = now();
     await expect(
-      parseWebhook(BODY, header(BODY, OTHER_SECRET, stamp), SECRET, stamp),
+      parseWebhook(BODY, await signedBy(BODY, stamp, OTHER), await published(), stamp),
     ).resolves.toBeNull();
   });
 });
@@ -166,12 +151,12 @@ describe("parseWebhookRequest", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-signature": header(BODY, SECRET, stamp),
+        "x-signature": await signedBy(BODY, stamp),
         "x-timestamp": stamp,
       },
       body: BODY,
     });
-    await expect(parseWebhookRequest(request, SECRET)).resolves.toEqual(PAYMENT);
+    await expect(parseWebhookRequest(request, await published())).resolves.toEqual(PAYMENT);
   });
 
   it("returns null when the request carries no x-signature header at all", async () => {
@@ -180,7 +165,7 @@ describe("parseWebhookRequest", () => {
       headers: { "content-type": "application/json", "x-timestamp": now() },
       body: BODY,
     });
-    await expect(parseWebhookRequest(request, SECRET)).resolves.toBeNull();
+    await expect(parseWebhookRequest(request, await published())).resolves.toBeNull();
   });
 
   it("returns null when the request carries no x-timestamp header at all", async () => {
@@ -189,11 +174,11 @@ describe("parseWebhookRequest", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-signature": header(BODY, SECRET, stamp),
+        "x-signature": await signedBy(BODY, stamp),
       },
       body: BODY,
     });
-    await expect(parseWebhookRequest(request, SECRET)).resolves.toBeNull();
+    await expect(parseWebhookRequest(request, await published())).resolves.toBeNull();
   });
 });
 
@@ -212,7 +197,7 @@ describe("a bank transfer's webhook, which names no address, amount or invoice",
     const stamped = now();
 
     await expect(
-      parseWebhook(WATCHED, header(WATCHED, SECRET, stamped), SECRET, stamped),
+      parseWebhook(WATCHED, await signedBy(WATCHED, stamped), await published(), stamped),
     ).resolves.toBeNull();
   });
 
@@ -221,8 +206,8 @@ describe("a bank transfer's webhook, which names no address, amount or invoice",
 
     const event = await parseWatchedWebhook(
       WATCHED,
-      header(WATCHED, SECRET, stamped),
-      SECRET,
+      await signedBy(WATCHED, stamped),
+      await published(),
       stamped,
     );
 
@@ -238,7 +223,7 @@ describe("a bank transfer's webhook, which names no address, amount or invoice",
     const stamped = now();
 
     await expect(
-      parseWatchedWebhook(WATCHED, header(WATCHED, OTHER_SECRET, stamped), SECRET, stamped),
+      parseWatchedWebhook(WATCHED, await signedBy(WATCHED, stamped, OTHER), await published(), stamped),
     ).resolves.toBeNull();
   });
 
@@ -248,11 +233,11 @@ describe("a bank transfer's webhook, which names no address, amount or invoice",
 
     const inferred = await parseWatchedWebhook(
       WATCHED,
-      header(WATCHED, SECRET, stamped),
-      SECRET,
+      await signedBy(WATCHED, stamped),
+      await published(),
       stamped,
     );
-    const told = await parseWatchedWebhook(said, header(said, SECRET, stamped), SECRET, stamped);
+    const told = await parseWatchedWebhook(said, await signedBy(said, stamped), await published(), stamped);
 
     expect(inferred?.kind).toBe("watched");
     expect(told?.kind).toBe("watched");
@@ -263,14 +248,14 @@ describe("a bank transfer's webhook, which names no address, amount or invoice",
     const request = new Request("https://shop.example.org/hooks/bank", {
       method: "POST",
       headers: {
-        "x-signature": header(WATCHED, SECRET, stamped),
+        "x-signature": await signedBy(WATCHED, stamped),
         "x-timestamp": stamped,
         "content-type": "application/json",
       },
       body: WATCHED,
     });
 
-    await expect(parseWatchedWebhookRequest(request, SECRET)).resolves.toMatchObject({
+    await expect(parseWatchedWebhookRequest(request, await published())).resolves.toMatchObject({
       status: "paid",
     });
   });
@@ -282,7 +267,7 @@ describe("a correctly signed body that is not a payment", () => {
     const body = "<html>gateway error</html>";
 
     await expect(
-      parseWebhook(body, header(body, SECRET, stamp), SECRET, stamp),
+      parseWebhook(body, await signedBy(body, stamp), await published(), stamp),
     ).resolves.toBeNull();
   });
 });
@@ -343,15 +328,16 @@ describe("a delivery the gateway signed with its own key", () => {
     ).resolves.toBe(false);
   });
 
-  it("never lets one scheme be checked with the other's credential", async () => {
+  it("refuses the shared secret scheme that used to be accepted here", async () => {
     const stamp = now();
+    const hmac = createHmac("sha256", "whsec_bd41a4f0c8e94d0fa1b7")
+      .update(`${stamp}.${BODY}`, "utf8")
+      .digest("hex");
 
     await expect(
-      verifyWebhookSignature(BODY, header(BODY, SECRET, stamp), await published(), stamp),
+      verifyWebhookSignature(BODY, `sha256=${hmac}`, await published(), stamp),
     ).resolves.toBe(false);
-    await expect(
-      verifyWebhookSignature(BODY, await signedByGateway(BODY, stamp), SECRET, stamp),
-    ).resolves.toBe(false);
+    await expect(verifyWebhookSignature(BODY, hmac, await published(), stamp)).resolves.toBe(false);
   });
 });
 
@@ -359,22 +345,7 @@ describe("answerWebhookChallenge", () => {
   const NONCE = "a".repeat(64);
   const CHALLENGE_BODY = JSON.stringify({ type: "webhook-challenge", nonce: NONCE });
 
-  it("echoes the nonce and signs it with the registered secret", async () => {
-    const stamp = now();
-    const answer = await answerWebhookChallenge(
-      CHALLENGE_BODY,
-      header(CHALLENGE_BODY, SECRET, stamp),
-      SECRET,
-      stamp,
-    );
-
-    expect(JSON.parse(String(answer))).toEqual({
-      nonce: NONCE,
-      signature: `sha256=${createHmac("sha256", SECRET).update(NONCE, "utf8").digest("hex")}`,
-    });
-  });
-
-  it("echoes the nonce alone when the gateway holds no secret of yours", async () => {
+  it("echoes the nonce alone, because the gateway holds nothing of yours to sign with", async () => {
     const stamp = now();
     const key = await signingKeyFromSeed(new Uint8Array(32).fill(9));
     const signed = `ed25519=${await key.sign(new TextEncoder().encode(`${stamp}.${CHALLENGE_BODY}`))}`;
@@ -391,14 +362,14 @@ describe("answerWebhookChallenge", () => {
     expect(JSON.parse(String(answer))).toEqual({ nonce: NONCE });
   });
 
-  it("answers nothing to a challenge the secret does not sign", async () => {
+  it("answers nothing to a challenge another key signed", async () => {
     const stamp = now();
 
     await expect(
       answerWebhookChallenge(
         CHALLENGE_BODY,
-        header(CHALLENGE_BODY, OTHER_SECRET, stamp),
-        SECRET,
+        await signedBy(CHALLENGE_BODY, stamp, OTHER),
+        await published(),
         stamp,
       ),
     ).resolves.toBeNull();
@@ -408,25 +379,105 @@ describe("answerWebhookChallenge", () => {
     const stamp = now();
     const request = new Request("https://shop.example/hooks/paid", {
       method: "POST",
-      headers: { "x-signature": header(BODY, SECRET, stamp), "x-timestamp": stamp },
+      headers: { "x-signature": await signedBy(BODY, stamp), "x-timestamp": stamp },
       body: BODY,
     });
 
-    expect(await answerWebhookChallengeRequest(request, SECRET)).toBeNull();
-    expect((await parseWebhookRequest(request, SECRET))?.id).toBe(PAYMENT.id);
+    expect(await answerWebhookChallengeRequest(request, await published())).toBeNull();
+    expect((await parseWebhookRequest(request, await published()))?.id).toBe(PAYMENT.id);
   });
 
   it("answers a challenge that arrives as a Request with a JSON body", async () => {
     const stamp = now();
     const request = new Request("https://shop.example/hooks/paid", {
       method: "POST",
-      headers: { "x-signature": header(CHALLENGE_BODY, SECRET, stamp), "x-timestamp": stamp },
+      headers: { "x-signature": await signedBy(CHALLENGE_BODY, stamp), "x-timestamp": stamp },
       body: CHALLENGE_BODY,
     });
 
-    const answer = await answerWebhookChallengeRequest(request, SECRET);
+    const answer = await answerWebhookChallengeRequest(request, await published());
 
     expect(answer?.headers.get("content-type")).toBe("application/json");
     expect(((await answer?.json()) as { nonce: string }).nonce).toBe(NONCE);
+  });
+});
+
+describe("a delivery in the shape the gateway sends now", () => {
+  const REAL_PREIMAGE = "4d".repeat(32);
+  const REAL_HASH = createHash("sha256").update(Buffer.from(REAL_PREIMAGE, "hex")).digest("hex");
+  const SETTLED = JSON.stringify({
+    id: "9500f6c684d69021968e8d3f98536812ff3e7505c3928154f7663068c8396a11",
+    status: "paid",
+    payment_hash: REAL_HASH,
+    preimage: REAL_PREIMAGE,
+    settled_at: "2026-08-13T09:41:00.000Z",
+  });
+
+  it("parses, and carries nothing it does not need", async () => {
+    const stamp = now();
+
+    const settled = await parseSettlement(SETTLED, await signedBy(SETTLED, stamp), await published(), stamp);
+
+    expect(settled?.id).toBe("9500f6c684d69021968e8d3f98536812ff3e7505c3928154f7663068c8396a11");
+    expect(settled?.status).toBe("paid");
+    expect(settled?.preimage).toBe(REAL_PREIMAGE);
+    expect(settled?.settledAt).toBe(Math.floor(Date.parse("2026-08-13T09:41:00.000Z") / 1000));
+    expect(SETTLED).not.toContain("verify_url");
+    expect(SETTLED).not.toContain("sealed");
+  });
+
+  it("proves itself, because the preimage is checked against the hash it names", async () => {
+    const stamp = now();
+    const settled = await parseSettlement(SETTLED, await signedBy(SETTLED, stamp), await published(), stamp);
+
+    expect(settled && isProvablySettled(settled)).toBe(true);
+  });
+
+  it("does not prove itself when the preimage hashes to something else", async () => {
+    const stamp = now();
+    const lying = JSON.stringify({ ...JSON.parse(SETTLED), preimage: "ff".repeat(32) });
+
+    const settled = await parseSettlement(lying, await signedBy(lying, stamp), await published(), stamp);
+
+    expect(settled && isProvablySettled(settled)).toBe(false);
+  });
+
+  it("refuses a delivery missing any part of what would be acted on", async () => {
+    const stamp = now();
+
+    for (const missing of ["id", "payment_hash", "settled_at", "status"]) {
+      const partial = JSON.parse(SETTLED) as Record<string, unknown>;
+      delete partial[missing];
+      const body = JSON.stringify(partial);
+
+      await expect(
+        parseSettlement(body, await signedBy(body, stamp), await published(), stamp),
+      ).resolves.toBeNull();
+    }
+  });
+
+  it("is null when nobody the receiver trusts signed it", async () => {
+    const stamp = now();
+
+    await expect(
+      parseSettlement(SETTLED, await signedBy(SETTLED, stamp, OTHER), await published(), stamp),
+    ).resolves.toBeNull();
+  });
+
+  it("reads the same delivery off a Request", async () => {
+    const stamp = now();
+    const request = new Request("https://shop.example/hooks/paid", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-signature": await signedBy(SETTLED, stamp),
+        "x-timestamp": stamp,
+      },
+      body: SETTLED,
+    });
+
+    await expect(parseSettlementRequest(request, await published())).resolves.toMatchObject({
+      status: "paid",
+    });
   });
 });

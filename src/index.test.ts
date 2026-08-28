@@ -4,7 +4,8 @@ import { connect } from "node:net";
 
 import { expect, test, vi } from "vitest";
 
-import { start, type Service } from "./index.ts";
+import { callerKey, paymentNamedBy, signedAs } from "../core/caller.ts";
+import { type Options, type Service, start } from "./index.ts";
 import { paymentId } from "./ledger.ts";
 import type { UnsavedPayment } from "./payment.ts";
 import {
@@ -13,6 +14,7 @@ import {
 	KEY_REUSED,
 	NO_WALLET_AVAILABLE,
 	REQUEST_IN_FLIGHT,
+	TOO_MANY_PENDING,
 	VERIFY_HOST_REFUSED,
 	VERIFY_UNCONFIRMED,
 	VERIFY_UNCONSENTED,
@@ -20,7 +22,7 @@ import {
 } from "./problem.ts";
 import type { Store } from "./store.ts";
 import { CLUSTER_KEY, openStore, until } from "./testing.ts";
-import { sign, VERIFY_CHALLENGE } from "./watch.ts";
+import { VERIFY_CHALLENGE } from "./watch.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
 
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
@@ -45,8 +47,11 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			workPerTick: 50,
 			verifyHosts: null,
 			verifyChallenge: true,
+			clientKeys: null,
+			mints: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs,
+			keepSealedSecs: 90 * 86_400,
 			token,
 			key: CLUSTER_KEY,
 		},
@@ -73,8 +78,11 @@ async function runningWithoutTheVerifyChallenge(): Promise<App> {
 			workPerTick: 50,
 			verifyHosts: null,
 			verifyChallenge: false,
+			clientKeys: null,
+			mints: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
+			keepSealedSecs: 90 * 86_400,
 			token: null,
 			key: CLUSTER_KEY,
 		},
@@ -104,7 +112,8 @@ function pendingPayment(overrides: Partial<UnsavedPayment> = {}): UnsavedPayment
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
 		sealed: null,
-		webhooks: [{ url: "https://example.com/hook", secret: "hunter2" }],
+		caller: null,
+		webhooks: [{ url: "https://example.com/hook" }],
 		...overrides,
 	};
 }
@@ -234,10 +243,14 @@ function walletServing(seen: string[]): () => void {
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
-		if (target.includes("127.0.0.1")) return real(...args);
+		if (target.includes("127.0.0.1")) {
+			return real(...args);
+		}
 
 		seen.push(target);
-		if (target !== WELL_KNOWN) return Promise.resolve(new Response("no route", { status: 404 }));
+		if (target !== WELL_KNOWN) {
+			return Promise.resolve(new Response("no route", { status: 404 }));
+		}
 
 		return Promise.resolve(
 			Response.json({
@@ -255,25 +268,21 @@ function walletServing(seen: string[]): () => void {
 	};
 }
 
-function hookAnswering(secret: string | null, nonceShift = ""): () => void {
+function hookAnswering(nonceShift = ""): () => void {
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
-		if (target.includes("127.0.0.1")) return real(...args);
+		if (target.includes("127.0.0.1")) {
+			return real(...args);
+		}
 
 		const asked = JSON.parse(String(args[1]?.body ?? "{}")) as { nonce?: string };
-		return answerChallenge(`${asked.nonce ?? ""}${nonceShift}`, secret);
+		return Response.json({ nonce: `${asked.nonce ?? ""}${nonceShift}` });
 	}) as typeof fetch;
 
 	return () => {
 		globalThis.fetch = real;
 	};
-}
-
-async function answerChallenge(nonce: string, secret: string | null): Promise<Response> {
-	if (!secret) return Response.json({ nonce });
-
-	return Response.json({ nonce, signature: `sha256=${await sign(secret, nonce)}` });
 }
 
 function postQuote(app: App, body: unknown): Promise<Response> {
@@ -456,7 +465,9 @@ test("a limit outside what the list will serve is refused rather than silently c
 
 function postTicket(app: App, body: unknown, token?: string): Promise<Response> {
 	const headers: Record<string, string> = { "content-type": "application/json" };
-	if (token) headers["authorization"] = `Bearer ${token}`;
+	if (token) {
+		headers["authorization"] = `Bearer ${token}`;
+	}
 
 	return fetch(`http://127.0.0.1:${app.service.port}/ws-tickets`, {
 		method: "POST",
@@ -557,7 +568,9 @@ function handshake(app: App, path: string, token?: string): Promise<number> {
 		"sec-websocket-version": "13",
 		"sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
 	};
-	if (token) headers["authorization"] = `Bearer ${token}`;
+	if (token) {
+		headers["authorization"] = `Bearer ${token}`;
+	}
 
 	return new Promise((answered) => {
 		const asked = httpRequest({ host: "127.0.0.1", port: app.service.port, path, headers });
@@ -656,6 +669,8 @@ test("a ticket minted on one instance opens a socket on another sharing the clus
 	opening.stop();
 });
 
+const OWNER = "rail_owner_2f0c8a4e7b1d9c05e3a71486";
+const STRANGER = "rail_stranger_9a8b7c6d5e4f3a2b1c0d";
 const WATCHED_HASH = "cc".repeat(32);
 const WATCHABLE = {
 	payment_hash: WATCHED_HASH,
@@ -664,7 +679,9 @@ const WATCHABLE = {
 };
 
 function nonceOffered(init: RequestInit | undefined): string | null {
-	if (init?.method !== "POST" || typeof init.body !== "string") return null;
+	if (init?.method !== "POST" || typeof init.body !== "string") {
+		return null;
+	}
 	try {
 		const asked = JSON.parse(init.body) as { type?: unknown; nonce?: unknown };
 		return asked.type === VERIFY_CHALLENGE && typeof asked.nonce === "string" ? asked.nonce : null;
@@ -673,29 +690,285 @@ function nonceOffered(init: RequestInit | undefined): string | null {
 	}
 }
 
-async function postWatch(app: App, body: unknown): Promise<Response> {
+async function postWatch(app: App, body: unknown, secret: string | null = null): Promise<Response> {
 	const outer = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
 		if (!target.includes("127.0.0.1") && target.includes("/verify")) {
 			const challenged = nonceOffered(args[1]);
-			if (challenged !== null) return Promise.resolve(Response.json({ nonce: challenged }));
+			if (challenged !== null) {
+				return Promise.resolve(Response.json({ nonce: challenged }));
+			}
 			return Promise.resolve(Response.json({ settled: false }));
 		}
 
 		return outer(...args);
 	}) as typeof fetch;
 
+	const sent = JSON.stringify(body);
 	try {
 		return await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
 			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(body),
+			headers: {
+				"content-type": "application/json",
+				...(secret === null ? {} : await speaking(secret, "POST", "/watched-payments", sent)),
+			},
+			body: sent,
 		});
 	} finally {
 		globalThis.fetch = outer;
 	}
 }
+
+async function speaking(
+	secret: string,
+	method: string,
+	path: string,
+	body: string,
+): Promise<Record<string, string>> {
+	return await signedAs(await callerKey(secret), method, path, body);
+}
+
+async function readAs(app: App, id: string, secret: string | null): Promise<Response> {
+	const path = `/incoming-payments/${id}`;
+
+	return await fetch(`http://127.0.0.1:${app.service.port}${path}`, {
+		headers: secret === null ? {} : await speaking(secret, "GET", path, ""),
+	});
+}
+
+test("once the gateway has forgotten a payment, its owner still reads its own record back", async () => {
+	const app = await running();
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+	const mine = app.store.insert(
+		pendingPayment({ caller: owner, sealed: "v1.mineAlone", expiresAt: 1_600_000_000 }),
+	);
+
+	app.store.sweep(0, 7_776_000);
+	expect(app.store.get(mine.id)).toBeNull();
+
+	const read = await readAs(app, mine.id, OWNER);
+	expect(read.status).toBe(200);
+	const body = (await read.json()) as Problem;
+	expect(body["kind"]).toBe("kept");
+	expect(body["sealed"]).toBe("v1.mineAlone");
+	expect(body).not.toHaveProperty("payment_hash");
+	expect(body).not.toHaveProperty("ln_address");
+
+	expect((await readAs(app, mine.id, STRANGER)).status).toBe(404);
+	expect((await readAs(app, mine.id, null)).status).toBe(404);
+
+	app.stop();
+});
+
+async function runningWith(overrides: Partial<Options> & { maxPending?: number }): Promise<App> {
+	const { maxPending, ...serving } = overrides;
+	const opened = openStore(maxPending === undefined ? {} : { maxPending });
+	const service = await start(
+		{
+			port: 0,
+			eagerDelayMs: 3000,
+			pollsPerSecond: 5,
+			workPerTick: 50,
+			verifyHosts: null,
+			verifyChallenge: true,
+			clientKeys: null,
+			mints: true,
+			tickStallMs: 30_000,
+			drainTimeoutMs: 10_000,
+			keepSealedSecs: 90 * 86_400,
+			token: null,
+			key: CLUSTER_KEY,
+			...serving,
+		},
+		opened.store,
+	);
+
+	return {
+		service,
+		store: opened.store,
+		stop: () => {
+			service.stop();
+			opened.stop();
+		},
+	};
+}
+
+test("an instance mints nothing unless it was turned on, and says how to proceed", async () => {
+	const app = await runningWith({ mints: false });
+	const port = app.service.port;
+
+	const minted = await fetch(`http://127.0.0.1:${port}/incoming-payments`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ ln_addresses: ["charter@coinos.io"], incoming_amount: MSAT_21K }),
+	});
+	expect(minted.status).toBe(403);
+	expect(String(((await minted.json()) as Problem)["detail"])).toContain("MINTING=1");
+
+	const quoted = await postQuote(app, { ln_addresses: ["charter@coinos.io"], amount: MSAT_21K });
+	expect(quoted.status).toBe(403);
+
+	expect((await postWatch(app, WATCHABLE, OWNER)).status).toBe(201);
+
+	app.stop();
+});
+
+test("an instance told to hold nothing takes no new work and keeps what it has", async () => {
+	const app = await runningWith({ maxPending: 0 });
+	const mine = app.store.insert(pendingPayment({ caller: null }));
+
+	const refused = await postWatch(app, WATCHABLE, OWNER);
+	expect(refused.status).toBe(429);
+	expect(refused.headers.get("ratelimit-limit")).toBe("0");
+
+	expect((await readAs(app, mine.id, null)).status).toBe(200);
+	expect(app.store.duePolls(10, 0).map((one) => one.id)).toEqual([mine.id]);
+
+	app.stop();
+});
+
+test("a caller over its share is refused with the ceiling in the headers", async () => {
+	const app = await runningWith({ maxPending: 1 });
+
+	const first = await postWatch(app, WATCHABLE, OWNER);
+	expect(first.status).toBe(201);
+
+	const second = await postWatch(app, { ...WATCHABLE, payment_hash: "dd".repeat(32) }, OWNER);
+	expect(second.status).toBe(429);
+	expect(second.headers.get("ratelimit-limit")).toBe("1");
+	expect(((await second.json()) as Problem)["type"]).toBe(TOO_MANY_PENDING);
+
+	app.stop();
+});
+
+test("one caller filling its share leaves another caller's share alone", async () => {
+	const app = await runningWith({ maxPending: 1 });
+
+	expect((await postWatch(app, WATCHABLE, OWNER)).status).toBe(201);
+	expect(
+		(await postWatch(app, { ...WATCHABLE, payment_hash: "dd".repeat(32) }, OWNER)).status,
+	).toBe(429);
+	expect((await postWatch(app, WATCHABLE, STRANGER)).status).toBe(201);
+
+	app.stop();
+});
+
+test("an instance keeping a list of client keys serves nobody else, on any route", async () => {
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+	const app = await runningWith({ clientKeys: new Set([owner]) });
+
+	expect((await postWatch(app, WATCHABLE, OWNER)).status).toBe(201);
+	expect((await postWatch(app, WATCHABLE, STRANGER)).status).toBe(403);
+	expect((await postWatch(app, WATCHABLE)).status).toBe(403);
+
+	const quoted = await postQuote(app, { ln_addresses: ["charter@coinos.io"], amount: MSAT_21K });
+	expect(quoted.status).toBe(403);
+	expect((await fetch(`http://127.0.0.1:${app.service.port}/health`)).status).toBe(200);
+
+	app.stop();
+});
+
+test("a watch that named its caller is handed back to that caller and to nobody else", async () => {
+	const app = await running();
+
+	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const id = String(created["id"]);
+
+	expect((await readAs(app, id, OWNER)).status).toBe(200);
+	expect((await readAs(app, id, STRANGER)).status).toBe(404);
+	expect((await readAs(app, id, null)).status).toBe(404);
+
+	app.stop();
+});
+
+test("a stranger who knows the payment hash gets a watch of their own and never joins yours", async () => {
+	const app = await running();
+	const restore = hookAnswering();
+
+	try {
+		const mine = {
+			...WATCHABLE,
+			webhook: { url: "https://shop.example/hooks/mine" },
+		};
+		const created = (await (await postWatch(app, mine, OWNER)).json()) as Problem;
+
+		const theirs = await postWatch(app, WATCHABLE, STRANGER);
+		expect(theirs.status).toBe(201);
+		expect(((await theirs.json()) as Problem)["id"]).not.toBe(created["id"]);
+
+		const stored = app.store.get(String(created["id"]));
+		expect(stored?.webhooks.map((hook) => hook.url)).toEqual(["https://shop.example/hooks/mine"]);
+	} finally {
+		restore();
+		app.stop();
+	}
+});
+
+test("a payment is named after the caller, so this instance's key can be rotated under it", async () => {
+	const app = await running();
+
+	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+
+	expect(created["id"]).toBe(paymentNamedBy(owner, WATCHED_HASH));
+	expect(created["id"]).not.toBe(paymentId(CLUSTER_KEY, WATCHED_HASH));
+
+	app.stop();
+});
+
+test("the same caller asking twice for the same invoice is one watch, not two", async () => {
+	const app = await running();
+
+	const first = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const again = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+
+	expect(again["id"]).toBe(first["id"]);
+
+	app.stop();
+});
+
+test("a ticket is not minted for a payment that belongs to somebody else", async () => {
+	const app = await running();
+
+	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const asked = JSON.stringify({ payment_id: created["id"] });
+	const port = app.service.port;
+
+	const theirs = await fetch(`http://127.0.0.1:${port}/ws-tickets`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...(await speaking(STRANGER, "POST", "/ws-tickets", asked)),
+		},
+		body: asked,
+	});
+	expect(theirs.status).toBe(404);
+
+	const ours = await fetch(`http://127.0.0.1:${port}/ws-tickets`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+		},
+		body: asked,
+	});
+	expect(ours.status).toBe(200);
+
+	app.stop();
+});
+
+test("a watch nobody signed for stays readable by anyone, until callers are required", async () => {
+	const app = await running();
+
+	const created = (await (await postWatch(app, WATCHABLE)).json()) as Problem;
+	const id = String(created["id"]);
+
+	expect((await readAs(app, id, null)).status).toBe(200);
+	expect((await readAs(app, id, STRANGER)).status).toBe(200);
+
+	app.stop();
+});
 
 test("an invoice can be watched without telling the gateway who or how much", async () => {
 	const app = await running();
@@ -729,21 +1002,19 @@ test("what the gateway stores about a blind watch names no recipient and no amou
 
 test("a watched payment can be owed a webhook, which is the bank rail's only way to be told", async () => {
 	const app = await running();
-	const restore = hookAnswering("s".repeat(32));
+	const restore = hookAnswering();
 
 	const created = (await (
 		await postWatch(app, {
 			...WATCHABLE,
 			payment_hash: PAYMENT_HASH,
-			webhook: { url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
+			webhook: { url: "https://shop.example/hooks/bank" },
 		})
 	).json()) as Problem;
 	restore();
 	const stored = app.store.get(String(created["id"]));
 
-	expect(stored?.webhooks).toEqual([
-		{ url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
-	]);
+	expect(stored?.webhooks).toEqual([{ url: "https://shop.example/hooks/bank" }]);
 
 	app.store.paid(String(created["id"]), PREIMAGE);
 
@@ -757,7 +1028,7 @@ test("a watched payment can be owed a webhook, which is the bank rail's only way
 test("re-registering the same watch with another webhook owes both, because webhooks are a set", async () => {
 	const app = await running();
 	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
-	const restore = hookAnswering(null);
+	const restore = hookAnswering();
 
 	await postWatch(app, { ...watchable, webhook: { url: "https://shop.example/hooks/one" } });
 	const again = await postWatch(app, {
@@ -769,10 +1040,12 @@ test("re-registering the same watch with another webhook owes both, because webh
 	expect(again.status).toBe(201);
 
 	const created = (await again.json()) as Problem;
-	expect(app.store.get(String(created["id"]))?.webhooks.map((hook) => hook.url).sort()).toEqual([
-		"https://shop.example/hooks/one",
-		"https://shop.example/hooks/two",
-	]);
+	expect(
+		app.store
+			.get(String(created["id"]))
+			?.webhooks.map((hook) => hook.url)
+			.sort(),
+	).toEqual(["https://shop.example/hooks/one", "https://shop.example/hooks/two"]);
 
 	app.stop();
 });
@@ -787,8 +1060,11 @@ async function pinnedTo(allowed: string[]): Promise<App> {
 			workPerTick: 50,
 			verifyHosts: new Set(allowed),
 			verifyChallenge: true,
+			clientKeys: null,
+			mints: true,
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
+			keepSealedSecs: 90 * 86_400,
 			token: null,
 			key: CLUSTER_KEY,
 		},
@@ -845,7 +1121,9 @@ test("a verify URL that answers nothing like LUD-21 is refused, so nobody else g
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
-		if (target.includes("127.0.0.1")) return real(...args);
+		if (target.includes("127.0.0.1")) {
+			return real(...args);
+		}
 
 		return Promise.resolve(new Response("<html>a stranger's home page</html>"));
 	}) as typeof fetch;
@@ -870,7 +1148,9 @@ function verifySpeakingButSilentOnTheChallenge(seen: string[]): () => void {
 	const real = globalThis.fetch;
 	globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
 		const target = String(args[0]);
-		if (target.includes("127.0.0.1")) return real(...args);
+		if (target.includes("127.0.0.1")) {
+			return real(...args);
+		}
 
 		seen.push(`${args[1]?.method ?? "GET"} ${target}`);
 		return Promise.resolve(Response.json({ settled: false }));
@@ -896,10 +1176,7 @@ test("a wallet cannot be pointed at, because it never agreed to be polled", asyn
 		expect(refused.status).toBe(424);
 		expect(((await refused.json()) as Problem)["type"]).toBe(VERIFY_UNCONSENTED);
 		expect(app.store.get(paymentId(CLUSTER_KEY, PAYMENT_HASH))).toBeNull();
-		expect(seen).toEqual([
-			`GET ${WATCHABLE.verify_url}`,
-			`POST ${WATCHABLE.verify_url}`,
-		]);
+		expect(seen).toEqual([`GET ${WATCHABLE.verify_url}`, `POST ${WATCHABLE.verify_url}`]);
 	} finally {
 		restore();
 		app.stop();
@@ -942,27 +1219,10 @@ test("a webhook that will not answer the challenge is refused, and nothing is wa
 	app.stop();
 });
 
-test("a webhook whose answer the registered secret does not sign is refused", async () => {
-	const app = await running();
-	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
-	const answeringForItself = hookAnswering("someone-elses-secret");
-
-	const refused = await postWatch(app, {
-		...watchable,
-		webhook: { url: "https://shop.example/hooks/bank", secret: "s".repeat(32) },
-	});
-	answeringForItself();
-
-	expect(refused.status).toBe(424);
-	expect(((await refused.json()) as Problem)["type"]).toBe(WEBHOOK_UNCONFIRMED);
-
-	app.stop();
-});
-
 test("a webhook that answers with a nonce of its own is refused", async () => {
 	const app = await running();
 	const watchable = { ...WATCHABLE, payment_hash: PAYMENT_HASH };
-	const answeringSomethingElse = hookAnswering(null, "-and-a-bit-more");
+	const answeringSomethingElse = hookAnswering("-and-a-bit-more");
 
 	const refused = await postWatch(app, {
 		...watchable,
@@ -981,7 +1241,7 @@ test("a watch asking for a webhook somewhere private is refused, like a create i
 
 	const refused = await postWatch(app, {
 		...WATCHABLE,
-		webhook: { url: "http://192.168.1.10/hooks", secret: "s".repeat(32) },
+		webhook: { url: "http://192.168.1.10/hooks" },
 	});
 
 	expect(refused.status).toBe(400);
@@ -1074,15 +1334,15 @@ test("a blind watch is refused when there is nothing left to watch or nothing to
 	app.stop();
 });
 
-test("a watch reaching past the three days the gateway promises is refused, and stores nothing", async () => {
+test("a watch reaching past the thirty days the gateway promises is refused, and stores nothing", async () => {
 	const app = await running();
 
 	const tooFar = await postWatch(app, {
 		...WATCHABLE,
-		expires_at: new Date(Date.now() + 4 * 86_400_000).toISOString(),
+		expires_at: new Date(Date.now() + 31 * 86_400_000).toISOString(),
 	});
 	expect(tooFar.status).toBe(400);
-	expect(String(((await tooFar.json()) as Problem)["detail"])).toContain("3 days");
+	expect(String(((await tooFar.json()) as Problem)["detail"])).toContain("30 days");
 
 	expect((await postWatch(app, WATCHABLE)).status).toBe(201);
 
@@ -1139,7 +1399,9 @@ test("every watcher of one trigger sees its payments, and watchers of another se
 	expect(seenByOverlay[0]!["status"]).toBe("paid");
 	expect(seenByOverlay[0]!["preimage"]).toBe(PREIMAGE);
 
-	for (const socket of [overlay, lamp, stranger]) socket.close();
+	for (const socket of [overlay, lamp, stranger]) {
+		socket.close();
+	}
 	app.stop();
 });
 
@@ -1251,7 +1513,9 @@ test("a draining instance turns readiness down and waits for the tick in flight"
 	let asked = 0;
 	globalThis.fetch = (() => {
 		asked += 1;
-		return new Promise((answer) => setTimeout(() => answer(Response.json({ settled: false })), 400));
+		return new Promise((answer) =>
+			setTimeout(() => answer(Response.json({ settled: false })), 400),
+		);
 	}) as typeof fetch;
 
 	const app = await running(null, 3000);
@@ -1297,7 +1561,9 @@ test("a body larger than this gateway reads is refused before anything parses it
 
 function post(app: App, body: unknown, key?: string): Promise<Response> {
 	const headers: Record<string, string> = { "content-type": "application/json" };
-	if (key) headers["idempotency-key"] = key;
+	if (key) {
+		headers["idempotency-key"] = key;
+	}
 
 	return fetch(`http://127.0.0.1:${app.service.port}/incoming-payments`, {
 		method: "POST",

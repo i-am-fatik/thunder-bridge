@@ -2,9 +2,9 @@ import type { WalletFailure, WalletReason } from "../core/refusal.ts";
 
 export {
 	NoWalletAvailable,
-	WalletRefused,
 	type WalletFailure,
 	type WalletReason,
+	WalletRefused,
 } from "../core/refusal.ts";
 
 export const INVALID_REQUEST = "urn:problem-type:thunder-bridge:invalid-request";
@@ -16,6 +16,8 @@ export const WEBHOOK_UNCONFIRMED = "urn:problem-type:thunder-bridge:webhook-unco
 export const VERIFY_UNCONFIRMED = "urn:problem-type:thunder-bridge:verify-unconfirmed";
 export const VERIFY_HOST_REFUSED = "urn:problem-type:thunder-bridge:verify-host-refused";
 export const VERIFY_UNCONSENTED = "urn:problem-type:thunder-bridge:verify-unconsented";
+export const TOO_MANY_PENDING = "urn:problem-type:thunder-bridge:too-many-pending";
+export const CALLER_UNKNOWN = "urn:problem-type:thunder-bridge:caller-unknown";
 
 const STATUS: Record<WalletReason, number> = {
 	"address-unusable": 400,
@@ -31,7 +33,11 @@ export class BodyTooLarge extends Error {}
 
 export function statusForWallets(wallets: WalletFailure[]): number {
 	const codes = wallets.map((wallet) => STATUS[wallet.reason]);
-	if (codes.includes(502)) return 502;
-	if (codes.includes(422)) return 422;
+	if (codes.includes(502)) {
+		return 502;
+	}
+	if (codes.includes(422)) {
+		return 422;
+	}
 	return 400;
 }

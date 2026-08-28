@@ -72,7 +72,9 @@ interface FioStatement {
  */
 export function fioStatement(config: FioConfig): Statement {
   const named = typeof config.token === "string" ? [config.token] : config.token;
-  if (named.length === 0) throw new Error("fioStatement needs at least one token to read with");
+  if (named.length === 0) {
+    throw new Error("fioStatement needs at least one token to read with");
+  }
 
   const usedAt = new Map(named.map((token) => [token, Number.NEGATIVE_INFINITY]));
   const tokenWindowMs = (config.minIntervalSecs ?? DEFAULT_MIN_INTERVAL_SECS) * MILLIS;
@@ -82,10 +84,14 @@ export function fioStatement(config: FioConfig): Statement {
 
   return async (sinceUnix: number) => {
     const now = Date.now();
-    if (now - lastRead < paceMs) return credits;
+    if (now - lastRead < paceMs) {
+      return credits;
+    }
 
     const idlest = longestUnused(usedAt);
-    if (now - idlest.usedAt < tokenWindowMs) return credits;
+    if (now - idlest.usedAt < tokenWindowMs) {
+      return credits;
+    }
 
     usedAt.set(idlest.token, now);
     lastRead = now;
@@ -103,7 +109,9 @@ export function fioStatement(config: FioConfig): Statement {
     if (answer.status === TOO_SOON) {
       throw new Error("fio refuses a second read of this token inside its 30 second window");
     }
-    if (!answer.ok) throw new Error(`fio answered ${answer.status} reading the statement`);
+    if (!answer.ok) {
+      throw new Error(`fio answered ${answer.status} reading the statement`);
+    }
 
     const read = (await answer.json()) as FioStatement;
     credits = (read.accountStatement?.transactionList?.transaction ?? [])
@@ -144,7 +152,9 @@ function asCredit(transaction: FioTransaction): Credit {
 
 function bookedAtIn(cell: Cell): number {
   const value = cell?.value;
-  if (typeof value === "number") return Math.floor(value / MILLIS);
+  if (typeof value === "number") {
+    return Math.floor(value / MILLIS);
+  }
 
   const at = Date.parse(asIso8601(textIn(cell)));
 
@@ -154,7 +164,9 @@ function bookedAtIn(cell: Cell): number {
 function asIso8601(booked: string): string {
   const day = booked.slice(0, DATE_CHARS);
   const zone = booked.slice(DATE_CHARS);
-  if (!UTC_OFFSET.test(zone)) return `${day}T00:00:00Z`;
+  if (!UTC_OFFSET.test(zone)) {
+    return `${day}T00:00:00Z`;
+  }
 
   return `${day}T00:00:00${zone.slice(0, 3)}:${zone.slice(3)}`;
 }

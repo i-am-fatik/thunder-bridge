@@ -1,11 +1,13 @@
+import { paymentNamedBy } from "../core/caller.ts";
 import { announce, type Gossip } from "./gossip.ts";
 import {
-	paymentId,
-	SOURCES,
 	type Claim,
 	type Facts,
+	type Kept,
 	type Ledger,
+	paymentId,
 	type Retry,
+	SOURCES,
 	type Source,
 	type Watermarks,
 } from "./ledger.ts";
@@ -35,14 +37,13 @@ export class Store {
 	private readonly maxPending: number;
 	private convergedAt: number | null = null;
 
-	constructor(ledger: Ledger, key: Uint8Array, maxPending: number, retired: Uint8Array[] = []) {
+	constructor(ledger: Ledger, key: Uint8Array, maxPending: number) {
 		this.ledger = ledger;
 		this.key = key;
 		this.maxPending = maxPending;
 		this.gossip = {
 			self: this.ledger.origin,
 			key: this.key,
-			retired,
 			peers: new Map(),
 			onFacts: (facts) => {
 				for (const settled of this.ledger.absorb(facts)) {
@@ -75,9 +76,11 @@ export class Store {
 	}
 
 	insert(unsaved: UnsavedPayment): Payment {
-		const id = paymentId(this.key, unsaved.paymentHash);
+		const id = this.names(unsaved);
 		const settled = this.ledger.settlement(id);
-		if (settled) return asPayment(settled);
+		if (settled) {
+			return asPayment(settled);
+		}
 
 		const taken = this.ledger.accept({ ...unsaved, id });
 		this.spread(taken.facts);
@@ -85,8 +88,21 @@ export class Store {
 		return taken.payment;
 	}
 
+	/**
+	 * A caller's payment is named after that caller, so the name survives a
+	 * rotation of this instance's key and reads the same at every gateway watching
+	 * it. Only a payment nobody signed for falls back to this instance's own key
+	 */
+	names(named: { caller: string | null; paymentHash: string }): string {
+		return named.caller === null
+			? paymentId(this.key, named.paymentHash)
+			: paymentNamedBy(named.caller, named.paymentHash);
+	}
+
 	private spread(facts: Facts): void {
-		if (facts.accepted) announce(this.gossip, { facts, more: false });
+		if (facts.accepted) {
+			announce(this.gossip, { facts, more: false });
+		}
 	}
 
 	get(id: string): Payment | null {
@@ -103,7 +119,9 @@ export class Store {
 			this.ledger.forget(id);
 			return { payment: asPayment(already, pending), won: false };
 		}
-		if (!pending) throw new Error(`payment ${id} is not on the worklist`);
+		if (!pending) {
+			throw new Error(`payment ${id} is not on the worklist`);
+		}
 
 		const { settled, facts } = this.ledger.settle(pending, preimage);
 		announce(this.gossip, { facts, more: false });
@@ -120,8 +138,8 @@ export class Store {
 		return this.ledger.list(limit, window);
 	}
 
-	full(): boolean {
-		return this.ledger.count() >= this.maxPending;
+	full(caller: string | null): boolean {
+		return this.ledger.countFor(caller) >= this.maxPending;
 	}
 
 	duePolls(limit: number, leaseSecs: number): Payment[] {
@@ -156,8 +174,12 @@ export class Store {
 		this.ledger.releaseKey(key);
 	}
 
-	sweep(graceSecs: number): Payment[] {
-		return this.ledger.sweep(graceSecs);
+	sweep(graceSecs: number, keepSealedSecs: number): Payment[] {
+		return this.ledger.sweep(graceSecs, keepSealedSecs);
+	}
+
+	kept(id: string): Kept | null {
+		return this.ledger.kept(id);
 	}
 
 	close(): void {

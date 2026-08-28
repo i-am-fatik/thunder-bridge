@@ -57,7 +57,9 @@ export function kraken(baseUrl = "https://api.kraken.com"): Ticker {
       error?: string[];
       result?: Record<string, { c?: string[] }>;
     };
-    if (answer.error?.length) throw new Error(`kraken refused XBT${asked}: ${answer.error[0]}`);
+    if (answer.error?.length) {
+      throw new Error(`kraken refused XBT${asked}: ${answer.error[0]}`);
+    }
 
     const pairs = Object.values(answer.result ?? {});
     if (pairs.length !== 1) {
@@ -79,7 +81,9 @@ export function bitstamp(baseUrl = "https://www.bitstamp.net"): Ticker {
   return async (currency: string) => {
     const pair = `btc${currency.toLowerCase()}`;
     const answer = await asJson(`${baseUrl}/api/v2/ticker/${pair}/`, "bitstamp");
-    if (Array.isArray(answer)) throw new Error(`bitstamp has no ${pair} pair`);
+    if (Array.isArray(answer)) {
+      throw new Error(`bitstamp has no ${pair} pair`);
+    }
 
     return asMinor((answer as { last?: string }).last, "bitstamp", currency);
   };
@@ -127,7 +131,9 @@ export function medianOf(
   return async (currency: string) => {
     const asked = currency.toUpperCase();
     const remembered = held.get(asked);
-    if (remembered && Date.now() - remembered.at < holdFor) return remembered.price;
+    if (remembered && Date.now() - remembered.at < holdFor) {
+      return remembered.price;
+    }
 
     const answers = await Promise.allSettled(tickers.map((ticker) => ticker(asked)));
     const quoted = answers
@@ -197,7 +203,9 @@ export function msatFor(
 
 async function asJson(url: string, venue: string): Promise<unknown> {
   const answer = await fetch(url, { headers: { accept: "application/json" } });
-  if (!answer.ok) throw new Error(`${venue} answered ${answer.status}`);
+  if (!answer.ok) {
+    throw new Error(`${venue} answered ${answer.status}`);
+  }
 
   return answer.json();
 }
@@ -220,7 +228,9 @@ function spreadBpsOf(sorted: number[]): number {
 
 function middleOf(sorted: number[]): number {
   const middle = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) return sorted[middle] ?? 0;
+  if (sorted.length % 2 === 1) {
+    return sorted[middle] ?? 0;
+  }
 
   return Math.round(((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2);
 }

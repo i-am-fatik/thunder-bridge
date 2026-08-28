@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { callerKey, callerOf, paymentNamedBy } from "../../core/caller.js";
 import { ThunderBridge } from "../src/client";
 import {
   GatewayCheatError,
@@ -222,20 +223,19 @@ describe("createPayment", () => {
     expect(String(calls[0].init?.body)).not.toContain(`"value":${AMOUNT_MSAT}`);
   });
 
-  it("sends the webhook url and secret nested under one webhook object when they are given", async () => {
+  it("sends the webhook url nested under one webhook object, and no secret to hold", async () => {
     const calls = stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
 
     await new ThunderBridge(GATEWAY).createPayment({
       lnAddresses: [LN_ADDRESS],
       amountMsat: AMOUNT_MSAT,
       webhookUrl: "https://shop.example.org/hooks/lightning",
-      webhookSecret: "s3cret",
     });
 
     expect(postedBody(calls)).toEqual({
       ln_addresses: [LN_ADDRESS],
       incoming_amount: { value: String(AMOUNT_MSAT), asset_code: "BTC", asset_scale: 11 },
-      webhook: { url: "https://shop.example.org/hooks/lightning", secret: "s3cret" },
+      webhook: { url: "https://shop.example.org/hooks/lightning" },
     });
   });
 
@@ -1531,6 +1531,8 @@ describe("watchPayment", () => {
     };
   }
 
+  const NAMING_SECRET = "rail_naming_7d1c4b9e2a6f0538";
+
   function gatewayWatches(overrides: Record<string, unknown> = {}): Routes {
     return {
       [`${GATEWAY}/watched-payments`]: () =>
@@ -1549,6 +1551,37 @@ describe("watchPayment", () => {
         ),
     };
   }
+
+  it("knows what the payment is called before any gateway has heard of it", async () => {
+    const named = new ThunderBridge(GATEWAY, { secret: NAMING_SECRET });
+    const key = await callerKey(NAMING_SECRET);
+
+    expect(await named.nameFor(WATCH_HASH)).toBe(paymentNamedBy(key.publicKeyHex, WATCH_HASH));
+    expect(await new ThunderBridge(GATEWAY).nameFor(WATCH_HASH)).toBeNull();
+  });
+
+  it("takes the name it worked out itself, whichever gateway answers", async () => {
+    const key = await callerKey(NAMING_SECRET);
+    const mine = paymentNamedBy(key.publicKeyHex, WATCH_HASH);
+    stubFetch(gatewayWatches({ id: mine }));
+
+    const watched = await new ThunderBridge(GATEWAY, { secret: NAMING_SECRET }).watchPayment(
+      watchable(),
+    );
+
+    expect(watched.id).toBe(mine);
+  });
+
+  it("catches a gateway that answers with a name that is not this payment's", async () => {
+    stubFetch(gatewayWatches({ id: "watch_0001" }));
+
+    const rejection = await new ThunderBridge(GATEWAY, { secret: NAMING_SECRET })
+      .watchPayment(watchable())
+      .catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(GatewayCheatError);
+    expect((rejection as GatewayCheatError).code).toBe("id_not_mine");
+  });
 
   it("hands over a hash, a URL and an expiry, and deliberately nothing else", async () => {
     const calls = stubFetch(gatewayWatches());
@@ -1846,5 +1879,74 @@ describe("refusesStrangers", () => {
     await gateway.refusesStrangers();
 
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("a client that names itself", () => {
+  const SECRET = "rail_5c1d9e2f7a0b384c6d5e1f2a";
+
+  function headersOf(call: FetchCall | undefined): Headers {
+    return new Headers((call?.init?.headers ?? {}) as Record<string, string>);
+  }
+
+  it("signs a create the way the gateway reads it, path and body and all", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments`]: () => jsonResponse(wireOf(pendingPayment()), 201),
+    });
+
+    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).createPayment({
+      lnAddresses: [LN_ADDRESS],
+      amountMsat: AMOUNT_MSAT,
+    });
+
+    const call = calls[0];
+    expect(
+      await callerOf(
+        headersOf(call),
+        "POST",
+        "/incoming-payments",
+        String(call?.init?.body ?? ""),
+      ),
+    ).toBe((await callerKey(SECRET)).publicKeyHex);
+  });
+
+  it("signs a read over the path it reads, query string included", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments?limit=10`]: () =>
+        jsonResponse({ payments: [], settled_scanned: 0 }),
+    });
+
+    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).listPayments(10);
+
+    expect(await callerOf(headersOf(calls[0]), "GET", "/incoming-payments?limit=10", "")).toBe(
+      (await callerKey(SECRET)).publicKeyHex,
+    );
+    expect(await callerOf(headersOf(calls[0]), "GET", "/incoming-payments", "")).toBeNull();
+  });
+
+  it("carries the secret nowhere, only what it proves", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments?limit=10`]: () =>
+        jsonResponse({ payments: [], settled_scanned: 0 }),
+    });
+
+    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).listPayments(10);
+
+    const headers = headersOf(calls[0]);
+    for (const name of ["x-client-key", "x-signature", "x-timestamp", "authorization"]) {
+      expect(headers.get(name) ?? "").not.toContain(SECRET);
+    }
+  });
+
+  it("says nothing when no secret was given, so an anonymous client still works", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments?limit=10`]: () =>
+        jsonResponse({ payments: [], settled_scanned: 0 }),
+    });
+
+    await new ThunderBridge(GATEWAY, { verify: false }).listPayments(10);
+
+    expect(headersOf(calls[0]).get("x-signature")).toBeNull();
+    expect(headersOf(calls[0]).get("x-client-key")).toBeNull();
   });
 });

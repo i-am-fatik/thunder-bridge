@@ -3,7 +3,6 @@
     "watch": "deno run --allow-net --allow-env main.ts"
   },
   "imports": {
-    "thunder-bridge": "npm:thunder-bridge@0.8.10"
-  },
-  "fmt": { "lineWidth": 100 }
+    "thunder-bridge": "npm:thunder-bridge@1.1.0"
+  }
 }

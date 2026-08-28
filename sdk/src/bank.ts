@@ -83,9 +83,6 @@ export interface BankTransferParams {
    */
   webhookUrl?: string;
 
-  /** Signs that delivery, so `verifyWebhookSignature` can tell it came from the gateway */
-  webhookSecret?: string;
-
   /**
    * Register on a gateway you do not own anyway. The verify URL names the amount
    * and the reference, so its operator ends up reading your order book, and the
@@ -168,7 +165,6 @@ export async function bankTransfer(params: BankTransferParams): Promise<BankTran
     trigger: params.trigger,
     sealed: params.sealed,
     webhookUrl: params.webhookUrl,
-    webhookSecret: params.webhookSecret,
   });
 
   return { id: watched.id, paymentHash: watched.paymentHash, verifyUrl, spd };
@@ -195,10 +191,14 @@ export function bankVerifyEndpoint(
 
   return async (request: Request) => {
     const consented = await answerVerifyChallengeRequest(request);
-    if (consented !== null) return consented;
+    if (consented !== null) {
+      return consented;
+    }
 
     const asked = readQuery(new URL(request.url));
-    if (asked === null) return Response.json({ settled: false }, { status: 400 });
+    if (asked === null) {
+      return Response.json({ settled: false }, { status: 400 });
+    }
 
     const subject = subjectOf(asked.reference, asked.amountMinor, asked.currency);
     const expected = await hmacHex(config.secret, `verify|${subject}`);
@@ -208,7 +208,9 @@ export function bankVerifyEndpoint(
 
     const since = unixNow() - (config.lookBackSecs ?? DEFAULT_LOOK_BACK_SECS);
     const landed = (await config.statement(since)).some((credit) => pays(credit, asked));
-    if (!landed) return Response.json({ settled: false }, { headers: paced });
+    if (!landed) {
+      return Response.json({ settled: false }, { headers: paced });
+    }
 
     return Response.json(
       { settled: true, preimage: await hmacHex(config.secret, `preimage|${subject}`) },
@@ -229,8 +231,12 @@ function readQuery(url: URL): Asked | null {
   const minor = Number(url.searchParams.get("minor"));
   const currency = url.searchParams.get("cc");
   const signature = url.searchParams.get("sig");
-  if (!reference || !currency || !signature) return null;
-  if (!Number.isInteger(minor) || minor <= 0) return null;
+  if (!reference || !currency || !signature) {
+    return null;
+  }
+  if (!Number.isInteger(minor) || minor <= 0) {
+    return null;
+  }
 
   return { reference, amountMinor: minor, currency, signature };
 }
@@ -258,7 +264,9 @@ function shortPaymentDescriptor(params: BankTransferParams, currency: string): s
     `CC:${currency.toUpperCase()}`,
     `MSG:${params.reference}`,
   ];
-  if (params.variableSymbol) fields.push(`X-VS:${params.variableSymbol}`);
+  if (params.variableSymbol) {
+    fields.push(`X-VS:${params.variableSymbol}`);
+  }
 
   return `SPD*1.0*${fields.join("*")}`;
 }
@@ -268,8 +276,12 @@ function major(amountMinor: number, currency: string): string {
 }
 
 async function refuseAnOpenGateway(params: BankTransferParams): Promise<void> {
-  if (params.allowPublicGateway === true) return;
-  if (await params.gateway.refusesStrangers()) return;
+  if (params.allowPublicGateway === true) {
+    return;
+  }
+  if (await params.gateway.refusesStrangers()) {
+    return;
+  }
 
   throw new Error(
     "this gateway serves callers with no token, so it is not yours, and its operator would read the amount and the reference off every verify URL. Point at one that answers 401 to a stranger, or say allowPublicGateway",
@@ -277,7 +289,9 @@ async function refuseAnOpenGateway(params: BankTransferParams): Promise<void> {
 }
 
 function refuseUnusable(params: BankTransferParams, currency: string): void {
-  if (!IBAN.test(params.iban)) throw new Error(`${params.iban} is not an IBAN`);
+  if (!IBAN.test(params.iban)) {
+    throw new Error(`${params.iban} is not an IBAN`);
+  }
   if (!Number.isInteger(params.amountMinor) || params.amountMinor <= 0) {
     throw new Error("amountMinor must be a whole number of minor units above zero");
   }

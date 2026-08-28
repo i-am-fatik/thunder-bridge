@@ -42,7 +42,9 @@ function freshly(): void {
 
 function optionsOf(index = 0): RequestOptions {
 	const options = asked[index];
-	if (options === undefined) throw new Error("nothing was asked");
+	if (options === undefined) {
+		throw new Error("nothing was asked");
+	}
 
 	return options;
 }
@@ -76,7 +78,12 @@ test("it connects to the address already verified and never asks the name again"
 
 test("the certificate is still checked against the name, not against the address", async () => {
 	freshly();
-	await pinnedToTheAddressWeVerified("https://example.com/pay", {}, AbortSignal.timeout(5000), VERIFIED);
+	await pinnedToTheAddressWeVerified(
+		"https://example.com/pay",
+		{},
+		AbortSignal.timeout(5000),
+		VERIFIED,
+	);
 
 	expect(optionsOf().servername).toBe("example.com");
 	expect((optionsOf().headers as Record<string, string>)["host"]).toBe("example.com");

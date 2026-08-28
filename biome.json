@@ -1,0 +1,27 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
+	"formatter": { "enabled": true, "indentStyle": "tab", "lineWidth": 100 },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "none",
+			"style": { "useBlockStatements": "error" }
+		}
+	},
+	"files": {
+		"includes": [
+			"core/**/*.ts",
+			"src/**/*.ts",
+			"tools/**/*.ts",
+			"sdk/src/**/*.ts",
+			"sdk/test/**/*.ts",
+			"examples/*/*.ts"
+		]
+	},
+	"overrides": [
+		{
+			"includes": ["examples/*/*.ts"],
+			"formatter": { "indentStyle": "space", "indentWidth": 2 }
+		}
+	]
+}

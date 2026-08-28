@@ -6,30 +6,32 @@ import { dirname } from "node:path";
 import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { WebSocketServer, type WebSocket } from "ws";
-import * as log from "./log.ts";
-
+import { type WebSocket, WebSocketServer } from "ws";
 import { hexToBytes } from "../core/bytes.ts";
-import { signingKeyFromSeed, type SigningKey } from "../core/ed25519.ts";
+import { callerOf } from "../core/caller.ts";
+import { type SigningKey, signingKeyFromSeed } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
+import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.ts";
+import { sendThrough } from "../core/outbound.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
-import { bearer, hosts, positive, secret, secrets, whole } from "./env.ts";
-import { Ledger, paymentId } from "./ledger.ts";
-import { pinnedToTheAddressWeVerified } from "./pinned.ts";
-import { quote, resolve, RESOLVE_TIMEOUT_MS, speaksVerify } from "../core/lnurl.ts";
-import { sendThrough } from "../core/outbound.ts";
+import { allowed, bearer, positive, secret, whole } from "./env.ts";
+import { Ledger } from "./ledger.ts";
+import * as log from "./log.ts";
 import type { Payment } from "./payment.ts";
+import { pinnedToTheAddressWeVerified } from "./pinned.ts";
 import {
 	ALREADY_WATCHED,
 	BodyTooLarge,
+	CALLER_UNKNOWN,
 	INVALID_REQUEST,
 	KEY_REUSED,
 	MalformedRequest,
-	NoWalletAvailable,
 	NO_WALLET_AVAILABLE,
+	NoWalletAvailable,
 	REQUEST_IN_FLIGHT,
 	statusForWallets,
+	TOO_MANY_PENDING,
 	VERIFY_HOST_REFUSED,
 	VERIFY_UNCONFIRMED,
 	VERIFY_UNCONSENTED,
@@ -45,15 +47,16 @@ import {
 	type Watcher,
 } from "./watch.ts";
 import {
+	type CreateRequest,
 	fingerprint,
+	keptToWire,
 	paymentToWire,
+	type QuoteRequest,
 	quoteToWire,
 	readCreateRequest,
 	readQuoteRequest,
 	readTicketRequest,
 	readWatchRequest,
-	type CreateRequest,
-	type QuoteRequest,
 	type TicketRequest,
 	type WatchRequest,
 } from "./wire.ts";
@@ -85,7 +88,8 @@ const STALLED = "the watch loop has stopped being scheduled, so this instance ne
 const LEAVING = "this instance is shutting down and is not taking new work";
 const AT_CAPACITY = "this instance is watching as many payments as it can";
 const SPEC = readFileSync(new URL("../openapi.yaml", import.meta.url), "utf8");
-const RENDERER = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.64.0/dist/browser/standalone.js";
+const RENDERER =
+	"https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.64.0/dist/browser/standalone.js";
 const RENDERER_HASH = "sha384-ei8P62VHbV+6AdLO3hN333PsTEYp6k9OAVhlYvpmer+zdPIf8jSbdgh9ojiLWX3T";
 const RENDERER_ORIGIN = new URL(RENDERER).origin;
 const DOCS_POLICY = [
@@ -121,8 +125,11 @@ export type Options = {
 	workPerTick: number;
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
+	clientKeys: Set<string> | null;
+	mints: boolean;
 	tickStallMs: number;
 	drainTimeoutMs: number;
+	keepSealedSecs: number;
 	token: string | null;
 	key: Uint8Array;
 };
@@ -137,6 +144,9 @@ type Vitals = "serving" | "stalled" | "draining";
 type Serving = {
 	token: string | null;
 	key: Uint8Array;
+	keepSealedSecs: number;
+	clientKeys: Set<string> | null;
+	mints: boolean;
 	webhookKey: SigningKey;
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
@@ -147,6 +157,9 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	const serving: Serving = {
 		token,
 		key: options.key,
+		keepSealedSecs: options.keepSealedSecs,
+		clientKeys: options.clientKeys,
+		mints: options.mints,
 		webhookKey: await webhookSigningKey(options.key),
 		verifyHosts: options.verifyHosts,
 		verifyChallenge: options.verifyChallenge,
@@ -172,9 +185,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	const followers = new Map<WebSocket, Follower>();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
-		void respond(incoming, store, serving, vitals()).then((answer) =>
-			reply(answer, outgoing),
-		);
+		void respond(incoming, store, serving, vitals()).then((answer) => reply(answer, outgoing));
 	});
 
 	server.on("upgrade", (incoming, socket, head) => {
@@ -188,14 +199,19 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		if (ticketed) {
 			void readTicket(options.key, ticketed[1]!, unixNow())
 				.then((permits) => {
-					if (socket.destroyed) return;
+					if (socket.destroyed) {
+						return;
+					}
 					if (permits === null) {
 						refuseUpgrade(socket);
 						return;
 					}
 					upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
-						if (permits.kind === "trigger") subscribe(accepted, permits.trigger, store, followers);
-						else follow(accepted, permits.paymentId, store, followers);
+						if (permits.kind === "trigger") {
+							subscribe(accepted, permits.trigger, store, followers);
+						} else {
+							follow(accepted, permits.paymentId, store, followers);
+						}
 					});
 				})
 				.catch(() => refuseUpgrade(socket));
@@ -232,7 +248,9 @@ export async function start(options: Options, store: Store): Promise<Service> {
 			const mine =
 				follower.id === payment.id ||
 				(follower.trigger !== null && follower.trigger === payment.trigger);
-			if (mine) socket.send(frame);
+			if (mine) {
+				socket.send(frame);
+			}
 		}
 	};
 	store.onChange = publish;
@@ -251,14 +269,18 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	}, PING_INTERVAL_MS);
 
 	const sweeper = setInterval(() => {
-		for (const expired of store.sweep(EXPIRED_GRACE_SECS)) publish(expired);
+		for (const expired of store.sweep(EXPIRED_GRACE_SECS, options.keepSealedSecs)) {
+			publish(expired);
+		}
 	}, SWEEP_INTERVAL_MS);
 
 	let ticking = false;
 	let inFlight: Promise<void> = Promise.resolve();
 	const ticker = setInterval(() => {
 		firedAt = Date.now();
-		if (ticking) return;
+		if (ticking) {
+			return;
+		}
 		ticking = true;
 		inFlight = tick(watcher)
 			.catch((error: unknown) => log.warn(`tick failed: ${String(error)}`))
@@ -273,13 +295,17 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	return {
 		port,
 		stop: async () => {
-			if (draining) return;
+			if (draining) {
+				return;
+			}
 			draining = true;
 			clearInterval(keepalive);
 			clearInterval(ticker);
 			clearInterval(sweeper);
 			await Promise.race([inFlight, sleep(options.drainTimeoutMs, undefined, { ref: false })]);
-			for (const socket of followers.keys()) socket.close();
+			for (const socket of followers.keys()) {
+				socket.close();
+			}
 			upgrades.close();
 			server.closeAllConnections();
 			server.close();
@@ -303,7 +329,9 @@ function follow(
 	followers.set(socket, follower);
 	keepFresh(socket, follower, followers);
 	socket.send(JSON.stringify(paymentToWire(payment)));
-	if (payment.status !== "pending") socket.close();
+	if (payment.status !== "pending") {
+		socket.close();
+	}
 }
 
 function watch(
@@ -351,18 +379,24 @@ async function respond(
 	serving: Serving,
 	vitals: Vitals,
 ): Promise<Response> {
-	if (incoming.method === "OPTIONS") return new Response(null, { status: 204, headers: OPEN });
+	if (incoming.method === "OPTIONS") {
+		return new Response(null, { status: 204, headers: OPEN });
+	}
 
 	const answer =
 		refused(incoming, serving.token) ??
 		(await route(incoming, store, serving, vitals).catch(oversized).catch(unhandled));
-	for (const [header, value] of Object.entries(OPEN)) answer.headers.set(header, value);
+	for (const [header, value] of Object.entries(OPEN)) {
+		answer.headers.set(header, value);
+	}
 
 	return answer;
 }
 
 function refused(incoming: IncomingMessage, token: string | null): Response | null {
-	if (token === null || UNGATED.has(pathOf(incoming))) return null;
+	if (token === null || UNGATED.has(pathOf(incoming))) {
+		return null;
+	}
 
 	return bearerMatches(incoming, token) ? null : unauthorized();
 }
@@ -385,10 +419,14 @@ function readiness(
 	token: string | null,
 	vitals: Vitals,
 ): Response {
-	if (vitals === "draining") return unavailable(LEAVING);
+	if (vitals === "draining") {
+		return unavailable(LEAVING);
+	}
 
 	const trusted = token !== null && bearerMatches(incoming, token);
-	if (!trusted) return json({ status: "ready" });
+	if (!trusted) {
+		return json({ status: "ready" });
+	}
 
 	const info = store.info();
 
@@ -422,42 +460,105 @@ async function route(
 	vitals: Vitals,
 ): Promise<Response> {
 	const path = pathOf(incoming);
-	if (path === "/health") return vitals === "stalled" ? unavailable(STALLED) : new Response("OK");
-	if (path === "/ready") return readiness(incoming, store, serving.token, vitals);
-	if (path === "/openapi.yaml") return spec();
-	if (path === "/docs") return rendered();
-	if (path === "/webhook-key") return publishedWebhookKey(serving.webhookKey);
+	if (path === "/health") {
+		return vitals === "stalled" ? unavailable(STALLED) : new Response("OK");
+	}
+	if (path === "/ready") {
+		return readiness(incoming, store, serving.token, vitals);
+	}
+	if (path === "/openapi.yaml") {
+		return spec();
+	}
+	if (path === "/docs") {
+		return rendered();
+	}
+	if (path === "/webhook-key") {
+		return publishedWebhookKey(serving.webhookKey);
+	}
+
+	const request = await asRequest(incoming);
+	const caller = await callerFor(request);
+	if (!accepted(caller, serving.clientKeys)) {
+		return unknownCaller();
+	}
 
 	const one = /^\/incoming-payments\/([\w-]+)$/.exec(path);
 	if (one && incoming.method === "GET") {
-		const payment = store.get(one[1]!);
-		return payment ? json(paymentToWire(payment)) : notFound();
+		return handedTo(one[1]!, store, caller);
 	}
+
 	if (path === "/incoming-payments" && incoming.method === "GET") {
 		return serving.token === null ? notFound() : listed(incoming, store);
 	}
 	if (path === "/incoming-payments" && incoming.method === "POST") {
-		if (serving.verifyHosts) return mintsNothing();
-		return await create(await asRequest(incoming), store, serving.webhookKey);
+		if (!mints(serving)) {
+			return mintsNothing(serving);
+		}
+		return await create(request, store, serving.webhookKey, caller);
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
-		if (serving.verifyHosts) return mintsNothing();
-		return await quoted(await asRequest(incoming));
+		if (!mints(serving)) {
+			return mintsNothing(serving);
+		}
+		return await quoted(request);
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
-		return await watchOnly(await asRequest(incoming), store, serving);
+		return await watchOnly(request, store, serving, caller);
 	}
 	if (path === "/ws-tickets" && incoming.method === "POST") {
-		return await ticketed(await asRequest(incoming), store, serving.key);
+		return await ticketed(request, store, serving.key, caller);
 	}
 
 	return notFound();
+}
+
+/**
+ * A payment is handed to the key that created it and to nobody else. A stranger
+ * holding an id is answered 404 rather than 403, because a 403 would confirm the
+ * payment exists, which is the question they were asking
+ */
+function handedTo(id: string, store: Store, caller: string | null): Response {
+	const payment = store.get(id);
+	if (payment) {
+		return belongsTo(payment, caller) ? json(paymentToWire(payment)) : notFound();
+	}
+
+	const kept = store.kept(id);
+	if (!kept || (kept.caller !== null && kept.caller !== caller)) {
+		return notFound();
+	}
+
+	return json(keptToWire(kept));
+}
+
+/**
+ * Whether this instance serves that caller at all. An instance keeping no list
+ * serves everybody, which is what a gateway with one client is for
+ */
+function accepted(caller: string | null, clientKeys: Set<string> | null): boolean {
+	return clientKeys === null || (caller !== null && clientKeys.has(caller));
+}
+
+function belongsTo(payment: Payment, caller: string | null): boolean {
+	return payment.caller === null || payment.caller === caller;
+}
+
+async function callerFor(request: Request): Promise<string | null> {
+	const asked = new URL(request.url);
+
+	return await callerOf(
+		request.headers,
+		request.method,
+		`${asked.pathname}${asked.search}`,
+		await request.clone().text(),
+	);
 }
 
 async function create(
 	request: Request,
 	store: Store,
 	webhookKey: SigningKey,
+	caller: string | null,
 ): Promise<Response> {
 	let asked: CreateRequest;
 	try {
@@ -466,8 +567,8 @@ async function create(
 		return unreadable(error);
 	}
 
-	if (store.full()) {
-		return unavailable(AT_CAPACITY);
+	if (store.full(caller)) {
+		return tooMany(caller, store.info().maxPending);
 	}
 	if (asked.webhook && !(await confirmWebhook(asked.webhook, webhookKey))) {
 		return unconfirmedWebhook(asked.webhook.url);
@@ -475,7 +576,9 @@ async function create(
 
 	const key = request.headers.get("idempotency-key");
 	const claim = key ? store.claim(key, fingerprint(asked), CLAIM_LEASE_SECS) : null;
-	if (claim?.state === "done") return replay(store, claim.paymentId);
+	if (claim?.state === "done") {
+		return replay(store, claim.paymentId);
+	}
 	if (claim?.state === "inflight") {
 		return conflict(REQUEST_IN_FLIGHT, "A request with this Idempotency-Key is still running");
 	}
@@ -484,13 +587,19 @@ async function create(
 	}
 
 	try {
-		const payment = await mint(asked, store);
-		if (key) store.fulfill(key, payment.id);
+		const payment = await mint(asked, store, caller);
+		if (key) {
+			store.fulfill(key, payment.id);
+		}
 
 		return json(paymentToWire(payment), 201);
 	} catch (error: unknown) {
-		if (key) store.release(key);
-		if (!(error instanceof NoWalletAvailable)) throw error;
+		if (key) {
+			store.release(key);
+		}
+		if (!(error instanceof NoWalletAvailable)) {
+			throw error;
+		}
 
 		return problem(statusForWallets(error.wallets), {
 			type: NO_WALLET_AVAILABLE,
@@ -500,7 +609,7 @@ async function create(
 	}
 }
 
-async function mint(asked: CreateRequest, store: Store): Promise<Payment> {
+async function mint(asked: CreateRequest, store: Store, caller: string | null): Promise<Payment> {
 	const resolved = await resolve(asked.addresses, asked.amountMsat);
 
 	return store.insert({
@@ -515,18 +624,26 @@ async function mint(asked: CreateRequest, store: Store): Promise<Payment> {
 		verifyUrl: resolved.verifyUrl,
 		trigger: asked.trigger,
 		sealed: null,
+		caller,
 		webhooks: asked.webhook ? [asked.webhook] : [],
 	});
 }
 
 function replay(store: Store, paymentId: string): Response {
 	const payment = store.get(paymentId);
-	if (!payment) return gone("the payment this Idempotency-Key created has already been pruned");
+	if (!payment) {
+		return gone("the payment this Idempotency-Key created has already been pruned");
+	}
 
 	return json(paymentToWire(payment), 201);
 }
 
-async function ticketed(request: Request, store: Store, key: Uint8Array): Promise<Response> {
+async function ticketed(
+	request: Request,
+	store: Store,
+	key: Uint8Array,
+	caller: string | null,
+): Promise<Response> {
 	let asked: TicketRequest;
 	try {
 		asked = readTicketRequest(await request.json());
@@ -534,7 +651,12 @@ async function ticketed(request: Request, store: Store, key: Uint8Array): Promis
 		return unreadable(error);
 	}
 
-	if (asked.kind === "payment" && !store.get(asked.paymentId)) return notFound();
+	if (asked.kind === "payment") {
+		const payment = store.get(asked.paymentId);
+		if (!payment || !belongsTo(payment, caller)) {
+			return notFound();
+		}
+	}
 
 	const subject: Subject =
 		asked.kind === "trigger"
@@ -543,7 +665,10 @@ async function ticketed(request: Request, store: Store, key: Uint8Array): Promis
 
 	const minted = await mintTicket(key, subject, TICKET_TTL_SECS, unixNow());
 
-	return json({ ticket: minted.ticket, expires_at: new Date(minted.expiresAt * 1000).toISOString() });
+	return json({
+		ticket: minted.ticket,
+		expires_at: new Date(minted.expiresAt * 1000).toISOString(),
+	});
 }
 
 function isThisWatch(known: Payment, asked: WatchRequest): boolean {
@@ -573,8 +698,13 @@ function listed(incoming: IncomingMessage, store: Store): Response {
 	});
 }
 
-async function watchOnly(request: Request, store: Store, serving: Serving): Promise<Response> {
-	const { key, webhookKey } = serving;
+async function watchOnly(
+	request: Request,
+	store: Store,
+	serving: Serving,
+	caller: string | null,
+): Promise<Response> {
+	const { webhookKey } = serving;
 	let asked: WatchRequest;
 	try {
 		asked = readWatchRequest(await request.json());
@@ -582,8 +712,8 @@ async function watchOnly(request: Request, store: Store, serving: Serving): Prom
 		return unreadable(error);
 	}
 
-	if (store.full()) {
-		return unavailable(AT_CAPACITY);
+	if (store.full(caller)) {
+		return tooMany(caller, store.info().maxPending);
 	}
 	const now = unixNow();
 	if (asked.expiresAt <= now) {
@@ -595,8 +725,8 @@ async function watchOnly(request: Request, store: Store, serving: Serving): Prom
 		);
 	}
 
-	const known = store.get(paymentId(key, asked.paymentHash));
-	if (known && !isThisWatch(known, asked)) {
+	const known = store.get(store.names({ caller, paymentHash: asked.paymentHash }));
+	if (known && (!belongsTo(known, caller) || !isThisWatch(known, asked))) {
 		return conflict(ALREADY_WATCHED, "This payment hash is already being watched here");
 	}
 	if (serving.verifyHosts && !serving.verifyHosts.has(hostOf(asked.verifyUrl))) {
@@ -624,6 +754,7 @@ async function watchOnly(request: Request, store: Store, serving: Serving): Prom
 		verifyUrl: asked.verifyUrl,
 		trigger: asked.trigger,
 		sealed: asked.sealed,
+		caller,
 		webhooks: asked.webhook ? [asked.webhook] : [],
 	});
 
@@ -643,7 +774,9 @@ async function quoted(request: Request): Promise<Response> {
 
 		return json(quoteToWire(served.won, asked.amountMsat, served.refusals));
 	} catch (error: unknown) {
-		if (!(error instanceof NoWalletAvailable)) throw error;
+		if (!(error instanceof NoWalletAvailable)) {
+			throw error;
+		}
 
 		return problem(statusForWallets(error.wallets), {
 			type: NO_WALLET_AVAILABLE,
@@ -658,30 +791,42 @@ function pathOf(incoming: IncomingMessage): string {
 }
 
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
-	if (Number(incoming.headers["content-length"] ?? 0) > MAX_INBOUND_BYTES) throw new BodyTooLarge();
+	if (Number(incoming.headers["content-length"] ?? 0) > MAX_INBOUND_BYTES) {
+		throw new BodyTooLarge();
+	}
 
 	const headers = new Headers();
 	for (const [name, value] of Object.entries(incoming.headers)) {
-		if (typeof value === "string") headers.set(name, value);
+		if (typeof value === "string") {
+			headers.set(name, value);
+		}
 	}
 	const chunks: Buffer[] = [];
 	let bytes = 0;
 	for await (const chunk of incoming) {
 		bytes += (chunk as Buffer).length;
-		if (bytes > MAX_INBOUND_BYTES) throw new BodyTooLarge();
+		if (bytes > MAX_INBOUND_BYTES) {
+			throw new BodyTooLarge();
+		}
 		chunks.push(chunk as Buffer);
 	}
+
+	const body = Buffer.concat(chunks);
 
 	return new Request(`http://app${incoming.url ?? "/"}`, {
 		method: incoming.method,
 		headers,
-		body: Buffer.concat(chunks),
+		...(body.length === 0 ? {} : { body }),
 	});
 }
 
 function unreadable(error: unknown): Response {
-	if (error instanceof SyntaxError) return invalidRequest("the request body is not JSON");
-	if (error instanceof MalformedRequest) return invalidRequest(error.message);
+	if (error instanceof SyntaxError) {
+		return invalidRequest("the request body is not JSON");
+	}
+	if (error instanceof MalformedRequest) {
+		return invalidRequest(error.message);
+	}
 	throw error;
 }
 
@@ -730,12 +875,50 @@ function gone(detail: string): Response {
 	return problem(410, { title: "Gone", detail });
 }
 
+/**
+ * A caller over its share is refused with the pace and the ceiling in the headers
+ * the gateway itself reads off wallets, so a client learns the shape of the limit
+ * from the refusal rather than from documentation
+ */
+function tooMany(caller: string | null, maxPending: number): Response {
+	return new Response(
+		JSON.stringify({
+			type: TOO_MANY_PENDING,
+			status: 429,
+			title: "Too Many Requests",
+			detail:
+				caller === null
+					? `${AT_CAPACITY}, and every caller who signs nothing shares one share of it`
+					: AT_CAPACITY,
+		}),
+		{
+			status: 429,
+			headers: {
+				"content-type": "application/problem+json",
+				"ratelimit-limit": `${maxPending}`,
+				"ratelimit-remaining": "0",
+			},
+		},
+	);
+}
+
+/** A caller this instance does not accept, on an instance that keeps a list of them */
+function unknownCaller(): Response {
+	return problem(403, {
+		type: CALLER_UNKNOWN,
+		title: "This gateway does not accept that key",
+		detail: "this instance serves a list of client keys, and yours is not one of them",
+	});
+}
+
 function unavailable(detail: string): Response {
 	return problem(503, { title: "Service Unavailable", detail });
 }
 
 function oversized(error: unknown): Response {
-	if (!(error instanceof BodyTooLarge)) throw error;
+	if (!(error instanceof BodyTooLarge)) {
+		throw error;
+	}
 
 	return problem(413, {
 		type: INVALID_REQUEST,
@@ -756,12 +939,22 @@ function hostOf(url: string): string {
 	return new URL(url).hostname.toLowerCase();
 }
 
-function mintsNothing(): Response {
+/**
+ * Minting is off unless an instance turns it on, because it is the one path where
+ * the operator is handed the address and the amount in the clear and could log
+ * them. A blind store protects nothing that was already read
+ */
+function mints(serving: Serving): boolean {
+	return serving.mints && serving.verifyHosts === null;
+}
+
+function mintsNothing(serving: Serving): Response {
 	return problem(403, {
 		type: VERIFY_HOST_REFUSED,
 		title: "This gateway only watches, it does not mint",
-		detail:
-			"VERIFY_HOSTS pins this instance to a list of verify endpoints, and minting an invoice would put it on a wallet's host instead. Resolve the address yourself and register the payment with POST /watched-payments.",
+		detail: serving.verifyHosts
+			? "VERIFY_HOSTS pins this instance to a list of verify endpoints, and minting an invoice would put it on a wallet's host instead. Resolve the address yourself and register the payment with POST /watched-payments."
+			: "minting is off here, because it is the one path that hands the operator the address and the amount. Mint the invoice yourself and register it with POST /watched-payments, or ask the operator to set MINTING=1 and accept that they see both.",
 	});
 }
 
@@ -809,17 +1002,12 @@ if (import.meta.main) {
 	mkdirSync(dirname(path), { recursive: true });
 
 	const clusterKey = secret("CLUSTER_KEY");
-	const retiredKeys = secrets("CLUSTER_KEYS_RETIRED");
-	const ledger = new Ledger(
-		path,
-		clusterKey,
-		{
-			takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS", 600),
-			deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
-		},
-		retiredKeys,
-	);
-	const store = new Store(ledger, clusterKey, positive("MAX_PENDING", 5000), retiredKeys);
+
+	const ledger = new Ledger(path, clusterKey, {
+		takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS", 600),
+		deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
+	});
+	const store = new Store(ledger, clusterKey, whole("MAX_PENDING", 5000));
 	const cluster = new Cluster(store.gossip, {
 		key: clusterKey,
 		listenPort: whole("REPLICATE_LISTEN", 0),
@@ -833,11 +1021,14 @@ if (import.meta.main) {
 			port: whole("PORT", 3000),
 			eagerDelayMs: positive("POLL_INTERVAL_SECS", 5) * 1000,
 			workPerTick: positive("WORK_PER_TICK", 50),
-			verifyHosts: hosts("VERIFY_HOSTS"),
+			verifyHosts: allowed("VERIFY_HOSTS"),
 			verifyChallenge: process.env["VERIFY_CHALLENGE"] !== "0",
+			clientKeys: allowed("CLIENT_KEYS"),
+			mints: process.env["MINTING"] === "1",
 			pollsPerSecond: positive("POLLS_PER_SEC", 5),
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,
+			keepSealedSecs: positive("KEEP_SEALED_DAYS", 90) * 86_400,
 			token: bearer("GATEWAY_TOKEN"),
 			key: clusterKey,
 		},
@@ -846,7 +1037,9 @@ if (import.meta.main) {
 
 	let leaving = false;
 	const leave = () => {
-		if (leaving) process.exit(1);
+		if (leaving) {
+			process.exit(1);
+		}
 		leaving = true;
 		log.info("draining, and leaving once the tick in flight is done");
 		void service.stop().then(() => {

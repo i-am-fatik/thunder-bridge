@@ -4,9 +4,8 @@
     "deploy": "deployctl deploy --prod --env-file"
   },
   "imports": {
-    "thunder-bridge": "npm:thunder-bridge@0.8.10",
-    "thunder-bridge/server": "npm:thunder-bridge@0.8.10/server"
+    "thunder-bridge": "npm:thunder-bridge@1.1.0",
+    "thunder-bridge/server": "npm:thunder-bridge@1.1.0/server"
   },
-  "fmt": { "lineWidth": 100 },
   "unstable": ["kv"]
 }

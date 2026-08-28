@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: thunder-bridge, the endpoint your own service serves
-  version: 0.8.1
+  version: 1.2.0
   license:
     name: MIT
     identifier: MIT
@@ -206,6 +206,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/unsettled"
+
+    post:
+      tags: [bank-transfer]
+      operationId: answerVerifyChallenge
+      summary: Agree to be polled, before the gateway will watch anything pointed here
+      description: |
+        The gateway will not poll a URL a caller merely named. It POSTs a nonce here first and
+        watches nothing unless this endpoint hands the same nonce back, which is how a caller
+        shows the endpoint consented to the traffic rather than being volunteered for it. A
+        registration whose verify URL will not answer is refused with `verify-unconsented`.
+
+        Every verify endpoint the SDK builds answers this as its first line, before it parses
+        its own query, so `bankVerifyEndpoint`, `lightningVerifyEndpoint` and anything wrapping
+        `answerVerifyChallengeRequest` already do it.
+
+        There is nothing to sign. Echoing a nonce grants the asker nothing, so this holds no
+        secret and checks none.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [verify-challenge]
+                nonce:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+              required: [type, nonce]
+      responses:
+        "200":
+          description: The same nonce, and nothing else.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nonce:
+                    type: string
+                required: [nonce]
 
 components:
   schemas:

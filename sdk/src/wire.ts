@@ -5,6 +5,7 @@ import type {
   PaymentKind,
   PaymentStatus,
   Quote,
+  Settlement,
   TriggerEvent,
   WalletFailure,
   WalletReason,
@@ -26,9 +27,7 @@ export function createRequestBody(params: CreatePaymentParams, trigger: string |
   return JSON.stringify({
     ln_addresses: params.lnAddresses,
     incoming_amount: toAmount(params.amountMsat),
-    webhook: params.webhookUrl
-      ? { url: params.webhookUrl, secret: params.webhookSecret }
-      : undefined,
+    webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
     trigger: trigger ?? undefined,
   });
 }
@@ -42,7 +41,9 @@ export function quoteRequestBody(params: CreateQuoteParams): string {
 
 export function quoteFromWire(body: unknown): Quote | null {
   const wire = asObject(body);
-  if (wire === null) return null;
+  if (wire === null) {
+    return null;
+  }
 
   const lnAddress = text(wire["ln_address"]);
   const amountMsat = msatFrom(wire["amount"], 1);
@@ -52,15 +53,21 @@ export function quoteFromWire(body: unknown): Quote | null {
   const metadata = text(wire["metadata"]);
   const refusals = refusalsFrom(wire["refusals"]);
 
-  if (lnAddress === null || amountMsat === null || feeMsat === null) return null;
-  if (minMsat === null || maxMsat === null || metadata === null || refusals === null) return null;
+  if (lnAddress === null || amountMsat === null || feeMsat === null) {
+    return null;
+  }
+  if (minMsat === null || maxMsat === null || metadata === null || refusals === null) {
+    return null;
+  }
 
   return { lnAddress, amountMsat, feeMsat, minMsat, maxMsat, metadata, refusals };
 }
 
 export function paymentFromWire(body: unknown): Payment | null {
   const wire = asObject(body);
-  if (wire === null) return null;
+  if (wire === null) {
+    return null;
+  }
 
   const id = text(wire["id"]);
   const lnAddress = text(wire["ln_address"]);
@@ -73,11 +80,21 @@ export function paymentFromWire(body: unknown): Payment | null {
   const status = wire["status"];
   const preimage = wire["preimage"] ?? null;
 
-  if (id === null || lnAddress === null || bolt11 === null) return null;
-  if (paymentHash === null || verifyUrl === null) return null;
-  if (amountMsat === null || expiresAt === null || createdAt === null) return null;
-  if (!isStatus(status)) return null;
-  if (preimage !== null && typeof preimage !== "string") return null;
+  if (id === null || lnAddress === null || bolt11 === null) {
+    return null;
+  }
+  if (paymentHash === null || verifyUrl === null) {
+    return null;
+  }
+  if (amountMsat === null || expiresAt === null || createdAt === null) {
+    return null;
+  }
+  if (!isStatus(status)) {
+    return null;
+  }
+  if (preimage !== null && typeof preimage !== "string") {
+    return null;
+  }
 
   return {
     id,
@@ -105,15 +122,43 @@ export function watchRequestBody(params: WatchPaymentParams, trigger: string | n
     expires_at: expiresAt.toISOString(),
     trigger: trigger ?? undefined,
     sealed: params.sealed,
-    webhook: params.webhookUrl
-      ? { url: params.webhookUrl, secret: params.webhookSecret }
-      : undefined,
+    webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
   });
+}
+
+/**
+ * A delivery says the least it can and still be worth having: the name, how it
+ * ended, and a preimage against the hash it has to match. No verify url, because
+ * you named it, and no sealed record, because the size of a retry should not
+ * depend on what you put in it
+ */
+export function settlementFromWire(body: unknown): Settlement | null {
+  const wire = asObject(body);
+  if (wire === null) {
+    return null;
+  }
+
+  const id = text(wire["id"]);
+  const paymentHash = text(wire["payment_hash"]);
+  const settledAt = secondsFrom(wire["settled_at"]);
+  const status = wire["status"];
+  const preimage = wire["preimage"] ?? null;
+
+  if (id === null || paymentHash === null || settledAt === null || !isStatus(status)) {
+    return null;
+  }
+  if (preimage !== null && typeof preimage !== "string") {
+    return null;
+  }
+
+  return { id, status, paymentHash, preimage, settledAt };
 }
 
 export function triggerEventFromWire(body: unknown): TriggerEvent | null {
   const wire = asObject(body);
-  if (wire === null) return null;
+  if (wire === null) {
+    return null;
+  }
 
   const id = text(wire["id"]);
   const paymentHash = text(wire["payment_hash"]);
@@ -124,10 +169,18 @@ export function triggerEventFromWire(body: unknown): TriggerEvent | null {
   const preimage = wire["preimage"] ?? null;
   const sealed = wire["sealed"] ?? null;
 
-  if (id === null || paymentHash === null || verifyUrl === null) return null;
-  if (expiresAt === null || createdAt === null || !isStatus(status)) return null;
-  if (preimage !== null && typeof preimage !== "string") return null;
-  if (sealed !== null && typeof sealed !== "string") return null;
+  if (id === null || paymentHash === null || verifyUrl === null) {
+    return null;
+  }
+  if (expiresAt === null || createdAt === null || !isStatus(status)) {
+    return null;
+  }
+  if (preimage !== null && typeof preimage !== "string") {
+    return null;
+  }
+  if (sealed !== null && typeof sealed !== "string") {
+    return null;
+  }
 
   return {
     id,
@@ -146,7 +199,9 @@ export function triggerEventFromWire(body: unknown): TriggerEvent | null {
 
 function kindOf(wire: Record<string, unknown>): PaymentKind {
   const said = wire["kind"];
-  if (said === "minted" || said === "watched") return said;
+  if (said === "minted" || said === "watched") {
+    return said;
+  }
 
   return text(wire["ln_address"]) === null ? "watched" : "minted";
 }
@@ -156,7 +211,9 @@ function toAmount(msat: number): Record<string, unknown> {
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
   return value as Record<string, unknown>;
 }
 
@@ -166,25 +223,35 @@ function text(value: unknown): string | null {
 
 function msatFrom(value: unknown, least: number): number | null {
   const amount = asObject(value);
-  if (amount === null) return null;
-  if (amount["asset_code"] !== ASSET_CODE || amount["asset_scale"] !== ASSET_SCALE) return null;
+  if (amount === null) {
+    return null;
+  }
+  if (amount["asset_code"] !== ASSET_CODE || amount["asset_scale"] !== ASSET_SCALE) {
+    return null;
+  }
 
   const digits = amount["value"];
-  if (typeof digits !== "string" || !/^[0-9]+$/.test(digits)) return null;
+  if (typeof digits !== "string" || !/^[0-9]+$/.test(digits)) {
+    return null;
+  }
 
   const msat = Number(digits);
   return Number.isSafeInteger(msat) && msat >= least ? msat : null;
 }
 
 function refusalsFrom(value: unknown): WalletFailure[] | null {
-  if (!Array.isArray(value)) return null;
+  if (!Array.isArray(value)) {
+    return null;
+  }
 
   const refusals: WalletFailure[] = [];
   for (const entry of value) {
     const failure = asObject(entry);
     const address = failure === null ? null : text(failure["address"]);
     const reason = failure?.["reason"];
-    if (address === null || typeof reason !== "string" || !REASONS.has(reason)) return null;
+    if (address === null || typeof reason !== "string" || !REASONS.has(reason)) {
+      return null;
+    }
 
     refusals.push({ address, reason: reason as WalletReason });
   }
@@ -192,7 +259,9 @@ function refusalsFrom(value: unknown): WalletFailure[] | null {
 }
 
 function secondsFrom(value: unknown): number | null {
-  if (typeof value !== "string") return null;
+  if (typeof value !== "string") {
+    return null;
+  }
   const milliseconds = Date.parse(value);
   return Number.isNaN(milliseconds) ? null : Math.floor(milliseconds / 1000);
 }

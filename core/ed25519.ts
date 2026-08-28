@@ -12,7 +12,9 @@ export type SigningKey = {
 };
 
 export async function signingKeyFromSeed(seed: Uint8Array): Promise<SigningKey> {
-	if (seed.length !== SEED_BYTES) throw new Error(`an ed25519 seed is ${SEED_BYTES} bytes`);
+	if (seed.length !== SEED_BYTES) {
+		throw new Error(`an ed25519 seed is ${SEED_BYTES} bytes`);
+	}
 
 	const wrapped = new Uint8Array(PKCS8_HEADER.length + SEED_BYTES);
 	wrapped.set(PKCS8_HEADER);
@@ -33,8 +35,12 @@ export async function verifyHex(
 	signatureHex: string,
 	payload: Uint8Array,
 ): Promise<boolean> {
-	if (!isHex(publicKeyHex) || publicKeyHex.length !== PUBLIC_KEY_BYTES * 2) return false;
-	if (!isHex(signatureHex) || signatureHex.length !== SIGNATURE_BYTES * 2) return false;
+	if (!isHex(publicKeyHex) || publicKeyHex.length !== PUBLIC_KEY_BYTES * 2) {
+		return false;
+	}
+	if (!isHex(signatureHex) || signatureHex.length !== SIGNATURE_BYTES * 2) {
+		return false;
+	}
 
 	try {
 		const key = await crypto.subtle.importKey(
@@ -60,7 +66,9 @@ function fromBase64Url(text: string): Uint8Array {
 	const padded = text.replace(/-/g, "+").replace(/_/g, "/");
 	const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
 	const bytes = new Uint8Array(raw.length);
-	for (let at = 0; at < raw.length; at++) bytes[at] = raw.charCodeAt(at);
+	for (let at = 0; at < raw.length; at++) {
+		bytes[at] = raw.charCodeAt(at);
+	}
 
 	return bytes;
 }

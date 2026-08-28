@@ -49,17 +49,25 @@ export function lightningVerifyEndpoint(
 
   return async (request: Request) => {
     const consented = await answerVerifyChallengeRequest(request);
-    if (consented !== null) return consented;
+    if (consented !== null) {
+      return consented;
+    }
 
     const sealed = new URL(request.url).searchParams.get(WALLET);
-    if (sealed === null) return Response.json({ settled: false }, { status: 400 });
+    if (sealed === null) {
+      return Response.json({ settled: false }, { status: 400 });
+    }
 
     const opened = await unseal(config.secret, sealed);
-    if (opened === null) return Response.json({ settled: false }, { status: 403 });
+    if (opened === null) {
+      return Response.json({ settled: false }, { status: 403 });
+    }
 
     const wallet = JSON.parse(opened) as Relayed;
     const asked = await checkSettled(wallet.url, wallet.hash).catch(() => null);
-    if (asked === null) return Response.json({ settled: false }, { status: 502 });
+    if (asked === null) {
+      return Response.json({ settled: false }, { status: 502 });
+    }
 
     return Response.json(
       { settled: asked.preimage !== null, preimage: asked.preimage },

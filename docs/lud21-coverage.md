@@ -161,6 +161,62 @@ usable list ever grows.
 the `verify` URL for coinos, Alby and Stacker News, so a browser can run the
 whole proof itself with no proxy.
 
+## Why a recipient without LUD-21 cannot simply be watched
+
+Surveyed 2026-08-17, and the answer is closed rather than merely hard. After a
+payment settles, the preimage exists in exactly three places: the recipient's node,
+which generated it, the payer's wallet, which learned it from the route, and every
+node that forwarded it. Nothing writes it anywhere public. A watcher who is none of
+those three and is told by none of those three has no proof to obtain, and no
+cleverness produces one.
+
+So the question is never "how do I verify" but "which of the three will tell me".
+
+| Payer is | How the preimage reaches you | Node needed |
+|---|---|---|
+| an L402 client or an agent | `Authorization: L402 <macaroon>:<preimage>` | none |
+| a browser with WebLN | `sendPayment()` returns `{ preimage: string }` | none |
+| a browser holding its own NWC | `pay_invoice` returns the preimage | none |
+| somebody scanning a QR on a phone | **there is no path** | - |
+
+The first three have the payer in a request-response loop with you, so they hand the
+preimage over as the mechanism by which they get what they paid for, not as a
+favour. The fourth walked away, and it is ordinary retail.
+
+That last row leaves two options and no third: the recipient publishes LUD-21, or
+somebody wraps on a node. Everything else was checked and does not work - LNURL
+specs 01 through 23 carry no verification but LUD-21, LUD-09 and LUD-10 prove only
+to the payer, NIP-57 zap receipts carry `preimage` as a MAY and only where the
+provider speaks nostr at all, keysend lets the payer pick the preimage so no
+receipt property exists, BOLT12 is signed by the recipient exactly as BOLT11 is,
+and channel balances are private so nothing can be inferred by watching.
+
+Wrapping needs a node that can hold an invoice on one payment hash while paying
+another invoice on the same hash. Measured 2026-08-17: Alby Hub over NWC cannot,
+because ldk-node keys its payment store by hash and answers
+`DuplicatePayment: A payment with the given hash has already been initiated`. The
+collision also shadows the hold invoice, so `lookup_invoice` returns the failed
+outgoing attempt and `cancel_hold_invoice` answers `NOT_FOUND` on a payment that is
+still held. LND can, measured 2026-08-27 on the regtest stack in `dev/`: one node held
+an invoice on the hash it was also paying, the forward returned the preimage, and the
+wrap settled. Its invoices and its payments are separate records, which is what Boltz
+and Loop run this on. CLN needs a plugin, because stock `invoice` settles on receipt.
+
+Two nodes fix the collision and break the economics: one accumulates while the
+other drains, so the fronted amount stops returning and a rebalance treadmill
+starts. One node with LND keeps the loop closed.
+
+## When none of this applies
+
+Every list above is about a recipient reached at an address somebody else hosts.
+A recipient who owns the wallet does not need one: `nwcRail` mints over NIP-47 and
+`nwcVerifyEndpoint` answers the LUD-21 shape from `lookup_invoice`, so ZEUS Pay,
+Wallet of Satoshi and every other name on the refused lists is watchable through a
+connection string instead of through their address. The preimage then comes from
+the recipient's own node rather than from a hosted service, which is a shorter
+chain of trust than anything measured here. It costs a client that runs a server,
+which is why the survey and not this is what the gateway is built around.
+
 ## How the code uses this
 
 Presence of a preimage cannot be tested before someone pays, so the

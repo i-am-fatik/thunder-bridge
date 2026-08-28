@@ -78,7 +78,9 @@ export function qrToDataUrl(payload: string, options?: QrOptions): string {
 function svgOf(scanned: string, options?: QrOptions): string {
   const size = options?.size ?? 256;
   const color = options?.color ?? "#000";
-  if (!SAFE_COLOR.test(color)) throw new Error(`Invalid color: ${color}`);
+  if (!SAFE_COLOR.test(color)) {
+    throw new Error(`Invalid color: ${color}`);
+  }
 
   return renderSvg(scanned, size, color);
 }

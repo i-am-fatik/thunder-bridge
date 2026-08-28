@@ -36,7 +36,8 @@ function payment(nth: number): UnsavedPayment {
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
 		sealed: null,
-		webhooks: [{ url: HOOK, secret: "hunter2" }],
+		caller: null,
+		webhooks: [{ url: HOOK }],
 	};
 }
 
@@ -61,7 +62,7 @@ test("the same invoice inserted twice converges to one payment with merged webho
 		const first = store.insert(payment(2));
 		const again = store.insert({
 			...payment(2),
-			webhooks: [{ url: "https://elsewhere.example/hook", secret: null }],
+			webhooks: [{ url: "https://elsewhere.example/hook" }],
 		});
 
 		expect(again.id).toBe(first.id);
@@ -113,7 +114,9 @@ test("a payment parked with no due time is never handed out again", () => {
 test("only as many payments are taken as the batch asks for", () => {
 	const { store, stop } = openStore();
 	try {
-		for (let n = 0; n < 5; n += 1) store.insert(payment(n));
+		for (let n = 0; n < 5; n += 1) {
+			store.insert(payment(n));
+		}
 
 		const handed = [...store.duePolls(2, 30), ...store.duePolls(2, 30), ...store.duePolls(2, 30)];
 
@@ -145,7 +148,6 @@ test("settling a payment owes its webhooks and takes it off the worklist", () =>
 		expect(store.duePolls(10, 0)).toEqual([]);
 		const owed = store.dueDeliveries(10, 0);
 		expect(owed.map((hook) => hook.url)).toEqual([HOOK]);
-		expect(owed[0]?.secret).toBe("hunter2");
 		expect(JSON.parse(owed[0]?.body ?? "{}")).toMatchObject({ id: one.id, status: "paid" });
 	} finally {
 		stop();
@@ -258,11 +260,11 @@ test("a key left claimed by a crashed request is retaken once its lease runs out
 test("the store reports itself full once the worklist reaches its cap", () => {
 	const { store, stop } = openStore({ maxPending: 2 });
 	try {
-		expect(store.full()).toBe(false);
+		expect(store.full(null)).toBe(false);
 		store.insert(payment(0));
-		expect(store.full()).toBe(false);
+		expect(store.full(null)).toBe(false);
 		store.insert(payment(1));
-		expect(store.full()).toBe(true);
+		expect(store.full(null)).toBe(true);
 	} finally {
 		stop();
 	}
@@ -276,7 +278,7 @@ test("a pruned origin does not start its sequence over and lose what it takes on
 		one.store.paid(first.id, preimage(0));
 		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
 
-		one.store.sweep(0);
+		one.store.sweep(0, 7_776_000);
 		expect(one.store.info().rows.accepted).toBe(0);
 
 		const second = one.store.insert(payment(1));
@@ -295,14 +297,14 @@ test("a webhook only the other instance knew about is owed once the sweep notice
 	const theirs = "https://elsewhere.example/hook";
 	try {
 		const mine = one.store.insert(payment(0));
-		two.store.insert({ ...payment(0), webhooks: [{ url: theirs, secret: null }] });
+		two.store.insert({ ...payment(0), webhooks: [{ url: theirs }] });
 		one.store.paid(mine.id, preimage(0));
 
 		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
 		expect(two.store.get(mine.id)?.status).toBe("paid");
 		expect(two.store.dueDeliveries(10, 30)).toEqual([]);
 
-		two.store.sweep(3600);
+		two.store.sweep(3600, 7_776_000);
 
 		expect(two.store.dueDeliveries(10, 30).map((owed) => owed.url)).toEqual([theirs]);
 	} finally {
@@ -318,7 +320,7 @@ test("an accepted fact does not outlive the settlement that closed it", () => {
 		store.paid(waiting.id, preimage(0));
 		expect(store.info().rows.accepted).toBe(1);
 
-		store.sweep(0);
+		store.sweep(0, 7_776_000);
 
 		expect(store.info().rows.accepted).toBe(0);
 		expect(store.info().rows.paid).toBe(0);
@@ -350,7 +352,7 @@ test("a payment past the cap is still recorded and still offered to a peer", () 
 	try {
 		one.store.insert(payment(0));
 		const past = one.store.insert(payment(1));
-		expect(one.store.full()).toBe(true);
+		expect(one.store.full(null)).toBe(true);
 
 		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
 		two.store.gossip.onFacts(facts);
@@ -388,7 +390,7 @@ test("a pruned accepted fact is not resurrected by a peer that still holds it", 
 		two.store.gossip.onFacts(facts);
 		expect(two.store.info().pending).toBe(1);
 
-		two.store.sweep(0);
+		two.store.sweep(0, 7_776_000);
 		expect(two.store.info().pending).toBe(0);
 
 		two.store.gossip.onFacts(facts);
@@ -407,7 +409,11 @@ test("a peer that names no accepted facts is still heard on the ones it does nam
 		one.store.paid(waiting.id, preimage(0));
 		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
 
-		two.store.gossip.onFacts({ paid: facts.paid, outbox: facts.outbox, delivered: facts.delivered });
+		two.store.gossip.onFacts({
+			paid: facts.paid,
+			outbox: facts.outbox,
+			delivered: facts.delivered,
+		});
 
 		expect(two.store.get(waiting.id)?.status).toBe("paid");
 		expect(two.store.info().rows.accepted).toBe(0);
@@ -426,7 +432,7 @@ test("the worklist a rollback used to read is gone, and the stamp says so", () =
 
 	const opened = new DatabaseSync(ledger);
 	try {
-		expect(schemaVersionOf(ledger)).toBe(2);
+		expect(schemaVersionOf(ledger)).toBe(3);
 		const tables = opened
 			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending'")
 			.all();
@@ -481,7 +487,7 @@ test("a ledger from before the schema was versioned keeps its payments and gets 
 	const { store, stop } = openStore({ ledger });
 	try {
 		expect(store.get(waiting.id)).not.toBeNull();
-		expect(schemaVersionOf(ledger)).toBe(2);
+		expect(schemaVersionOf(ledger)).toBe(3);
 	} finally {
 		stop();
 		rmSync(directory, { recursive: true, force: true });
@@ -554,6 +560,88 @@ test("a ledger left over from before the request cache changed shape still boots
 		expect(store.claim("stale", "fingerprint", 60)).toEqual({ state: "mine" });
 	} finally {
 		stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a sealed blob outlives the payment it belonged to, and nothing readable does", () => {
+	const one = openStore();
+	try {
+		const owner = "ab".repeat(32);
+		const mine = one.store.insert({
+			...payment(0),
+			caller: owner,
+			sealed: "v1.thisIsTheClientsOwnCiphertext",
+		});
+		one.store.paid(mine.id, preimage(0));
+
+		one.store.sweep(0, 7_776_000);
+
+		expect(one.store.get(mine.id)).toBeNull();
+		const kept = one.store.kept(mine.id);
+		expect(kept?.sealed).toBe("v1.thisIsTheClientsOwnCiphertext");
+		expect(kept?.caller).toBe(owner);
+		expect(kept?.status).toBe("paid");
+		expect(JSON.stringify(kept)).not.toContain(payment(0).paymentHash);
+		expect(JSON.stringify(kept)).not.toContain("coinos.io");
+		expect(JSON.stringify(kept)).not.toContain(preimage(0));
+	} finally {
+		one.stop();
+	}
+});
+
+test("the blob goes too once the window an instance published has closed", () => {
+	const one = openStore();
+	try {
+		const mine = one.store.insert({ ...payment(1), sealed: "v1.keptForAWhile" });
+		one.store.paid(mine.id, preimage(1));
+
+		one.store.sweep(0, 0);
+
+		expect(one.store.kept(mine.id)).toBeNull();
+	} finally {
+		one.stop();
+	}
+});
+
+test("a payment that sealed nothing leaves nothing behind at all", () => {
+	const one = openStore();
+	try {
+		const mine = one.store.insert(payment(2));
+		one.store.paid(mine.id, preimage(2));
+
+		one.store.sweep(0, 7_776_000);
+
+		expect(one.store.get(mine.id)).toBeNull();
+		expect(one.store.kept(mine.id)).toBeNull();
+	} finally {
+		one.stop();
+	}
+});
+
+test("a record written before callers existed reads back as anonymous, not as nobody's", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-before-callers-"));
+	const ledger = join(directory, "ledger.db");
+	const before = openStore({ ledger });
+	const mine = before.store.insert(payment(0));
+	before.stop();
+
+	const written = new DatabaseSync(ledger);
+	const held = written.prepare("SELECT payment FROM accepted WHERE id = ?").get(mine.id) as {
+		payment: string;
+	};
+	const asItUsedToBe = JSON.parse(held.payment) as Record<string, unknown>;
+	delete asItUsedToBe["caller"];
+	written
+		.prepare("UPDATE accepted SET payment = ? WHERE id = ?")
+		.run(JSON.stringify(asItUsedToBe), mine.id);
+	written.close();
+
+	const after = openStore({ ledger });
+	try {
+		expect(after.store.get(mine.id)?.caller).toBeNull();
+	} finally {
+		after.stop();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });

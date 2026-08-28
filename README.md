@@ -124,7 +124,9 @@ standard's camelCase, and there is no authorization server.
 | Variable | Default | Meaning |
 |---|---|---|
 | `CLUSTER_KEY` | required | 32 bytes of hex, the swarm topic and the right to write a fact |
-| `CLUSTER_KEYS_RETIRED` | none | comma-separated 32-byte hex keys still accepted when verifying a peer's facts, so `CLUSTER_KEY` can be rotated without throwing the ledger away |
+| `MINTING` | off | `1` turns on `POST /incoming-payments` and `POST /quotes`. Off, the gateway only watches invoices a client minted itself, which is the only way the operator never sees an address or an amount |
+| `CLIENT_KEYS` | none | comma-separated client public keys this instance serves, and it serves nobody else. Unset serves everybody |
+| `KEEP_SEALED_DAYS` | `90` | how long a sealed blob outlives the payment it belonged to, after which it goes too |
 | `PORT` | `3000` | listen port, Railway sets this for you |
 | `LEDGER` | `./data/ledger.db` | the SQLite file, everything lives here |
 | `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/ready`, `/openapi.yaml`, `/docs` and `/webhook-key`. Blank counts as none, so a variable someone emptied leaves the gateway public rather than private and open to everyone |
@@ -135,7 +137,7 @@ standard's camelCase, and there is no authorization server.
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
 | `POLLS_PER_SEC` | `5` | fallback ceiling on outbound `verify` polls per host, used only where the endpoint names none itself with `RateLimit-Limit`. It stops one wallet everybody uses being hit harder than this however many payments point at it |
-| `MAX_PENDING` | `5000` | payments the cluster watches before a create or a watch answers 503, never a limit on what an instance knows |
+| `MAX_PENDING` | `5000` | payments one signing key may have waiting before a create or a watch answers 429. Every unsigned caller shares one share of it. `0` takes nothing new while still polling and serving what it holds, which is how a release that changes a delivery is cut over |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, each one that far further off than the last, retried for as long as the payment has left and never under an hour |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`. At `info` a line names every payment paid and every webhook delivered, so a shop's order flow is in your logs until you turn it down |
@@ -161,7 +163,7 @@ docker run -d -p 3000:3000 -v thunder-data:/data \
   -e CLUSTER_KEY=$(openssl rand -hex 32) thunder-bridge
 ```
 
-One image, one process: `node:24.19-slim` running `src/index.ts`. The build stage
+One image, one process: `node:26.6-slim` running `src/index.ts`. The build stage
 gates it with `npm ci`, the whole test suite, and `tsc --noEmit`.
 
 ## Railway
@@ -184,19 +186,27 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
 
 ## Limits
 
-- **The recipient must implement LUD-21.** BTCPay v2.3.8+, Alby, coinos, Blink,
-  stacker.news, Minibits and the Spark-hosted wallets do. Wallet of Satoshi,
-  Strike, Cash App, ZBD and Primal do not, and their users are refused at
-  creation. Measured coverage is in
+- **The recipient must implement LUD-21.** Blink is the easiest recipient to
+  point somebody at: non-custodial accounts shipped 2026-06-24 on Spark, the
+  address stays `username@blink.sv` whether the account holds its own keys or
+  not, and that domain answers `verify` at `lnurl.blink.sv`. BTCPay v2.3.8+ on a
+  node of your own, Alby, coinos, stacker.news, Minibits, Blitz and the
+  Spark-hosted wallets answer too. Wallet of Satoshi, Strike, Cash App, ZBD and
+  Primal do not, and their users are refused at creation. Measured coverage is in
   [docs/lud21-coverage.md](docs/lud21-coverage.md), re-measured against live
   wallets on the first of each month rather than read off anyone's changelog.
+- **Unless you own the wallet, in which case use NWC instead.** `nwcRail` mints on
+  a wallet of your own over NIP-47 and serves the gateway a `nwcVerifyEndpoint` of
+  yours, so a recipient with no LUD-21 address anywhere is watched anyway and the
+  preimage comes from their own node rather than from a hosted address service.
+  The gateway still speaks nothing but https, and the connection never reaches it.
 - **No fee, and no privacy layer.** Nothing flows through this service, and the
   payer sees the recipient's real invoice and node.
 - **No BOLT12.** Fetching an invoice from an offer needs a node.
 - **The proof is the recipient's word, cryptographically.** The preimage proves
   their server released it. It protects the payer against this service, not
   against a recipient inflating their own totals.
-- **Nothing is watched for longer than three days.** Every payment gets that same
+- **Nothing is watched for longer than thirty days.** Every payment gets that same
   promise, and `POST /watched-payments` refuses an `expires_at` past it rather
   than taking on a watch it will drop. A wallet's 30-day invoice stays payable
   after day three, it just is not being watched here.
@@ -206,22 +216,20 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   that answers publicly and then rebinds to `127.0.0.1` never gets connected to, and
   the certificate is still checked against the name rather than the address. A name
   nothing answers for is refused here rather than left to the connection.
-- **Without `GATEWAY_TOKEN` every write is anonymous, and nothing here rate limits
-  one.** That is what a public instance is for, but it means one caller can take all
-  `MAX_PENDING` slots with watches nobody will ever pay, and every later create or
-  watch answers 503 until those expire. `POST /quotes` is the same shape pointed
-  outward: it makes this service fetch a host the caller names, which is why it may
-  only name a public https one, at most three addresses per domain, and never more
-  than the addresses it resolved and verified itself. An instance meant to be
-  reachable by strangers wants a rate limit in front of it.
-- **An `Idempotency-Key` is a capability on a shared instance.** Listing is refused
-  without a token and a payment id is an HMAC nobody can guess, but a replay needs
-  neither: present the same key with the same body and the original payment comes
-  back, `bolt11` and `verify_url` included. That is what makes a retry safe, and on
-  an instance strangers share it also means a guessable key hands your invoice to
-  whoever guesses it. Use a random one. There is no per-caller identity to scope it
-  by, because `GATEWAY_TOKEN` is one bearer for the whole instance rather than one
-  per caller.
+- **A keypair is free to make, so a quota is fairness rather than a defence.**
+  `MAX_PENDING` counts per signing key, so one caller filling its share leaves
+  everybody else's alone and a caller over it gets `429`. Nothing stops the same
+  stranger coming back under a new key, though. `CLIENT_KEYS` does, by serving a named
+  list and nobody else, and that is the whole defence on an instance whose clients are
+  known. An instance open to strangers still wants a limiter in front of it.
+- **An unsigned caller is anonymous, and anonymous callers share one share.** Signing
+  is what makes a payment yours to read, so a caller that signs nothing gets a payment
+  any holder of the id can read, and its watches count against the one share every
+  anonymous caller shares.
+- **An `Idempotency-Key` is scoped to whoever presented it, and only for a signed
+  caller.** A replay hands back the payment that key created, which is what makes a
+  retry safe. On a signed call that is your key's own key. Unsigned, it is still a
+  capability anybody can guess their way into, so use a random one or sign.
 
 ## More
 

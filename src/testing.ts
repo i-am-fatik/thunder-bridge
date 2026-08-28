@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type AddressInfo } from "node:net";
+import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -26,23 +26,16 @@ export type TestOptions = {
 	takeoverAfterSecs?: number;
 	deliveryBackoffSecs?: number;
 	key?: Uint8Array;
-	retiredKeys?: Uint8Array[];
 };
 
 export function openStore(options: TestOptions = {}): Opened {
 	const path = options.ledger ?? join(mkdtempSync(join(tmpdir(), "tbd-")), "ledger.db");
 	const key = options.key ?? CLUSTER_KEY;
-	const retired = options.retiredKeys ?? [];
-	const ledger = new Ledger(
-		path,
-		key,
-		{
-			takeoverAfterSecs: options.takeoverAfterSecs ?? 600,
-			deliveryBackoffSecs: options.deliveryBackoffSecs ?? 30,
-		},
-		retired,
-	);
-	const store = new Store(ledger, key, options.maxPending ?? 5000, retired);
+	const ledger = new Ledger(path, key, {
+		takeoverAfterSecs: options.takeoverAfterSecs ?? 600,
+		deliveryBackoffSecs: options.deliveryBackoffSecs ?? 30,
+	});
+	const store = new Store(ledger, key, options.maxPending ?? 5000);
 	const cluster = new Cluster(store.gossip, {
 		key,
 		listenPort: options.listenPort ?? 0,
@@ -55,7 +48,9 @@ export function openStore(options: TestOptions = {}): Opened {
 		stop: () => {
 			cluster.close();
 			store.close();
-			if (!options.ledger) rmSync(dirname(path), { recursive: true, force: true });
+			if (!options.ledger) {
+				rmSync(dirname(path), { recursive: true, force: true });
+			}
 		},
 	};
 }
@@ -73,7 +68,9 @@ export function freePort(): Promise<number> {
 export async function until(condition: () => boolean, what: string): Promise<void> {
 	const deadline = Date.now() + WAIT_TIMEOUT_MS;
 	while (!condition()) {
-		if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+		if (Date.now() > deadline) {
+			throw new Error(`timed out waiting for ${what}`);
+		}
 		await sleep(WAIT_POLL_MS);
 	}
 }

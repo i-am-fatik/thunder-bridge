@@ -1,8 +1,8 @@
 import { decodeInvoice, preimageMatchesHash } from "./bolt11.ts";
 import { ask, BODY_LIMIT_BYTES } from "./outbound.ts";
+import { NoWalletAvailable, type WalletFailure, WalletRefused } from "./refusal.ts";
 import { sha256Hex } from "./sha256.ts";
 import { publicHttps } from "./url.ts";
-import { NoWalletAvailable, WalletRefused, type WalletFailure } from "./refusal.ts";
 
 export const VERIFY_WITHOUT_PREIMAGE = ["zeuspay.com", "zeusnuts.com", "ecash.love"];
 const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
@@ -95,11 +95,15 @@ async function firstThatServes<T>(
 	const refusals: WalletFailure[] = [];
 
 	for (const address of addresses) {
-		if (deadline.aborted) break;
+		if (deadline.aborted) {
+			break;
+		}
 		try {
 			return { won: await attempt(address, deadline), refusals };
 		} catch (refusal: unknown) {
-			if (!(refusal instanceof WalletRefused)) throw refusal;
+			if (!(refusal instanceof WalletRefused)) {
+				throw refusal;
+			}
 			console.warn(`wallet ${address} refused, ${refusal.reason}: ${refusal.message}`);
 			refusals.push({ address, reason: refusal.reason });
 		}
@@ -107,20 +111,13 @@ async function firstThatServes<T>(
 	throw new NoWalletAvailable(refusals);
 }
 
-async function probe(
-	address: string,
-	amountMsat: number,
-	deadline: AbortSignal,
-): Promise<Probed> {
+async function probe(address: string, amountMsat: number, deadline: AbortSignal): Promise<Probed> {
 	const [user, domain] = splitAddress(address);
 	if (cannotReleaseAPreimage(domain)) {
 		throw new WalletRefused("cannot-prove-delivery", `${address} never releases a preimage`);
 	}
 
-	const pay = await answered<PayRequest>(
-		`https://${domain}/.well-known/lnurlp/${user}`,
-		deadline,
-	);
+	const pay = await answered<PayRequest>(`https://${domain}/.well-known/lnurlp/${user}`, deadline);
 	if (pay.tag !== "payRequest" || !pay.callback) {
 		throw new WalletRefused("unreachable", `${address} answered with no payRequest`);
 	}
@@ -142,7 +139,9 @@ async function resolveAddress(
 	const { pay } = await probe(address, amountMsat, deadline);
 
 	const invoice = await answered<CallbackInvoice>(withAmount(pay.callback, amountMsat), deadline);
-	if (!invoice.pr) throw new WalletRefused("unreachable", `${address} returned no invoice`);
+	if (!invoice.pr) {
+		throw new WalletRefused("unreachable", `${address} returned no invoice`);
+	}
 	if (!invoice.verify || !publicHttps(invoice.verify)) {
 		throw new WalletRefused(
 			"cannot-prove-delivery",
@@ -196,7 +195,9 @@ export async function checkSettled(verifyUrl: string, paymentHash: string): Prom
 		pace: paceAskedFor(answer.headers),
 		ceiling: ceilingAskedFor(answer.headers),
 	};
-	if (!answer.said.settled || !answer.said.preimage) return { preimage: null, ...asked };
+	if (!answer.said.settled || !answer.said.preimage) {
+		return { preimage: null, ...asked };
+	}
 	if (!preimageMatchesHash(answer.said.preimage, paymentHash)) {
 		throw new Error(`verify returned a preimage that does not hash to ${paymentHash}`);
 	}
@@ -214,18 +215,24 @@ export async function speaksVerify(url: string): Promise<boolean> {
 
 function paceAskedFor(headers: Headers): number | null {
 	const asked = /max-age\s*=\s*(\d+)/i.exec(headers.get("cache-control") ?? "");
-	if (!asked) return null;
+	if (!asked) {
+		return null;
+	}
 
 	return Math.min(Math.max(Number(asked[1]), MIN_PACE_SECS), MAX_PACE_SECS);
 }
 
 function ceilingAskedFor(headers: Headers): number | null {
 	const asked = /^\s*(\d+)\s*(?:;\s*w\s*=\s*(\d+))?/i.exec(headers.get("ratelimit-limit") ?? "");
-	if (!asked) return null;
+	if (!asked) {
+		return null;
+	}
 
 	const perWindow = Number(asked[1]);
 	const window = asked[2] === undefined ? 1 : Number(asked[2]);
-	if (perWindow === 0 || window === 0) return null;
+	if (perWindow === 0 || window === 0) {
+		return null;
+	}
 
 	return Math.min(Math.max(perWindow / window, MIN_PER_SECOND), MAX_PER_SECOND);
 }
@@ -275,7 +282,9 @@ function toWords(bytes: Uint8Array): number[] {
 			words.push((accumulator >> bits) & 31);
 		}
 	}
-	if (bits > 0) words.push((accumulator << (5 - bits)) & 31);
+	if (bits > 0) {
+		words.push((accumulator << (5 - bits)) & 31);
+	}
 
 	return words;
 }
@@ -301,7 +310,9 @@ function bech32Polymod(values: number[]): number {
 		const top = checksum >> 25;
 		checksum = ((checksum & 0x1ffffff) << 5) ^ value;
 		for (let bit = 0; bit < 5; bit++) {
-			if ((top >> bit) & 1) checksum ^= BECH32_GENERATOR[bit]!;
+			if ((top >> bit) & 1) {
+				checksum ^= BECH32_GENERATOR[bit]!;
+			}
 		}
 	}
 
@@ -351,7 +362,9 @@ async function answeredJson<T>(
 	deadline?: AbortSignal,
 ): Promise<{ said: T; headers: Headers }> {
 	const answer = await ask(url, { headers: { accept: "application/json" }, deadline });
-	if (!answer.ok) throw new Error(`${url} answered ${answer.status}`);
+	if (!answer.ok) {
+		throw new Error(`${url} answered ${answer.status}`);
+	}
 	if (answer.truncated) {
 		throw new Error(`${url} answered with more than the ${BODY_LIMIT_BYTES} bytes we read`);
 	}

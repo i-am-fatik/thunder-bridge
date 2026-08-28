@@ -36,6 +36,29 @@ leaves. `DRAIN_TIMEOUT_SECS` bounds the wait. A webhook may go out twice across 
 drain that timed out, which is the documented at-least-once contract, and the
 receiver deduplicates on `id`.
 
+### When the release changes what a delivery looks like
+
+That drain is not enough for a release that changes the shape of a webhook body, and
+1.0 was one. A settlement owed but not yet delivered is stored as a rendered body, so
+it goes out in the old shape after the new build is running, and a client on the new
+version reads it as nothing at all and drops it. The gateway sees a 2xx and retires
+it. Nobody is told about a payment that was made.
+
+So a release that touches the delivery body is cut over rather than deployed:
+
+1. Stop taking new work. Set `MAX_PENDING=0` and redeploy the current build, or point
+   traffic away. A create and a watch both answer 429 while it holds.
+2. Wait for the outbox to empty. `/ready` with the bearer reports `parked_deliveries`,
+   and `sync.rows.outbox` against `sync.rows.delivered` says whether anything is still
+   owed. Nothing owed means nothing can be dropped.
+3. Then deploy, and put `MAX_PENDING` back.
+
+Watches already registered are a slower version of the same question. They keep being
+polled and they settle into the new shape, so they are fine as long as their receivers
+moved to the new client. Ones whose receivers did not are the payments that go quiet.
+Thirty days is the longest any watch lives, so a cutover with no overlap means waiting
+that out, and a cutover without waiting means telling those clients first.
+
 ## Roll back
 
 Check the schema stamp first. `src/ledger.ts` refuses to open a ledger a newer
@@ -98,22 +121,27 @@ out of Railway the moment the instance is up.
 
 ## Rotate a cluster key
 
-Set `CLUSTER_KEYS_RETIRED` to the old key on every instance first, then move
-`CLUSTER_KEY` to the new one, instance by instance. A retired key still verifies a
-peer's facts and a peer's handshake, so a rolled instance keeps absorbing what an
-unrolled one signs, and the ledger it already holds stays readable throughout: the
-fact MAC is only ever checked on arrival from a peer, never on a local read.
+A rotation is a rotation. Set `CLUSTER_KEY` to the new value and restart: the ledger
+remembers which key signed it, by a fingerprint that proves the key without holding
+it, and a boot under a new one re-signs every fact it still holds in one transaction.
+The old value opens nothing afterwards, which is the point. There is no list of
+retired keys any more, because a key that still admits a peer and still writes facts
+was never retired.
 
-Two costs, both bounded. The swarm topic comes from `CLUSTER_KEY` alone, so while
-the roll is half done the two halves cannot find each other over the DHT and
-converge only once everyone carries the new key. And a socket ticket is signed with
-`CLUSTER_KEY` alone too, so a ticket minted by one half and presented to the other
-is refused for its 60 second life, which costs the client a re-mint.
+The pass is bounded by what a ledger keeps rather than by history: an hour past
+settlement, plus the window `KEEP_SEALED_DAYS` sets for sealed blobs.
 
-Payments keep the id they were minted under, because an id is a keyed hash of the
-payment hash. After a rotation the same invoice registered again gets a different
-id, and both remain readable. Drop the retired key once every instance carries the
-new one and nothing is left to verify from before.
+Roll every instance. While a roll is half done the two halves are apart, because the
+swarm topic, the socket ticket and now the facts themselves all come from the live key
+alone. A ticket minted by one half and presented to the other is refused for its 60
+second life, which costs the client a re-mint.
+
+One thing does not survive a rotation, and it is worth knowing which. A payment its
+caller signed for is named after that caller, so it replicates across a rotation
+untouched. A payment nobody signed for is named by this instance's key, so after a
+rotation it stays readable here and a peer will refuse it, because it no longer names
+its own invoice. Minted payments are the ones that arrive unsigned, which is one more
+reason the minting endpoint is off unless an instance turns it on.
 
 Where those keys are kept, who can read them, and what happens when the person
 holding them leaves is not decided yet, and this file will not pretend otherwise.
@@ -177,7 +205,7 @@ per-host ceiling never binds.
 On the watched path that arrangement is now the only one, and `VERIFY_CHALLENGE` is why.
 A `verify_url` a caller named is challenged before anything is polled and has to echo the
 nonce, which no wallet will do. The reason is not politeness. This gateway polls a URL
-for three days on a caller's word, and one caller pointing it at a big wallet gets that
+for thirty days on a caller's word, and one caller pointing it at a big wallet gets that
 wallet's rate limit applied to this instance's address, which every other client here
 shares. Moving the last hop to the caller's own endpoint moves that cost onto the caller.
 An instance whose callers are all known can set `VERIFY_CHALLENGE=0` and go back to
@@ -212,28 +240,49 @@ There is no redelivery command. The payment is readable by id and on the trigger
 so the answer is for the client to reconcile against `GET /incoming-payments/{id}`, which
 is what a client should be able to do anyway.
 
-## A client who would rather not hand you a webhook secret
+## A payment is read by its owner, and followed by whoever holds the id
 
-They register the webhook with no `secret`, and the gateway signs the delivery
-`ed25519=<signature>` with a key derived from `CLUSTER_KEY` instead. They fetch the
-public half from `/webhook-key`, which answers without a bearer, and verify against
-it. Every instance in one cluster publishes the same key, so a delivery from any of
-them checks out.
+An HTTP read of a payment answers 404 to anybody but the key that created it. A socket
+on `/ws/incoming-payments/{id}` does not, and that is on purpose: a browser holds no
+server side secret, so it cannot sign, and watching your own payment from a page is
+what the socket is for. The id is derived from the caller's key, so a payer holding the
+invoice cannot work it out.
 
-Prefer it, and say so when someone asks. A secret they give you is kept in the
-ledger and replicated to every peer, because any instance may be the one that
-delivers, so it is one more thing of theirs you are holding. Rotating `CLUSTER_KEY`
-changes this key too, so a receiver caching it has to fetch it again.
+Tell a client who wants even that closed to ask for a ticket, or to run an instance
+with `GATEWAY_TOKEN`, which puts the socket handshake behind the bearer too.
 
-Either way their endpoint answers the challenge before the payment is taken on, so a
-client who registers a webhook against a server that is not up yet gets a 424 and no
-payment. Tell them to deploy the handler first and register second.
+## A client asking how a delivery is signed
+
+`ed25519=<signature>` with a key derived from `CLUSTER_KEY`, and there is no other
+answer any more. They fetch the public half from `/webhook-key`, which answers without
+a bearer, and verify against it. Every instance in one cluster publishes the same key,
+so a delivery from any of them checks out.
+
+There is no shared secret to register, and sending one is refused rather than ignored,
+so a client migrating from an older version hears about it instead of wondering why
+nothing verifies. You hold nothing of theirs.
+
+Rotating `CLUSTER_KEY` changes this key too, which makes a rotation something the
+clients see. Tell them a signature that stops verifying is a reason to read
+`/webhook-key` again before it is a reason to distrust you.
+
+Their endpoint answers the challenge before the payment is taken on, so a client who
+registers a webhook against a server that is not up yet gets a 424 and no payment.
+Tell them to deploy the handler first and register second.
 
 ## The instance is under abuse
 
-There is no per-caller quota and no rate limit on creation. `MAX_PENDING` is one
-global ceiling, so a single caller can starve every other one. Set
-`GATEWAY_TOKEN`, which turns every route except `/health`, `/ready`,
-`/openapi.yaml` and `/docs` into a bearer route. Without one, every write is
-anonymous. A gateway meant to be reachable by strangers wants a rate limit in
-front of it, which is not in this process.
+`MAX_PENDING` counts per signing key, so one caller filling its share leaves everybody
+else's alone and a caller over it gets 429 with the ceiling in the headers. Every
+caller that signs nothing shares one share between them, which is all you can fairly
+do for somebody who will not say who they are.
+
+That is fairness, not a defence. A keypair costs nothing to make, so the same stranger
+comes back under a new one. Two things actually stop them, and both are lists rather
+than counters. `CLIENT_KEYS` names the client keys this instance serves and refuses
+everybody else with 403, which on an instance whose clients you know is the whole
+answer. `GATEWAY_TOKEN` turns every route except `/health`, `/ready`, `/openapi.yaml`,
+`/docs` and `/webhook-key` into a bearer route.
+
+An instance genuinely open to strangers wants a limiter in front of it, which is not in
+this process and will not be.

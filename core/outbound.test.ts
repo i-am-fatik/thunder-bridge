@@ -9,7 +9,9 @@ vi.mock("node:dns/promises", async (importOriginal) => {
 	return {
 		...dns,
 		lookup: (host: string, options: LookupAllOptions) =>
-			host === "nothing.example" ? Promise.reject(new Error("ENOTFOUND")) : dns.lookup(host, options),
+			host === "nothing.example"
+				? Promise.reject(new Error("ENOTFOUND"))
+				: dns.lookup(host, options),
 	};
 });
 
@@ -82,7 +84,11 @@ test("a redirect that does not keep the method drops the body with it", async ()
 		return url === ENTRY ? redirect(ELSEWHERE, 303) : new Response("done");
 	});
 	try {
-		await ask(ENTRY, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+		await ask(ENTRY, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: "{}",
+		});
 		expect(sent[0]).toMatchObject({ method: "POST", body: "{}" });
 		expect(sent[1]).toMatchObject({ method: "GET" });
 		expect(sent[1]?.body).toBeUndefined();
@@ -151,7 +157,9 @@ test("an empty answer is read without a body to read", async () => {
 test("a redirect that does not say where to is refused rather than retried", async () => {
 	const { seen, restore } = answering(() => new Response(null, { status: 302 }));
 	try {
-		await expect(ask(ENTRY, { method: "POST", body: "{}" })).rejects.toThrow(/without saying where to/);
+		await expect(ask(ENTRY, { method: "POST", body: "{}" })).rejects.toThrow(
+			/without saying where to/,
+		);
 		expect(seen).toEqual([ENTRY]);
 	} finally {
 		restore();

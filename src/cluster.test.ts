@@ -1,11 +1,14 @@
 import { createHmac } from "node:crypto";
-
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "vitest";
+import { callerKey, paymentNamedBy } from "../core/caller.ts";
 
 import type { UnsavedPayment } from "./payment.ts";
 import type { Store } from "./store.ts";
 
-import { CLUSTER_KEY, freePort, openStore, until, type TestOptions } from "./testing.ts";
+import { CLUSTER_KEY, freePort, openStore, type TestOptions, until } from "./testing.ts";
 
 const TAKEOVER_TIMEOUT_MS = 25_000;
 
@@ -35,13 +38,16 @@ function payment(nth: number): UnsavedPayment {
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
 		sealed: null,
-		webhooks: [{ url: "https://example.com/hook", secret: "hunter2" }],
+		caller: null,
+		webhooks: [{ url: "https://example.com/hook" }],
 	};
 }
 
 function signedAsCluster(source: string, fields: (string | number | null)[]): string {
 	const hmac = createHmac("sha256", CLUSTER_KEY).update(source);
-	for (const field of fields) hmac.update("\x00").update(field === null ? "\x01" : String(field));
+	for (const field of fields) {
+		hmac.update("\x00").update(field === null ? "\x01" : String(field));
+	}
 
 	return hmac.digest("hex");
 }
@@ -129,7 +135,9 @@ test("every instance takes on every pending payment, whoever created it", async 
 	const cluster = await connected();
 	try {
 		const made: string[] = [];
-		for (let n = 0; n < 20; n += 1) made.push(cluster.first.insert(spread(n)).id);
+		for (let n = 0; n < 20; n += 1) {
+			made.push(cluster.first.insert(spread(n)).id);
+		}
 
 		const seen = (store: Store) => made.filter((one) => store.get(one) !== null).length;
 		await until(() => seen(cluster.second) === 20, "the pending set to gossip across");
@@ -177,8 +185,7 @@ test("both instances say they are in sync and agree on what they hold", async ()
 			"the accepted marks to match",
 		);
 		await until(
-			() =>
-				cluster.first.info().convergedAt !== null && cluster.second.info().convergedAt !== null,
+			() => cluster.first.info().convergedAt !== null && cluster.second.info().convergedAt !== null,
 			"both instances to hear a reply that came back short",
 		);
 
@@ -192,7 +199,7 @@ test("two instances at their cap still both hold every payment", async () => {
 	const cluster = await connected({ maxPending: 2 });
 	try {
 		const made = [0, 1, 2].map((n) => cluster.first.insert(spread(n)).id);
-		expect(cluster.first.full()).toBe(true);
+		expect(cluster.first.full(null)).toBe(true);
 
 		await until(
 			() => made.every((one) => cluster.second.get(one) !== null),
@@ -220,7 +227,9 @@ test("a payment of my own is polled at once, however much a peer handed over", a
 	const cluster = await connected();
 	try {
 		const theirs: string[] = [];
-		for (let n = 0; n < 20; n += 1) theirs.push(cluster.first.insert(spread(n)).id);
+		for (let n = 0; n < 20; n += 1) {
+			theirs.push(cluster.first.insert(spread(n)).id);
+		}
 		await until(
 			() => theirs.every((one) => cluster.second.get(one) !== null),
 			"the worklist to gossip across",
@@ -315,11 +324,11 @@ test("the same invoice inserted on both instances converges to one payment", asy
 		const invoice = payment(1);
 		const mine = cluster.first.insert({
 			...invoice,
-			webhooks: [{ url: "https://a.example/hook", secret: null }],
+			webhooks: [{ url: "https://a.example/hook" }],
 		});
 		const theirs = cluster.second.insert({
 			...invoice,
-			webhooks: [{ url: "https://b.example/hook", secret: null }],
+			webhooks: [{ url: "https://b.example/hook" }],
 		});
 
 		expect(theirs.id).toBe(mine.id);
@@ -356,7 +365,7 @@ test("a payment minted with nobody listening reaches the instance that joins lat
 	}
 });
 
-test("an instance rolled onto a new key still takes the facts its unrolled peers signed", () => {
+test("an instance on a new key refuses the facts the old key signed, which is what rotating means", () => {
 	const NEXT_KEY = Buffer.from("11".repeat(32), "hex");
 	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
 
@@ -365,16 +374,175 @@ test("an instance rolled onto a new key still takes the facts its unrolled peers
 	const { facts } = before.store.gossip.since(nothingSeen);
 	before.stop();
 
-	const rolled = openStore({ key: NEXT_KEY, retiredKeys: [CLUSTER_KEY] });
-	const alone = openStore({ key: NEXT_KEY });
+	const rolled = openStore({ key: NEXT_KEY });
 	try {
-		rolled.store.gossip.onFacts(facts);
-		expect(rolled.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
-
-		expect(() => alone.store.gossip.onFacts(facts)).toThrow("without the cluster key");
-		expect(alone.store.get(taken.id)).toBeNull();
+		expect(() => rolled.store.gossip.onFacts(facts)).toThrow("without the cluster key");
+		expect(rolled.store.get(taken.id)).toBeNull();
 	} finally {
 		rolled.stop();
-		alone.stop();
+	}
+});
+
+test("a ledger rolled onto a new key keeps every payment, because the facts are re-signed", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-rolled-"));
+	const ledger = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("22".repeat(32), "hex");
+
+	const before = openStore({ ledger });
+	const taken = before.store.insert(payment(1));
+	before.store.paid(taken.id, preimage(1));
+	before.stop();
+
+	const after = openStore({ ledger, key: NEXT_KEY });
+	try {
+		expect(after.store.get(taken.id)?.status).toBe("paid");
+
+		const settled = after.store.list(10, 1000);
+		expect(settled.map((one) => one.id)).toEqual([taken.id]);
+	} finally {
+		after.stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a caller's payment replicates across a rotation, and the old key opens nothing", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-resigned-"));
+	const ledger = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("33".repeat(32), "hex");
+	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
+	const owner = (await callerKey("rail_rolled_8c2f5a1d")).publicKeyHex;
+
+	const before = openStore({ ledger });
+	const taken = before.store.insert({ ...payment(2), caller: owner });
+	before.stop();
+
+	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const { facts } = rolled.store.gossip.since(nothingSeen);
+	rolled.stop();
+
+	const peer = openStore({ key: NEXT_KEY });
+	const stale = openStore();
+	try {
+		peer.store.gossip.onFacts(facts);
+		expect(peer.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
+
+		expect(() => stale.store.gossip.onFacts(facts)).toThrow("without the cluster key");
+	} finally {
+		peer.stop();
+		stale.stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a payment nobody signed for stops replicating after a rotation, because the key named it", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-anonymous-"));
+	const ledger = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("44".repeat(32), "hex");
+	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
+
+	const before = openStore({ ledger });
+	const taken = before.store.insert(payment(3));
+	before.stop();
+
+	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const { facts } = rolled.store.gossip.since(nothingSeen);
+	const peer = openStore({ key: NEXT_KEY });
+	try {
+		expect(rolled.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
+		expect(() => peer.store.gossip.onFacts(facts)).toThrow("does not name the invoice");
+	} finally {
+		rolled.stop();
+		peer.stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a payment named after its caller replicates, and the peer checks the name itself", async () => {
+	const cluster = await connected();
+	try {
+		const owner = (await callerKey("rail_cluster_4b8f2e1a9c7d3056")).publicKeyHex;
+		const mine = cluster.first.insert({ ...payment(5), caller: owner });
+
+		expect(mine.id).toBe(paymentNamedBy(owner, payment(5).paymentHash));
+		await until(
+			() => cluster.second.get(mine.id) !== null,
+			"the caller's payment to gossip across",
+		);
+
+		const settled = cluster.first.paid(mine.id, preimage(5));
+		expect(settled.won).toBe(true);
+		await until(() => cluster.second.get(mine.id)?.status === "paid", "the paid fact to replicate");
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a fact named after one caller but claiming another is refused, key or no key", async () => {
+	const cluster = await connected();
+	try {
+		const owner = (await callerKey("rail_cluster_4b8f2e1a9c7d3056")).publicKeyHex;
+		const misnamed = {
+			...spread(101),
+			caller: owner,
+			id: paymentNamedBy("00".repeat(32), spread(101).paymentHash),
+		};
+		const fact = {
+			origin: "a-peer-that-holds-the-key",
+			seq: 1,
+			id: misnamed.id,
+			payment: JSON.stringify(misnamed),
+			acceptedAt: 1_700_000_000,
+			expiresAt: misnamed.expiresAt,
+		};
+
+		expect(() =>
+			cluster.first.gossip.onFacts({
+				accepted: [{ ...fact, mac: signedAsCluster("accepted", Object.values(fact)) }],
+			}),
+		).toThrow("does not name the invoice it watches");
+
+		expect(cluster.first.get(misnamed.id)).toBeNull();
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("every kind of fact survives a rotation, because re-signing reads the same fields the signing did", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-allkinds-"));
+	const ledger = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("55".repeat(32), "hex");
+	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
+	const owner = (await callerKey("rail_allkinds_1f7b")).publicKeyHex;
+
+	const before = openStore({ ledger });
+	const mine = before.store.insert({
+		...payment(4),
+		caller: owner,
+		webhooks: [{ url: "https://shop.example/hooks/one" }],
+	});
+	before.store.paid(mine.id, preimage(4));
+	const owed = before.store.dueDeliveries(10, 0);
+	expect(owed).toHaveLength(1);
+	before.store.delivered(owed[0]!);
+	expect(before.store.info().rows).toMatchObject({ accepted: 1, paid: 1, outbox: 1, delivered: 1 });
+	before.stop();
+
+	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const { facts } = rolled.store.gossip.since(nothingSeen);
+	rolled.stop();
+
+	const peer = openStore({ key: NEXT_KEY });
+	try {
+		peer.store.gossip.onFacts(facts);
+
+		expect(peer.store.info().rows).toMatchObject({
+			accepted: 1,
+			paid: 1,
+			outbox: 1,
+			delivered: 1,
+		});
+	} finally {
+		peer.stop();
+		rmSync(directory, { recursive: true, force: true });
 	}
 });
