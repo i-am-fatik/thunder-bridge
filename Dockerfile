@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:26.6-slim AS check
+FROM --platform=$BUILDPLATFORM node:26.8.1-slim AS check
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /app
@@ -15,7 +15,7 @@ RUN npm prune --omit=dev \
 	'for d in "$1"/*; do case "$(basename "$d")" in linux-*) ;; *) rm -rf "$d";; esac; done' _ {} \; \
 	&& find node_modules -name "*.bare" -delete
 
-FROM node:26.6-slim
+FROM node:26.8.1-slim
 RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /app

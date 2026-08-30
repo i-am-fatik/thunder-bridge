@@ -163,7 +163,7 @@ docker run -d -p 3000:3000 -v thunder-data:/data \
   -e CLUSTER_KEY=$(openssl rand -hex 32) thunder-bridge
 ```
 
-One image, one process: `node:26.6-slim` running `src/index.ts`. The build stage
+One image, one process: `node:26.8.1-slim` running `src/index.ts`. The build stage
 gates it with `npm ci`, the whole test suite, and `tsc --noEmit`.
 
 ## Railway
