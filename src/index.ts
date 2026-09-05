@@ -235,15 +235,16 @@ export async function start(options: Options, store: Store): Promise<Service> {
 
 		const watching = WATCHING.exec(path);
 		if (watching) {
+			const asked = new URL(incoming.url ?? "/", "http://app").searchParams.get("replay");
 			let depth: number;
 			try {
-				depth = readReplayDepth(askedReplay(incoming));
+				depth = readReplayDepth(asked);
 			} catch {
 				refuseUpgrade(socket, "400 Bad Request");
 				return;
 			}
 			upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
-				watch(accepted, watching[1]!, store, followers, depth);
+				subscribe(accepted, hashed(watching[1]!), store, followers, depth);
 			});
 			return;
 		}
@@ -341,16 +342,6 @@ function follow(
 	if (payment.status !== "pending") {
 		socket.close();
 	}
-}
-
-function watch(
-	socket: WebSocket,
-	secret: string,
-	store: Store,
-	followers: Map<WebSocket, Follower>,
-	depth: number,
-): void {
-	subscribe(socket, hashed(secret), store, followers, depth);
 }
 
 function subscribe(
@@ -807,10 +798,6 @@ async function quoted(request: Request): Promise<Response> {
 
 function pathOf(incoming: IncomingMessage): string {
 	return new URL(incoming.url ?? "/", "http://app").pathname;
-}
-
-function askedReplay(incoming: IncomingMessage): string | null {
-	return new URL(incoming.url ?? "/", "http://app").searchParams.get("replay");
 }
 
 function replayCeiling(max: number): string {
