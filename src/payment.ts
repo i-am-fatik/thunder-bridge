@@ -22,6 +22,7 @@ export type Payment = {
 	createdAt: number;
 	verifyUrl: string;
 	trigger: string | null;
+	replay: number;
 	sealed: string | null;
 	caller: string | null;
 	webhooks: Webhook[];

@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Thunder Bridge
-  version: 1.2.0
+  version: 1.3.0
   license:
     name: MIT
     identifier: MIT
@@ -590,6 +590,7 @@ paths:
   /ws/triggers/{secret}:
     parameters:
       - $ref: "#/components/parameters/trigger_secret"
+      - $ref: "#/components/parameters/replay_ask"
     get:
       tags: [triggers]
       operationId: followTrigger
@@ -599,8 +600,11 @@ paths:
         whose payments a long-lived consumer wants as they land. An overlay, a microcontroller
         or a game server subscribes once and reacts to each one.
 
-        On connect the socket replays the trigger's most recent settlements oldest first, then
-        streams every payment carrying the same `trigger` as it changes. Unlike the per-payment
+        On connect the socket replays the trigger's most recent settlements oldest first, ten
+        unless `replay` asks for another number, then streams every payment carrying the same
+        `trigger` as it changes. What can be replayed is what the ledger still holds: a
+        settlement is forgotten an hour after it lands unless the payment was created with
+        `replay`, which keeps that many of the trigger's newest. Unlike the per-payment
         socket this one never closes on its own, because a trigger has no terminal state.
 
         The path segment is the secret whose sha256 is the `trigger` given at create time. The
@@ -869,6 +873,19 @@ components:
       schema:
         type: string
 
+    replay_ask:
+      name: replay
+      in: query
+      required: false
+      description: |
+        How many of the trigger's settlements to replay on connect, oldest first, up to 500.
+        Ten when absent. The gateway hands back what it still holds, so a number larger than
+        what the payments were created with just replays fewer.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 500
+
     idempotency_key:
       name: Idempotency-Key
       in: header
@@ -991,6 +1008,17 @@ components:
         payment fetched by id does not disclose which trigger it belongs to.
       examples: ["3ba4d2c3e9b5c9f5c58a2e1c0c0d0a2f7e2a5b8c9d0e1f2a3b4c5d6e7f809192"]
 
+    replay:
+      type: integer
+      minimum: 0
+      description: |
+        How many of this trigger's settlements the gateway keeps replayable past the hour it
+        would otherwise forget them in. Zero, the default, keeps nothing past that hour. The
+        operator's `MAX_REPLAY` is the ceiling, and asking for more is a 400 naming it. Needs
+        `trigger`, because retention is per trigger: the sweep keeps each trigger's newest
+        settlements up to the number they were created with and forgets the rest.
+      examples: [10]
+
     create_incoming_payment_request:
       type: object
       properties:
@@ -1002,6 +1030,8 @@ components:
           $ref: "#/components/schemas/webhook"
         trigger:
           $ref: "#/components/schemas/trigger"
+        replay:
+          $ref: "#/components/schemas/replay"
       required: [ln_addresses, incoming_amount]
 
     settlement:
@@ -1110,6 +1140,11 @@ components:
           format: date-time
         sealed:
           $ref: "#/components/schemas/sealed"
+        replay:
+          type: integer
+          description: |
+            How many of its trigger's settlements this payment asked the gateway to keep past
+            the hour. Absent when it asked for none, which is the default.
       required:
         - id
         - kind
@@ -1156,6 +1191,8 @@ components:
             watches anything.
         trigger:
           $ref: "#/components/schemas/trigger"
+        replay:
+          $ref: "#/components/schemas/replay"
         sealed:
           $ref: "#/components/schemas/sealed"
         webhook:
@@ -1165,8 +1202,8 @@ components:
     create_ws_ticket_request:
       type: object
       description: |
-        Name exactly one. Naming both, or neither, is a 400: a ticket is bound to one
-        subject on purpose, so there is nothing sensible to do with two.
+        Name exactly one subject. Naming both, or neither, is a 400: a ticket is bound to
+        one subject on purpose, so there is nothing sensible to do with two.
       properties:
         trigger_secret:
           type: string
@@ -1176,8 +1213,15 @@ components:
         payment_id:
           type: string
           description: A payment id this gateway issued. An unknown one is a 404, not a ticket.
+        replay:
+          type: integer
+          minimum: 0
+          maximum: 500
+          description: |
+            For a trigger ticket, how many settlements the socket it opens replays, oldest
+            first. Ten when absent. Rides inside the signed ticket, so the socket URL still
+            carries nothing but the ticket.
       minProperties: 1
-      maxProperties: 1
 
     create_quote_request:
       type: object

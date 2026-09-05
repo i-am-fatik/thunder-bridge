@@ -27,6 +27,7 @@ export type IncomingPayment = {
 	expires_at: string;
 	created_at: string;
 	sealed?: string;
+	replay?: number;
 };
 
 export type Delivered = {
@@ -50,6 +51,7 @@ export type WatchRequest = {
 	verifyUrl: string;
 	expiresAt: number;
 	trigger: string | null;
+	replay: number;
 	sealed: string | null;
 	webhook: Webhook | null;
 };
@@ -69,6 +71,7 @@ export type CreateRequest = {
 	amountMsat: number;
 	webhook: Webhook | null;
 	trigger: string | null;
+	replay: number;
 };
 
 export type QuoteRequest = {
@@ -77,7 +80,7 @@ export type QuoteRequest = {
 };
 
 export type TicketRequest =
-	| { kind: "trigger"; secret: string }
+	| { kind: "trigger"; secret: string; replay: number | null }
 	| { kind: "payment"; paymentId: string };
 
 export function paymentToWire(payment: PublicPayment): IncomingPayment {
@@ -94,6 +97,7 @@ export function paymentToWire(payment: PublicPayment): IncomingPayment {
 		expires_at: toTimestamp(payment.expiresAt),
 		created_at: toTimestamp(payment.createdAt),
 		...(payment.sealed === null ? {} : { sealed: payment.sealed }),
+		...((payment.replay ?? 0) === 0 ? {} : { replay: payment.replay }),
 	};
 }
 
@@ -139,6 +143,7 @@ export function readWatchRequest(body: unknown): WatchRequest {
 		verifyUrl,
 		expiresAt: readExpiry(fields["expires_at"]),
 		trigger: readTrigger(fields["trigger"]),
+		replay: readReplay(fields["replay"], fields["trigger"]),
 		sealed: readSealed(fields["sealed"]),
 		webhook: readWebhook(fields["webhook"]),
 	};
@@ -167,6 +172,7 @@ export function readCreateRequest(body: unknown): CreateRequest {
 		amountMsat: readAmount(fields["incoming_amount"], "incoming_amount"),
 		webhook: readWebhook(fields["webhook"]),
 		trigger: readTrigger(fields["trigger"]),
+		replay: readReplay(fields["replay"], fields["trigger"]),
 	};
 }
 
@@ -190,7 +196,7 @@ export function readTicketRequest(body: unknown): TicketRequest {
 		if (typeof secret !== "string" || secret.length === 0) {
 			throw new MalformedRequest("trigger_secret must be a non-empty string");
 		}
-		return { kind: "trigger", secret };
+		return { kind: "trigger", secret, replay: readReplayAsk(fields["replay"]) };
 	}
 	if (typeof paymentId !== "string" || !/^[\w-]+$/.test(paymentId)) {
 		throw new MalformedRequest("payment_id must be an id this gateway could have issued");
@@ -201,7 +207,15 @@ export function readTicketRequest(body: unknown): TicketRequest {
 
 export function fingerprint(asked: CreateRequest): string {
 	return createHash("sha256")
-		.update(JSON.stringify([asked.addresses, asked.amountMsat, asked.webhook, asked.trigger]))
+		.update(
+			JSON.stringify([
+				asked.addresses,
+				asked.amountMsat,
+				asked.webhook,
+				asked.trigger,
+				asked.replay,
+			]),
+		)
 		.digest("hex");
 }
 
@@ -305,6 +319,37 @@ function readSealed(value: unknown): string | null {
 		throw new MalformedRequest(`sealed must be a string of at most ${MAX_SEALED_CHARS} characters`);
 	}
 	return value;
+}
+
+export const REPLAY_ASK_CEILING = 500;
+
+export function readReplay(value: unknown, trigger: unknown): number {
+	if (value === undefined || value === null) {
+		return 0;
+	}
+	if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+		throw new MalformedRequest("replay must be a whole number of settlements to keep, 0 or more");
+	}
+	if (value > 0 && (trigger === undefined || trigger === null)) {
+		throw new MalformedRequest("replay keeps a trigger's settlements, so it needs a trigger");
+	}
+	return value;
+}
+
+export function readReplayAsk(value: unknown): number | null {
+	if (value === undefined || value === null) {
+		return null;
+	}
+	const asked = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+	if (
+		typeof asked !== "number" ||
+		!Number.isInteger(asked) ||
+		asked < 0 ||
+		asked > REPLAY_ASK_CEILING
+	) {
+		throw new MalformedRequest(`replay must be a whole number from 0 to ${REPLAY_ASK_CEILING}`);
+	}
+	return asked;
 }
 
 function readTrigger(value: unknown): string | null {

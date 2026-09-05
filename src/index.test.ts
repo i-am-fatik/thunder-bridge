@@ -52,6 +52,7 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			tickStallMs: 30_000,
 			drainTimeoutMs,
 			keepSealedSecs: 90 * 86_400,
+			maxReplay: 100,
 			token,
 			key: CLUSTER_KEY,
 		},
@@ -83,6 +84,7 @@ async function runningWithoutTheVerifyChallenge(): Promise<App> {
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			keepSealedSecs: 90 * 86_400,
+			maxReplay: 100,
 			token: null,
 			key: CLUSTER_KEY,
 		},
@@ -111,6 +113,7 @@ function pendingPayment(overrides: Partial<UnsavedPayment> = {}): UnsavedPayment
 		createdAt: 1_700_000_000,
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
+		replay: 0,
 		sealed: null,
 		caller: null,
 		webhooks: [{ url: "https://example.com/hook" }],
@@ -777,6 +780,7 @@ async function runningWith(overrides: Partial<Options> & { maxPending?: number }
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			keepSealedSecs: 90 * 86_400,
+			maxReplay: 100,
 			token: null,
 			key: CLUSTER_KEY,
 			...serving,
@@ -1065,6 +1069,7 @@ async function pinnedTo(allowed: string[]): Promise<App> {
 			tickStallMs: 30_000,
 			drainTimeoutMs: 10_000,
 			keepSealedSecs: 90 * 86_400,
+			maxReplay: 100,
 			token: null,
 			key: CLUSTER_KEY,
 		},
@@ -1353,6 +1358,8 @@ const SECRET = "the-overlay-holds-this";
 const ANOTHER_SECRET = "someone-elses-trigger";
 const SECOND_PREIMAGE = "01".repeat(32);
 const SECOND_HASH = "72cd6e8422c407fb6d098690f1130b7ded7ec2f7f5e1d30bd9d521f015363793";
+const THIRD_PREIMAGE = "02".repeat(32);
+const THIRD_HASH = "75877bb41d393b5fb8455ce60ecd8dda001d06316496b14dfa7f895656eeca4a";
 
 function triggerOf(secret: string): string {
 	return createHash("sha256").update(secret).digest("hex");
@@ -1662,5 +1669,76 @@ test("an unknown payment closes the socket instead of hanging", async () => {
 
 	await new Promise((closed) => socket.addEventListener("close", closed, { once: true }));
 
+	app.stop();
+});
+
+test("a create asking to keep more than the gateway allows is refused, naming the ceiling", async () => {
+	const app = await running();
+	const trigger = triggerOf(SECRET);
+
+	const refused = await post(app, { ...UNUSABLE, trigger, replay: 101 });
+	const detail = ((await refused.json()) as Problem)["detail"];
+
+	expect(refused.status).toBe(400);
+	expect(String(detail)).toContain("100");
+
+	const alone = await post(app, { ...UNUSABLE, replay: 5 });
+	expect(alone.status).toBe(400);
+	expect(String(((await alone.json()) as Problem)["detail"])).toContain("trigger");
+
+	app.stop();
+});
+
+test("a watcher asks how much to replay and gets that many of the newest, oldest first", async () => {
+	const app = await running();
+	const trigger = triggerOf(SECRET);
+	const hashes = [PAYMENT_HASH, SECOND_HASH, THIRD_HASH];
+	const preimages = [PREIMAGE, SECOND_PREIMAGE, THIRD_PREIMAGE];
+	hashes.forEach((paymentHash, nth) => {
+		const one = app.store.insert(pendingPayment({ trigger, paymentHash, replay: 5 }));
+		app.store.paid(one.id, preimages[nth]!);
+	});
+
+	const shallow = new WebSocket(
+		`ws://127.0.0.1:${app.service.port}/ws/triggers/${SECRET}?replay=2`,
+	);
+	await new Promise((ready) => shallow.addEventListener("open", ready, { once: true }));
+	const replayed = collecting(shallow);
+	await settled();
+	expect(replayed.map((frame) => frame["preimage"])).toEqual([SECOND_PREIMAGE, THIRD_PREIMAGE]);
+	shallow.close();
+
+	const ticket = await ticketFor(app, { trigger_secret: SECRET, replay: 1 });
+	const ticketed = await openedWith(app, ticket);
+	const seen = collecting(ticketed);
+	await settled();
+	expect(seen.map((frame) => frame["preimage"])).toEqual([THIRD_PREIMAGE]);
+	ticketed.close();
+
+	expect(await handshake(app, `/ws/triggers/${SECRET}?replay=many`)).toBe(400);
+	expect((await postTicket(app, { trigger_secret: SECRET, replay: 501 })).status).toBe(400);
+
+	app.stop();
+});
+
+test("what a minter asked to keep is still on the socket after the hour, and no more than that", async () => {
+	const app = await running();
+	const trigger = triggerOf(SECRET);
+	const hashes = [PAYMENT_HASH, SECOND_HASH, THIRD_HASH];
+	const preimages = [PREIMAGE, SECOND_PREIMAGE, THIRD_PREIMAGE];
+	hashes.forEach((paymentHash, nth) => {
+		const one = app.store.insert(pendingPayment({ trigger, paymentHash, replay: 2 }));
+		app.store.paid(one.id, preimages[nth]!);
+	});
+
+	app.store.sweep(0, 7_776_000);
+
+	const overlay = await watching(app, SECRET);
+	const replayed = collecting(overlay);
+	await settled();
+
+	expect(replayed.map((frame) => frame["preimage"])).toEqual([SECOND_PREIMAGE, THIRD_PREIMAGE]);
+	expect(replayed[0]!["replay"]).toBe(2);
+	overlay.close();
 	app.stop();
 });

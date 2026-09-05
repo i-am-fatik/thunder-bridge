@@ -1,16 +1,18 @@
 import { bytesToHex } from "./bytes.ts";
 import { equalInConstantTime, hmacHex } from "./hmac.ts";
 
-const VERSION = "1";
+const VERSION = "2";
 const NONCE_BYTES = 8;
 const TRIGGER = "t";
 const PAYMENT = "p";
 const SHAPE = new RegExp(
-	`^${VERSION}\\.([${TRIGGER}${PAYMENT}])\\.([0-9a-f]{64})\\.([0-9]+)\\.([0-9a-f]+)\\.([0-9a-f]{64})$`,
+	`^${VERSION}\\.([${TRIGGER}${PAYMENT}])\\.([0-9a-f]{64})\\.([0-9]+)\\.([0-9a-f]+)\\.([0-9]+)\\.([0-9a-f]{64})$`,
 );
 
 /** What a ticket permits, and the only thing it permits */
-export type Subject = { kind: "trigger"; trigger: string } | { kind: "payment"; paymentId: string };
+export type Subject =
+	| { kind: "trigger"; trigger: string; replay: number }
+	| { kind: "payment"; paymentId: string };
 
 export type Ticket = { ticket: string; expiresAt: number; jti: string };
 
@@ -28,9 +30,11 @@ export async function mint(
 	const jti = bytesToHex(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
 	const named =
 		subject.kind === "trigger"
-			? { tag: TRIGGER, name: subject.trigger }
-			: { tag: PAYMENT, name: subject.paymentId };
-	const claim = [VERSION, named.tag, named.name, String(expiresAt), jti].join(".");
+			? { tag: TRIGGER, name: subject.trigger, replay: subject.replay }
+			: { tag: PAYMENT, name: subject.paymentId, replay: 0 };
+	const claim = [VERSION, named.tag, named.name, String(expiresAt), jti, String(named.replay)].join(
+		".",
+	);
 
 	return { ticket: `${claim}.${await hmacHex(key, claim)}`, expiresAt, jti };
 }
@@ -50,7 +54,8 @@ export async function read(
 	const name = shaped[2]!;
 	const expiresAt = Number(shaped[3]!);
 	const jti = shaped[4]!;
-	const mac = shaped[5]!;
+	const replay = Number(shaped[5]!);
+	const mac = shaped[6]!;
 	if (expiresAt <= now) {
 		return null;
 	}
@@ -61,6 +66,6 @@ export async function read(
 	}
 
 	return kind === TRIGGER
-		? { kind: "trigger", trigger: name, jti }
+		? { kind: "trigger", trigger: name, replay, jti }
 		: { kind: "payment", paymentId: name, jti };
 }

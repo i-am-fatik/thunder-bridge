@@ -37,6 +37,7 @@ function payment(nth: number): UnsavedPayment {
 		createdAt: 1_700_000_000,
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
+		replay: 0,
 		sealed: null,
 		caller: null,
 		webhooks: [{ url: "https://example.com/hook" }],
@@ -125,7 +126,7 @@ test("a trigger survives replication, so any instance can serve its stream", asy
 		cluster.first.paid(one.id, preimage(4));
 		await until(() => cluster.second.get(one.id)?.status === "paid", "the paid fact to replicate");
 
-		expect(cluster.second.replay(trigger, 10, 500).map((settled) => settled.id)).toEqual([one.id]);
+		expect(cluster.second.replay(trigger, 10).map((settled) => settled.id)).toEqual([one.id]);
 	} finally {
 		cluster.stop();
 	}

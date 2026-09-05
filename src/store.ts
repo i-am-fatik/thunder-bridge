@@ -130,8 +130,8 @@ export class Store {
 		return { payment: asPayment(settled, pending), won: true };
 	}
 
-	replay(trigger: string, limit: number, window: number): PublicPayment[] {
-		return this.ledger.replay(trigger, limit, window);
+	replay(trigger: string, limit: number): PublicPayment[] {
+		return this.ledger.replay(trigger, limit);
 	}
 
 	list(limit: number, window: number): PublicPayment[] {

@@ -55,6 +55,7 @@ import {
 	quoteToWire,
 	readCreateRequest,
 	readQuoteRequest,
+	readReplayAsk,
 	readTicketRequest,
 	readWatchRequest,
 	type TicketRequest,
@@ -75,7 +76,6 @@ const FOLLOWING = /^\/ws\/incoming-payments\/([\w-]+)$/;
 const WATCHING = /^\/ws\/triggers\/([\w-]+)$/;
 const TICKETED = /^\/ws\/tickets\/([\w.-]+)$/;
 const REPLAY_LIMIT = 10;
-const REPLAY_WINDOW = 500;
 const SETTLED_WINDOW = 1_000;
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 500;
@@ -130,6 +130,7 @@ export type Options = {
 	tickStallMs: number;
 	drainTimeoutMs: number;
 	keepSealedSecs: number;
+	maxReplay: number;
 	token: string | null;
 	key: Uint8Array;
 };
@@ -150,6 +151,7 @@ type Serving = {
 	webhookKey: SigningKey;
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
+	maxReplay: number;
 };
 
 export async function start(options: Options, store: Store): Promise<Service> {
@@ -163,6 +165,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		webhookKey: await webhookSigningKey(options.key),
 		verifyHosts: options.verifyHosts,
 		verifyChallenge: options.verifyChallenge,
+		maxReplay: options.maxReplay,
 	};
 	const watcher: Watcher = {
 		store,
@@ -208,7 +211,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 					}
 					upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
 						if (permits.kind === "trigger") {
-							subscribe(accepted, permits.trigger, store, followers);
+							subscribe(accepted, permits.trigger, store, followers, permits.replay);
 						} else {
 							follow(accepted, permits.paymentId, store, followers);
 						}
@@ -233,8 +236,15 @@ export async function start(options: Options, store: Store): Promise<Service> {
 
 		const watching = WATCHING.exec(path);
 		if (watching) {
+			let depth: number | null;
+			try {
+				depth = readReplayAsk(askedReplay(incoming));
+			} catch {
+				refuseUpgrade(socket, "400 Bad Request");
+				return;
+			}
 			upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
-				watch(accepted, watching[1]!, store, followers);
+				watch(accepted, watching[1]!, store, followers, depth ?? REPLAY_LIMIT);
 			});
 			return;
 		}
@@ -339,8 +349,9 @@ function watch(
 	secret: string,
 	store: Store,
 	followers: Map<WebSocket, Follower>,
+	depth: number,
 ): void {
-	subscribe(socket, hashed(secret), store, followers);
+	subscribe(socket, hashed(secret), store, followers, depth);
 }
 
 function subscribe(
@@ -348,12 +359,13 @@ function subscribe(
 	trigger: string,
 	store: Store,
 	followers: Map<WebSocket, Follower>,
+	depth: number,
 ): void {
 	const follower: Follower = { id: null, trigger, answered: true };
 	followers.set(socket, follower);
 	keepFresh(socket, follower, followers);
 
-	for (const settled of store.replay(trigger, REPLAY_LIMIT, REPLAY_WINDOW)) {
+	for (const settled of store.replay(trigger, depth)) {
 		socket.send(JSON.stringify(paymentToWire(settled)));
 	}
 }
@@ -494,7 +506,7 @@ async function route(
 		if (!mints(serving)) {
 			return mintsNothing(serving);
 		}
-		return await create(request, store, serving.webhookKey, caller);
+		return await create(request, store, serving, caller);
 	}
 	if (path === "/quotes" && incoming.method === "POST") {
 		if (!mints(serving)) {
@@ -557,7 +569,7 @@ async function callerFor(request: Request): Promise<string | null> {
 async function create(
 	request: Request,
 	store: Store,
-	webhookKey: SigningKey,
+	serving: Serving,
 	caller: string | null,
 ): Promise<Response> {
 	let asked: CreateRequest;
@@ -567,10 +579,13 @@ async function create(
 		return unreadable(error);
 	}
 
+	if (asked.replay > serving.maxReplay) {
+		return invalidRequest(replayCeiling(serving.maxReplay));
+	}
 	if (store.full(caller)) {
 		return tooMany(caller, store.info().maxPending);
 	}
-	if (asked.webhook && !(await confirmWebhook(asked.webhook, webhookKey))) {
+	if (asked.webhook && !(await confirmWebhook(asked.webhook, serving.webhookKey))) {
 		return unconfirmedWebhook(asked.webhook.url);
 	}
 
@@ -623,6 +638,7 @@ async function mint(asked: CreateRequest, store: Store, caller: string | null): 
 		createdAt: unixNow(),
 		verifyUrl: resolved.verifyUrl,
 		trigger: asked.trigger,
+		replay: asked.replay,
 		sealed: null,
 		caller,
 		webhooks: asked.webhook ? [asked.webhook] : [],
@@ -660,7 +676,7 @@ async function ticketed(
 
 	const subject: Subject =
 		asked.kind === "trigger"
-			? { kind: "trigger", trigger: hashed(asked.secret) }
+			? { kind: "trigger", trigger: hashed(asked.secret), replay: asked.replay ?? REPLAY_LIMIT }
 			: { kind: "payment", paymentId: asked.paymentId };
 
 	const minted = await mintTicket(key, subject, TICKET_TTL_SECS, unixNow());
@@ -712,6 +728,9 @@ async function watchOnly(
 		return unreadable(error);
 	}
 
+	if (asked.replay > serving.maxReplay) {
+		return invalidRequest(replayCeiling(serving.maxReplay));
+	}
 	if (store.full(caller)) {
 		return tooMany(caller, store.info().maxPending);
 	}
@@ -753,6 +772,7 @@ async function watchOnly(
 		createdAt: now,
 		verifyUrl: asked.verifyUrl,
 		trigger: asked.trigger,
+		replay: asked.replay,
 		sealed: asked.sealed,
 		caller,
 		webhooks: asked.webhook ? [asked.webhook] : [],
@@ -788,6 +808,14 @@ async function quoted(request: Request): Promise<Response> {
 
 function pathOf(incoming: IncomingMessage): string {
 	return new URL(incoming.url ?? "/", "http://app").pathname;
+}
+
+function askedReplay(incoming: IncomingMessage): string | null {
+	return new URL(incoming.url ?? "/", "http://app").searchParams.get("replay");
+}
+
+function replayCeiling(max: number): string {
+	return `replay must be ${max} or fewer, which is how many settlements this gateway keeps per trigger`;
 }
 
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
@@ -1029,6 +1057,7 @@ if (import.meta.main) {
 			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
 			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,
 			keepSealedSecs: positive("KEEP_SEALED_DAYS", 90) * 86_400,
+			maxReplay: whole("MAX_REPLAY", 100),
 			token: bearer("GATEWAY_TOKEN"),
 			key: clusterKey,
 		},

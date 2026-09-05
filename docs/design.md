@@ -42,6 +42,15 @@ policy can be got wrong. Two instances that accept the same invoice write two
 facts, and the reader unions their webhooks, because a union of grow-only sets
 does not care who went first.
 
+A settlement is forgotten an hour after it lands. The gateway is a watcher, not a
+book: the socket and the webhook have had their hour to hear about it, and after that
+the operator holds nothing about who was paid. The one exception is asked for at mint
+time. A payment created with `replay` says how many of its trigger's newest settlements
+the sweep keeps, so a page that opens the trigger's socket a day later still sees the
+last ten. The ceiling is the operator's `MAX_REPLAY`, retention is per trigger, and a
+settlement kept this way is the same signed fact as any other, so peers prune it by the
+same rule and agree.
+
 `pending` is still written, and nothing reads it. It is there so a rollback to the
 release before this one finds the worklist where it expects it. The release after
 this one drops it.

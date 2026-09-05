@@ -129,7 +129,8 @@ retired keys any more, because a key that still admits a peer and still writes f
 was never retired.
 
 The pass is bounded by what a ledger keeps rather than by history: an hour past
-settlement, plus the window `KEEP_SEALED_DAYS` sets for sealed blobs.
+settlement, the settlements a trigger was minted to keep under `MAX_REPLAY`, plus the
+window `KEEP_SEALED_DAYS` sets for sealed blobs.
 
 Roll every instance. While a roll is half done the two halves are apart, because the
 swarm topic, the socket ticket and now the facts themselves all come from the live key

@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import type { Payment } from "./payment.ts";
 import { MalformedRequest } from "./problem.ts";
-import { paymentToWire, readCreateRequest } from "./wire.ts";
+import { paymentToWire, readCreateRequest, readReplayAsk, readTicketRequest } from "./wire.ts";
 
 function payment(): Payment {
 	return {
@@ -17,6 +17,7 @@ function payment(): Payment {
 		createdAt: 1_700_000_000,
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
+		replay: 0,
 		sealed: null,
 		caller: null,
 		webhooks: [{ url: "https://example.com/hook" }],
@@ -142,4 +143,30 @@ test("a priority list of different providers is what it was always for", () => {
 	];
 
 	expect(readCreateRequest(asked({ ln_addresses: providers })).addresses).toEqual(providers);
+});
+
+test("replay is a whole number of settlements to keep, and only means something with a trigger", () => {
+	const trigger = "ab".repeat(32);
+	const asked = {
+		ln_addresses: ["charter@coinos.io"],
+		incoming_amount: { value: "21000", asset_code: "BTC", asset_scale: 11 },
+	};
+
+	expect(readCreateRequest({ ...asked, trigger, replay: 10 }).replay).toBe(10);
+	expect(readCreateRequest({ ...asked, trigger }).replay).toBe(0);
+	expect(() => readCreateRequest({ ...asked, trigger, replay: -1 })).toThrow(/whole number/);
+	expect(() => readCreateRequest({ ...asked, trigger, replay: 1.5 })).toThrow(/whole number/);
+	expect(() => readCreateRequest({ ...asked, trigger, replay: "10" })).toThrow(/whole number/);
+	expect(() => readCreateRequest({ ...asked, replay: 10 })).toThrow(/needs a trigger/);
+});
+
+test("a ticket may ask how much to replay, within the ceiling a socket is ever handed", () => {
+	expect(readTicketRequest({ trigger_secret: "s" })).toMatchObject({ replay: null });
+	expect(readTicketRequest({ trigger_secret: "s", replay: 25 })).toMatchObject({ replay: 25 });
+	expect(() => readTicketRequest({ trigger_secret: "s", replay: 501 })).toThrow(/0 to 500/);
+	expect(() => readTicketRequest({ trigger_secret: "s", replay: -1 })).toThrow(/0 to 500/);
+	expect(readReplayAsk("25")).toBe(25);
+	expect(readReplayAsk(null)).toBeNull();
+	expect(() => readReplayAsk("")).toThrow(/0 to 500/);
+	expect(() => readReplayAsk("many")).toThrow(/0 to 500/);
 });

@@ -43,6 +43,7 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 				tickStallMs: 30_000,
 				drainTimeoutMs: 10_000,
 				keepSealedSecs: 90 * 86_400,
+				maxReplay: 100,
 				token: null,
 				key: CLUSTER_KEY,
 			},

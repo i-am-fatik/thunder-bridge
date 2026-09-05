@@ -235,6 +235,7 @@ type Statements = {
 	pruneSettled: StatementSync;
 	unowed: StatementSync;
 	settlement: StatementSync;
+	settledForTrigger: StatementSync;
 	recentlyPaid: StatementSync;
 	insertPaid: StatementSync;
 	insertOutbox: StatementSync;
@@ -341,6 +342,9 @@ export class Ledger {
 				"DELETE FROM accepted WHERE id IN (SELECT id FROM paid WHERE settledAt <= ?)",
 			),
 			settlement: this.db.prepare("SELECT payment FROM paid WHERE id = ? LIMIT 1"),
+			settledForTrigger: this.db.prepare(
+				"SELECT payment FROM paid WHERE json_extract(payment, '$.trigger') = ? ORDER BY settledAt DESC, seq DESC LIMIT ?",
+			),
 			recentlyPaid: this.db.prepare(
 				"SELECT payment FROM paid ORDER BY settledAt DESC, seq DESC LIMIT ?",
 			),
@@ -377,7 +381,19 @@ export class Ledger {
 				`DELETE FROM outbox WHERE owedAt <= ? AND (dueAt IS NULL
 					OR EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url))`,
 			),
-			prunePaid: this.db.prepare("DELETE FROM paid WHERE settledAt <= ?"),
+			prunePaid: this.db.prepare(
+				`DELETE FROM paid WHERE settledAt <= ? AND id IN (
+					SELECT id FROM (
+						SELECT id,
+							COALESCE(json_extract(payment, '$.replay'), 0) AS keep,
+							ROW_NUMBER() OVER (
+								PARTITION BY json_extract(payment, '$.trigger')
+								ORDER BY settledAt DESC, seq DESC
+							) AS newest
+						FROM paid
+					) WHERE newest > keep
+				)`,
+			),
 			pruneDelivered: this.db.prepare("DELETE FROM delivered WHERE deliveredAt <= ?"),
 			heldRequest: this.db.prepare(
 				"SELECT fingerprint, paymentId, leaseUntil FROM requests WHERE key = ?",
@@ -564,20 +580,9 @@ export class Ledger {
 		return row ? asStored<PublicPayment>(row.payment) : null;
 	}
 
-	replay(trigger: string, limit: number, window: number): PublicPayment[] {
-		const matched: PublicPayment[] = [];
-		for (const settled of this.recentlySettled(window)) {
-			if (settled.trigger !== trigger) {
-				continue;
-			}
-
-			matched.push(settled);
-			if (matched.length === limit) {
-				break;
-			}
-		}
-
-		return matched.reverse();
+	replay(trigger: string, limit: number): PublicPayment[] {
+		const rows = this.statements.settledForTrigger.all(trigger, limit) as Row[];
+		return rows.map((row) => asStored<PublicPayment>(row.payment)).reverse();
 	}
 
 	list(limit: number, window: number): PublicPayment[] {
@@ -1110,7 +1115,7 @@ export function paymentId(key: Uint8Array, paymentHash: string): string {
 function asStored<T extends PublicPayment>(record: string): T {
 	const payment = JSON.parse(record) as T;
 
-	return { ...payment, caller: payment.caller ?? null };
+	return { ...payment, caller: payment.caller ?? null, replay: payment.replay ?? 0 };
 }
 
 function macWith(key: Uint8Array, source: Source, fields: (string | number | null)[]): string {

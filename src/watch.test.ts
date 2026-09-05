@@ -90,6 +90,7 @@ function payment(overrides: Partial<Payment> = {}): Payment {
 		createdAt: unixNow(),
 		verifyUrl: VERIFY_URL,
 		trigger: null,
+		replay: 0,
 		sealed: null,
 		caller: null,
 		webhooks: [{ url: HOOK_URL }],

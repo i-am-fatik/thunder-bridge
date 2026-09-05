@@ -137,6 +137,7 @@ standard's camelCase, and there is no authorization server.
 | `TICK_STALL_SECS` | `30` | how long the watch loop may go unscheduled before `/health` turns 503 |
 | `DRAIN_TIMEOUT_SECS` | `10` | how long a shutdown waits for the tick in flight before closing anyway |
 | `POLLS_PER_SEC` | `5` | fallback ceiling on outbound `verify` polls per host, used only where the endpoint names none itself with `RateLimit-Limit`. It stops one wallet everybody uses being hit harder than this however many payments point at it |
+| `MAX_REPLAY` | `100` | the most settlements of one trigger a client may ask the gateway to keep replayable past the hour it otherwise forgets them in, per payment through `replay`. It bounds what the ledger holds for the socket's replay, so raise it knowing every trigger may keep that many |
 | `MAX_PENDING` | `5000` | payments one signing key may have waiting before a create or a watch answers 429. Every unsigned caller shares one share of it. `0` takes nothing new while still polling and serving what it holds, which is how a release that changes a delivery is cut over |
 | `TAKEOVER_AFTER_SECS` | `600` | how long another instance stands by before taking on work it does not own, a webhook to deliver or a payment to poll |
 | `WEBHOOK_BACKOFF_SECS` | `30` | step between delivery attempts, each one that far further off than the last, retried for as long as the payment has left and never under an hour |

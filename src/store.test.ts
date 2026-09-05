@@ -35,6 +35,7 @@ function payment(nth: number): UnsavedPayment {
 		createdAt: 1_700_000_000,
 		verifyUrl: "https://coinos.io/api/lnurl/verify/1",
 		trigger: null,
+		replay: 0,
 		sealed: null,
 		caller: null,
 		webhooks: [{ url: HOOK }],
@@ -643,5 +644,45 @@ test("a record written before callers existed reads back as anonymous, not as no
 	} finally {
 		after.stop();
 		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a settlement its minter asked to keep outlives the hour, up to the number asked", () => {
+	const { store, stop } = openStore();
+	const trigger = "ab".repeat(32);
+	try {
+		const kept = [0, 1, 2].map((nth) => store.insert({ ...payment(nth), trigger, replay: 2 }));
+		kept.forEach((one, nth) => store.paid(one.id, preimage(nth)));
+		const loose = store.insert(payment(3));
+		store.paid(loose.id, preimage(3));
+
+		store.sweep(0, 7_776_000);
+
+		expect(store.info().rows.paid).toBe(2);
+		expect(store.replay(trigger, 10).map((settled) => settled.id)).toEqual([
+			kept[1]!.id,
+			kept[2]!.id,
+		]);
+		expect(store.get(kept[2]!.id)?.status).toBe("paid");
+		expect(store.get(loose.id)).toBeNull();
+	} finally {
+		stop();
+	}
+});
+
+test("replay hands back the newest of a trigger oldest first, and only as many as were asked for", () => {
+	const { store, stop } = openStore();
+	const trigger = "cd".repeat(32);
+	try {
+		const paid = [0, 1, 2].map((nth) => store.insert({ ...payment(nth), trigger, replay: 5 }));
+		paid.forEach((one, nth) => store.paid(one.id, preimage(nth)));
+
+		expect(store.replay(trigger, 2).map((settled) => settled.id)).toEqual([
+			paid[1]!.id,
+			paid[2]!.id,
+		]);
+		expect(store.replay("ef".repeat(32), 2)).toEqual([]);
+	} finally {
+		stop();
 	}
 });

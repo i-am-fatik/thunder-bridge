@@ -7,7 +7,7 @@ const OTHER_KEY = new Uint8Array(32).fill(9);
 const NOW = 1_900_000_000;
 const TTL = 60;
 
-const WATCHING: Subject = { kind: "trigger", trigger: "a".repeat(64) };
+const WATCHING: Subject = { kind: "trigger", trigger: "a".repeat(64), replay: 10 };
 const READING: Subject = { kind: "payment", paymentId: "b".repeat(64) };
 
 test("a ticket reads back as the subject it was minted for", async () => {
@@ -21,7 +21,12 @@ test("a ticket reads back as the subject it was minted for", async () => {
 
 test("a ticket for one trigger never opens another", async () => {
 	const mine = await mint(KEY, WATCHING, TTL, NOW);
-	const theirs = await mint(KEY, { kind: "trigger", trigger: "c".repeat(64) }, TTL, NOW);
+	const theirs = await mint(
+		KEY,
+		{ kind: "trigger", trigger: "c".repeat(64), replay: 10 },
+		TTL,
+		NOW,
+	);
 
 	const read1 = await read(KEY, mine.ticket, NOW);
 	const read2 = await read(KEY, theirs.ticket, NOW);
@@ -32,10 +37,15 @@ test("a ticket for one trigger never opens another", async () => {
 });
 
 test("a trigger ticket is not a payment ticket even for the same hex", async () => {
-	const watching = await mint(KEY, { kind: "trigger", trigger: "a".repeat(64) }, TTL, NOW);
+	const watching = await mint(
+		KEY,
+		{ kind: "trigger", trigger: "a".repeat(64), replay: 10 },
+		TTL,
+		NOW,
+	);
 
 	expect(await read(KEY, watching.ticket, NOW)).toMatchObject({ kind: "trigger" });
-	expect(await read(KEY, watching.ticket.replace(/^1\.t\./, "1.p."), NOW)).toBeNull();
+	expect(await read(KEY, watching.ticket.replace(/^2\.t\./, "2.p."), NOW)).toBeNull();
 });
 
 test("a ticket is spent by time, on the second it expires", async () => {
@@ -82,4 +92,18 @@ test("two tickets for the same subject differ, so one cannot be guessed from ano
 
 	expect(one.ticket).not.toBe(other.ticket);
 	expect(one.jti).not.toBe(other.jti);
+});
+
+test("a trigger ticket carries how much to replay, and that rides under the same signature", async () => {
+	const shallow = await mint(
+		KEY,
+		{ kind: "trigger", trigger: "a".repeat(64), replay: 1 },
+		TTL,
+		NOW,
+	);
+	const deep = await mint(KEY, { kind: "trigger", trigger: "a".repeat(64), replay: 50 }, TTL, NOW);
+
+	expect(await read(KEY, shallow.ticket, NOW)).toMatchObject({ replay: 1 });
+	expect(await read(KEY, deep.ticket, NOW)).toMatchObject({ replay: 50 });
+	expect(await read(KEY, shallow.ticket.replace(".1.", ".50."), NOW)).toBeNull();
 });
