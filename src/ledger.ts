@@ -389,9 +389,9 @@ export class Ledger {
 							ROW_NUMBER() OVER (
 								PARTITION BY json_extract(payment, '$.trigger')
 								ORDER BY settledAt DESC, seq DESC
-							) AS newest
+							) AS nth
 						FROM paid
-					) WHERE newest > keep
+					) WHERE nth > keep
 				)`,
 			),
 			pruneDelivered: this.db.prepare("DELETE FROM delivered WHERE deliveredAt <= ?"),
