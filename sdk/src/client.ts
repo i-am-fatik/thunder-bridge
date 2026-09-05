@@ -630,7 +630,7 @@ export class ThunderBridge {
         try {
           url = `${base}/ws/tickets/${await this.wsTicket({
             trigger_secret: secret,
-            ...(options.replay === undefined ? {} : { replay: options.replay }),
+            replay: options.replay,
           })}`;
         } catch (refused: unknown) {
           options.onError?.(refused);
@@ -672,7 +672,7 @@ export class ThunderBridge {
     return asked === true || this.token !== null;
   }
 
-  private async wsTicket(body: Record<string, string | number>): Promise<string> {
+  private async wsTicket(body: Record<string, string | number | undefined>): Promise<string> {
     const sent = JSON.stringify(body);
     const response = await fetch(`${this.baseUrl}/ws-tickets`, {
       method: "POST",
