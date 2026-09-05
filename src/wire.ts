@@ -99,7 +99,7 @@ export function paymentToWire(payment: PublicPayment): IncomingPayment {
 		expires_at: toTimestamp(payment.expiresAt),
 		created_at: toTimestamp(payment.createdAt),
 		...(payment.sealed === null ? {} : { sealed: payment.sealed }),
-		...((payment.replay ?? 0) === 0 ? {} : { replay: payment.replay }),
+		...(payment.replay === 0 ? {} : { replay: payment.replay }),
 	};
 }
 
