@@ -11,6 +11,8 @@ const MAX_ADDRESSES = 16;
 const MAX_PER_DOMAIN = 3;
 const MAX_ADDRESS_CHARS = 320;
 const MAX_SEALED_CHARS = 4096;
+const REPLAY_DEPTH = 10;
+const MAX_REPLAY_DEPTH = 500;
 
 export type Amount = { value: string; asset_code: string; asset_scale: number };
 
@@ -80,7 +82,7 @@ export type QuoteRequest = {
 };
 
 export type TicketRequest =
-	| { kind: "trigger"; secret: string; replay: number | null }
+	| { kind: "trigger"; secret: string; replay: number }
 	| { kind: "payment"; paymentId: string };
 
 export function paymentToWire(payment: PublicPayment): IncomingPayment {
@@ -196,7 +198,7 @@ export function readTicketRequest(body: unknown): TicketRequest {
 		if (typeof secret !== "string" || secret.length === 0) {
 			throw new MalformedRequest("trigger_secret must be a non-empty string");
 		}
-		return { kind: "trigger", secret, replay: readReplayAsk(fields["replay"]) };
+		return { kind: "trigger", secret, replay: readReplayDepth(fields["replay"]) };
 	}
 	if (typeof paymentId !== "string" || !/^[\w-]+$/.test(paymentId)) {
 		throw new MalformedRequest("payment_id must be an id this gateway could have issued");
@@ -321,8 +323,6 @@ function readSealed(value: unknown): string | null {
 	return value;
 }
 
-export const REPLAY_ASK_CEILING = 500;
-
 export function readReplay(value: unknown, trigger: unknown): number {
 	if (value === undefined || value === null) {
 		return 0;
@@ -336,18 +336,18 @@ export function readReplay(value: unknown, trigger: unknown): number {
 	return value;
 }
 
-export function readReplayAsk(value: unknown): number | null {
+export function readReplayDepth(value: unknown): number {
 	if (value === undefined || value === null) {
-		return null;
+		return REPLAY_DEPTH;
 	}
 	const asked = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
 	if (
 		typeof asked !== "number" ||
 		!Number.isInteger(asked) ||
 		asked < 0 ||
-		asked > REPLAY_ASK_CEILING
+		asked > MAX_REPLAY_DEPTH
 	) {
-		throw new MalformedRequest(`replay must be a whole number from 0 to ${REPLAY_ASK_CEILING}`);
+		throw new MalformedRequest(`replay must be a whole number from 0 to ${MAX_REPLAY_DEPTH}`);
 	}
 	return asked;
 }

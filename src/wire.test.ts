@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import type { Payment } from "./payment.ts";
 import { MalformedRequest } from "./problem.ts";
-import { paymentToWire, readCreateRequest, readReplayAsk, readTicketRequest } from "./wire.ts";
+import { paymentToWire, readCreateRequest, readReplayDepth, readTicketRequest } from "./wire.ts";
 
 function payment(): Payment {
 	return {
@@ -160,13 +160,13 @@ test("replay is a whole number of settlements to keep, and only means something 
 	expect(() => readCreateRequest({ ...asked, replay: 10 })).toThrow(/needs a trigger/);
 });
 
-test("a ticket may ask how much to replay, within the ceiling a socket is ever handed", () => {
-	expect(readTicketRequest({ trigger_secret: "s" })).toMatchObject({ replay: null });
+test("a ticket asks how much to replay, ten when it does not say, never past what a socket is handed", () => {
+	expect(readTicketRequest({ trigger_secret: "s" })).toMatchObject({ replay: 10 });
 	expect(readTicketRequest({ trigger_secret: "s", replay: 25 })).toMatchObject({ replay: 25 });
 	expect(() => readTicketRequest({ trigger_secret: "s", replay: 501 })).toThrow(/0 to 500/);
 	expect(() => readTicketRequest({ trigger_secret: "s", replay: -1 })).toThrow(/0 to 500/);
-	expect(readReplayAsk("25")).toBe(25);
-	expect(readReplayAsk(null)).toBeNull();
-	expect(() => readReplayAsk("")).toThrow(/0 to 500/);
-	expect(() => readReplayAsk("many")).toThrow(/0 to 500/);
+	expect(readReplayDepth("25")).toBe(25);
+	expect(readReplayDepth(null)).toBe(10);
+	expect(() => readReplayDepth("")).toThrow(/0 to 500/);
+	expect(() => readReplayDepth("many")).toThrow(/0 to 500/);
 });

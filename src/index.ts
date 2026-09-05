@@ -55,7 +55,7 @@ import {
 	quoteToWire,
 	readCreateRequest,
 	readQuoteRequest,
-	readReplayAsk,
+	readReplayDepth,
 	readTicketRequest,
 	readWatchRequest,
 	type TicketRequest,
@@ -75,7 +75,6 @@ const CLAIM_LEASE_SECS = RESOLVE_TIMEOUT_MS / 1000 + 10;
 const FOLLOWING = /^\/ws\/incoming-payments\/([\w-]+)$/;
 const WATCHING = /^\/ws\/triggers\/([\w-]+)$/;
 const TICKETED = /^\/ws\/tickets\/([\w.-]+)$/;
-const REPLAY_LIMIT = 10;
 const SETTLED_WINDOW = 1_000;
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 500;
@@ -236,15 +235,15 @@ export async function start(options: Options, store: Store): Promise<Service> {
 
 		const watching = WATCHING.exec(path);
 		if (watching) {
-			let depth: number | null;
+			let depth: number;
 			try {
-				depth = readReplayAsk(askedReplay(incoming));
+				depth = readReplayDepth(askedReplay(incoming));
 			} catch {
 				refuseUpgrade(socket, "400 Bad Request");
 				return;
 			}
 			upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
-				watch(accepted, watching[1]!, store, followers, depth ?? REPLAY_LIMIT);
+				watch(accepted, watching[1]!, store, followers, depth);
 			});
 			return;
 		}
@@ -676,7 +675,7 @@ async function ticketed(
 
 	const subject: Subject =
 		asked.kind === "trigger"
-			? { kind: "trigger", trigger: hashed(asked.secret), replay: asked.replay ?? REPLAY_LIMIT }
+			? { kind: "trigger", trigger: hashed(asked.secret), replay: asked.replay }
 			: { kind: "payment", paymentId: asked.paymentId };
 
 	const minted = await mintTicket(key, subject, TICKET_TTL_SECS, unixNow());
