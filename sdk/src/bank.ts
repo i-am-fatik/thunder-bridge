@@ -71,6 +71,9 @@ export interface BankTransferParams {
    */
   trigger?: string;
 
+  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
+  replay?: number;
+
   /**
    * Handed back untouched on that stream, so a watcher learns which order settled
    * without asking anyone. `seal` it and the gateway cannot read it either
@@ -163,6 +166,7 @@ export async function bankTransfer(params: BankTransferParams): Promise<BankTran
     verifyUrl,
     expiresAt: params.expiresAt,
     trigger: params.trigger,
+    replay: params.replay,
     sealed: params.sealed,
     webhookUrl: params.webhookUrl,
   });

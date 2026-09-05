@@ -112,11 +112,25 @@ export interface CreateOptions {
    * from any URL a payer sees
    */
   trigger?: string;
+
+  /**
+   * How many of the trigger's settlements the gateway keeps replayable past the
+   * hour it would otherwise forget them in, up to the ceiling its operator set.
+   * Needs `trigger`, defaults to none
+   */
+  replay?: number;
 }
 
 export interface FollowOptions {
   /** Called for the recent settlements replayed on connect, then for each new one */
   onPayment: (settled: TriggerEvent) => void;
+
+  /**
+   * How many settlements to ask for on connect, defaults to the gateway's ten.
+   * It hands back what it still holds, which is the last hour unless the
+   * payments were minted with `replay`
+   */
+  replay?: number;
 
   /** Called when a connection drops or a frame is refused, the follow keeps going */
   onError?: (error: unknown) => void;
@@ -194,6 +208,7 @@ export class ThunderBridge {
     const sent = createRequestBody(
       params,
       options?.trigger ? sha256Hex(unguessable(options.trigger)) : null,
+      options?.replay ?? null,
     );
     const headers = await this.sending("/incoming-payments", sent);
     if (options?.idempotencyKey) {
@@ -592,7 +607,8 @@ export class ThunderBridge {
    */
   followTrigger(secret: string, options: FollowOptions): () => void {
     const base = this.baseUrl.replace(/^http/, "ws");
-    const direct = `${base}/ws/triggers/${encodeURIComponent(unguessable(secret))}`;
+    const asked = options.replay === undefined ? "" : `?replay=${options.replay}`;
+    const direct = `${base}/ws/triggers/${encodeURIComponent(unguessable(secret))}${asked}`;
     const firstDelay = options.reconnectDelayMs ?? RECONNECT_DELAY_MS;
 
     let socket: WebSocket | null = null;
@@ -612,7 +628,10 @@ export class ThunderBridge {
       let url = direct;
       if (this.needsTicket(options.tickets)) {
         try {
-          url = `${base}/ws/tickets/${await this.wsTicket({ trigger_secret: secret })}`;
+          url = `${base}/ws/tickets/${await this.wsTicket({
+            trigger_secret: secret,
+            ...(options.replay === undefined ? {} : { replay: options.replay }),
+          })}`;
         } catch (refused: unknown) {
           options.onError?.(refused);
           again();
@@ -653,7 +672,7 @@ export class ThunderBridge {
     return asked === true || this.token !== null;
   }
 
-  private async wsTicket(body: Record<string, string>): Promise<string> {
+  private async wsTicket(body: Record<string, string | number>): Promise<string> {
     const sent = JSON.stringify(body);
     const response = await fetch(`${this.baseUrl}/ws-tickets`, {
       method: "POST",

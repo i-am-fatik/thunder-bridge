@@ -1,6 +1,6 @@
 {
   "name": "thunder-bridge",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Trustless JavaScript client for the Thunder Bridge Lightning payment gateway. Proves the invoice came from your own wallet before the payer sees it.",
   "author": "i-am-fatik",
   "homepage": "https://agora.gripe/en/tools/thunder-bridge",

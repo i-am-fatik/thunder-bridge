@@ -151,6 +151,14 @@ describe("bankTransfer", () => {
     expect(body["sealed"]).toBe("v1.opaque");
   });
 
+  it("asks the gateway to keep the trigger's settlements when the transfer says how many", async () => {
+    const calls = watching();
+
+    await bankTransfer(asking({ trigger: "the-shop-holds-this", replay: 10 }));
+
+    expect((JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>)["replay"]).toBe(10);
+  });
+
   it("sends the bearer, because a gateway of your own asks for one", async () => {
     const calls = watching();
 

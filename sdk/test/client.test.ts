@@ -250,6 +250,23 @@ describe("createPayment", () => {
     expect(Object.keys(postedBody(calls))).toEqual(["ln_addresses", "incoming_amount"]);
   });
 
+  it("asks the gateway to keep the trigger's settlements when told how many, and never otherwise", async () => {
+    const calls = stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
+
+    await new ThunderBridge(GATEWAY).createPayment(
+      { lnAddresses: [LN_ADDRESS], amountMsat: AMOUNT_MSAT },
+      { trigger: "the-overlay-holds-this", replay: 10 },
+    );
+    await new ThunderBridge(GATEWAY).createPayment(
+      { lnAddresses: [LN_ADDRESS], amountMsat: AMOUNT_MSAT },
+      { trigger: "the-overlay-holds-this" },
+    );
+
+    const mints = calls.filter((call) => call.url === `${GATEWAY}/incoming-payments`);
+    expect((JSON.parse(String(mints[0]!.init?.body)) as Record<string, unknown>)["replay"]).toBe(10);
+    expect(JSON.parse(String(mints[1]!.init?.body))).not.toHaveProperty("replay");
+  });
+
   it("does not double the slash in the request path when the base URL ends in one", async () => {
     const calls = stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
 
@@ -1217,6 +1234,20 @@ describe("followTrigger", () => {
     stop();
   });
 
+  it("asks the socket for as much replay as it was told", () => {
+    const { stop } = following({ replay: 25 });
+
+    expect(theSocket().url).toBe(`wss://gateway.example.net/ws/triggers/${WATCH_SECRET}?replay=25`);
+    stop();
+  });
+
+  it("asks for no particular replay when it was not told one, leaving the gateway its default", () => {
+    const { stop } = following();
+
+    expect(theSocket().url).not.toContain("replay");
+    stop();
+  });
+
   it("hands over the replay and then every live payment, pending ones included", () => {
     const { seen, stop } = following();
 
@@ -1375,6 +1406,19 @@ describe("followTrigger with tickets", () => {
 
     expect(calls[0].url).toBe(`${GATEWAY}/ws-tickets`);
     expect(JSON.parse(String(calls[0].init?.body))).toEqual({ trigger_secret: WATCH_SECRET });
+    stop();
+  });
+
+  it("puts the replay it wants in the ticket request, since a ticket URL carries nothing else", async () => {
+    const calls = minting();
+    const stop = new ThunderBridge(GATEWAY, { verify: false }).followTrigger(WATCH_SECRET, {
+      onPayment: () => {},
+      tickets: true,
+      replay: 25,
+    });
+    await drainMicrotasks();
+
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ trigger_secret: WATCH_SECRET, replay: 25 });
     stop();
   });
 
@@ -1618,6 +1662,16 @@ describe("watchPayment", () => {
     const body = JSON.parse(String(calls[0].init?.body)) as Record<string, unknown>;
     expect(body["trigger"]).toBe(sha256Hex("the-overlay-holds-this"));
     expect(String(calls[0].init?.body)).not.toContain("the-overlay-holds-this");
+  });
+
+  it("asks the gateway to keep the trigger's settlements when told how many", async () => {
+    const calls = stubFetch(gatewayWatches());
+
+    await new ThunderBridge(GATEWAY).watchPayment(
+      watchable({ trigger: "the-overlay-holds-this", replay: 10 }),
+    );
+
+    expect((JSON.parse(String(calls[0].init?.body)) as Record<string, unknown>)["replay"]).toBe(10);
   });
 
   it("refuses a trigger short enough to guess, because nothing rate limits a guess at it", async () => {

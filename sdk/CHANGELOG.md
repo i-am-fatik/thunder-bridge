@@ -13,6 +13,21 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 1.3.0
+
+A page that opens the trigger's socket a day later still sees the last payments, because
+the place that mints them can ask the gateway to keep some.
+
+### Added
+
+- `replay` on `lnurlPayEndpoint`, on `createPayment`'s options, on `watchPayment`, on
+  `bankTransfer` and on every rail: how many of the trigger's newest settlements the
+  gateway keeps replayable past the hour it otherwise forgets them in. Needs the trigger,
+  and the operator's `MAX_REPLAY` is the ceiling, so a number above it is refused at mint.
+- `replay` on `followTrigger`: how many settlements to ask for on connect, ten when
+  absent. It rides in the ticket request body or the socket query string, and the
+  gateway hands back what it still holds. Needs a gateway at 1.3.0 or later.
+
 ## 1.2.0
 
 A recipient with no LUD-21 address anywhere is watchable now, because their own node

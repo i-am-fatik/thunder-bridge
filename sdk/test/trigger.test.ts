@@ -205,6 +205,26 @@ describe("the callback half", () => {
     expect(JSON.stringify(body)).not.toContain("the-overlay-holds-this");
   });
 
+  it("asks the gateway to keep as many settlements as the place was built with", async () => {
+    const calls = stubFetch(gatewayServing());
+    const handler = endpoint({ watchSecret: "the-overlay-holds-this", replay: 10 });
+    const callback = await callbackFor(handler);
+
+    await handler(new Request(callback));
+
+    const body = JSON.parse(String(calls[1]!.init?.body)) as Record<string, unknown>;
+    expect(body["replay"]).toBe(10);
+  });
+
+  it("asks for nothing to be kept unless told, which is what the gateway does anyway", async () => {
+    const calls = stubFetch(gatewayServing());
+    const handler = endpoint({ watchSecret: "the-overlay-holds-this" });
+
+    await handler(new Request(await callbackFor(handler)));
+
+    expect(JSON.parse(String(calls[1]!.init?.body))).not.toHaveProperty("replay");
+  });
+
   it("refuses a swapped recipient, so nobody can mint on a wallet of their choosing", async () => {
     stubFetch(gatewayServing());
     const handler = endpoint();
@@ -311,6 +331,17 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
     expect(body).not.toHaveProperty("incoming_amount");
     expect(JSON.stringify(body)).not.toContain(WINNER);
     expect(JSON.stringify(body)).not.toContain(String(AMOUNT_MSAT));
+  });
+
+  it("asks the blind watch to keep settlements too, since the socket is the same either way", async () => {
+    const calls = stubFetch(recipientAndBlindGateway());
+    const handler = endpoint({ blind: true, watchSecret: "the-overlay-holds-this", replay: 10 });
+
+    await handler(new Request((await payRequest(handler)).callback));
+
+    const watch = calls.find((call) => call.url === `${GATEWAY}/watched-payments`);
+    const body = JSON.parse(String(watch?.init?.body)) as Record<string, unknown>;
+    expect(body["replay"]).toBe(10);
   });
 
   it("never asks the gateway to mint, so the gateway never sees the callback either", async () => {

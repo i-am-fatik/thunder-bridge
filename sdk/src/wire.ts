@@ -23,12 +23,17 @@ const REASONS: ReadonlySet<string> = new Set<WalletReason>([
   "invoice-refused",
 ]);
 
-export function createRequestBody(params: CreatePaymentParams, trigger: string | null): string {
+export function createRequestBody(
+  params: CreatePaymentParams,
+  trigger: string | null,
+  replay: number | null,
+): string {
   return JSON.stringify({
     ln_addresses: params.lnAddresses,
     incoming_amount: toAmount(params.amountMsat),
     webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
     trigger: trigger ?? undefined,
+    replay: replay ?? undefined,
   });
 }
 
@@ -121,6 +126,7 @@ export function watchRequestBody(params: WatchPaymentParams, trigger: string | n
     verify_url: params.verifyUrl,
     expires_at: expiresAt.toISOString(),
     trigger: trigger ?? undefined,
+    replay: params.replay,
     sealed: params.sealed,
     webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
   });

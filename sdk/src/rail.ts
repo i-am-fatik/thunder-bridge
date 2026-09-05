@@ -68,6 +68,9 @@ export interface BankRailConfig {
   /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
   trigger?: string;
 
+  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
+  replay?: number;
+
   /** Handed back untouched on that stream. Stable across re-offers, for the reason `expiresAt` is */
   sealed?: (order: Order) => string | Promise<string>;
 
@@ -96,6 +99,9 @@ export interface LightningRailConfig {
   /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
   trigger?: string;
 
+  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
+  replay?: number;
+
   /**
    * Makes the mint safe to retry. Unset nothing is sent, because a key stable
    * across re-offers is one the gateway can join against the bank leg's reference
@@ -120,6 +126,9 @@ export interface BlindLightningRailConfig {
 
   /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
   trigger?: string;
+
+  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
+  replay?: number;
 
   /** Only a watched leg has anywhere to carry this */
   sealed?: (order: Order) => string | Promise<string>;
@@ -161,6 +170,9 @@ export interface NwcRailConfig {
   /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
   trigger?: string;
 
+  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
+  replay?: number;
+
   /** Only a watched leg has anywhere to carry this */
   sealed?: (order: Order) => string | Promise<string>;
 
@@ -190,6 +202,7 @@ export function bankRail(config: BankRailConfig): Rail {
       currency: order.currency,
       expiresAt,
       trigger: config.trigger,
+      replay: config.replay,
       sealed: await config.sealed?.(order),
       variableSymbol: config.variableSymbol?.(order),
       webhookUrl: config.webhookUrl,
@@ -219,7 +232,11 @@ export function lightningRail(config: LightningRailConfig): Rail {
         amountMsat: await config.amountMsat(order),
         webhookUrl: config.webhookUrl,
       },
-      { idempotencyKey: config.idempotencyKey?.(order), trigger: config.trigger },
+      {
+        idempotencyKey: config.idempotencyKey?.(order),
+        trigger: config.trigger,
+        replay: config.replay,
+      },
     );
 
     return {
@@ -253,6 +270,7 @@ export function blindLightningRail(config: BlindLightningRailConfig): Rail {
         : resolved.verifyUrl,
       expiresAt: resolved.expiresAt,
       trigger: config.trigger,
+      replay: config.replay,
       sealed: await config.sealed?.(order),
       webhookUrl: config.webhookUrl,
     });
@@ -289,6 +307,7 @@ export function nwcRail(config: NwcRailConfig): Rail {
       ),
       expiresAt: invoice.expiresAt,
       trigger: config.trigger,
+      replay: config.replay,
       sealed: await config.sealed?.(order),
       webhookUrl: config.webhookUrl,
     });

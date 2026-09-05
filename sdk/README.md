@@ -91,7 +91,7 @@ them and this table does not repeat them.
 | `gateway.waitForWatched(id, options?)` | the same for a watched one, answering the shape both rails share |
 | `gateway.firstToSettle(ids, options?)` | wait on several legs, keep the first really paid, drop the losers |
 | `gateway.watchPayment(params)` | hand over an invoice you obtained yourself, without the address or the amount |
-| `gateway.followTrigger(secret, options)` | stream every payment carrying one trigger, reconnecting on its own |
+| `gateway.followTrigger(secret, options)` | stream every payment carrying one trigger, reconnecting on its own. `replay` asks for how many past settlements on connect |
 | `gateway.isPrivate` | whether a token was given |
 
 **Proving it** - [`src/verify.ts`](src/verify.ts)
@@ -108,7 +108,7 @@ them and this table does not repeat them.
 
 | Export | What it does |
 |---|---|
-| `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your domain. From `thunder-bridge/server` |
+| `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your domain. `replay` keeps its last settlements on the gateway for a page that opens later. From `thunder-bridge/server` |
 | `seal(secret, plaintext)`, `unseal` | the blob the gateway stores and cannot read |
 | `toLnurl(url)` | bech32-encode an endpoint url |
 | `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway that serves strangers |

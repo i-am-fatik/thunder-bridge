@@ -28,6 +28,13 @@ export interface TriggerConfig {
   /** Groups every payment here so `followTrigger` can watch the place, keep it off the QR */
   watchSecret?: string;
 
+  /**
+   * How many settlements of this place the gateway keeps replayable past the hour
+   * it would otherwise forget them in, up to the ceiling its operator set. What a
+   * page that opens later still gets to see. Needs `watchSecret`
+   */
+  replay?: number;
+
   /** Override when a proxy hides the public URL from the request, no trailing slash */
   baseUrl?: string;
 
@@ -140,7 +147,7 @@ async function mintThroughGateway(
 ): Promise<{ bolt11: string; verifyUrl: string }> {
   const payment = await config.gateway.createPayment(
     { lnAddresses: [address], amountMsat },
-    { idempotencyKey: nonce, trigger: config.watchSecret },
+    { idempotencyKey: nonce, trigger: config.watchSecret, replay: config.replay },
   );
 
   return { bolt11: payment.bolt11, verifyUrl: payment.verifyUrl };
@@ -161,6 +168,7 @@ async function mintBlind(
       verifyUrl: resolved.verifyUrl,
       expiresAt: resolved.expiresAt,
       trigger: config.watchSecret,
+      replay: config.replay,
       sealed: locked ? await seal(locked.secret, JSON.stringify(locked.data(minted))) : undefined,
     });
   } catch (refused: unknown) {

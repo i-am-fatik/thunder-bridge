@@ -82,6 +82,13 @@ export interface WatchPaymentParams {
   verifyUrl: string;
   expiresAt: number;
   trigger?: string;
+
+  /**
+   * How many of this trigger's settlements the gateway keeps replayable past the
+   * hour it would otherwise forget them in, up to the ceiling its operator set.
+   * Needs `trigger`, defaults to none
+   */
+  replay?: number;
   sealed?: string;
   webhookUrl?: string;
 }
