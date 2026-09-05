@@ -26,14 +26,14 @@ const REASONS: ReadonlySet<string> = new Set<WalletReason>([
 export function createRequestBody(
   params: CreatePaymentParams,
   trigger: string | null,
-  replay: number | null,
+  replay: number | undefined,
 ): string {
   return JSON.stringify({
     ln_addresses: params.lnAddresses,
     incoming_amount: toAmount(params.amountMsat),
     webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
     trigger: trigger ?? undefined,
-    replay: replay ?? undefined,
+    replay,
   });
 }
 

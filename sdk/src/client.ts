@@ -208,7 +208,7 @@ export class ThunderBridge {
     const sent = createRequestBody(
       params,
       options?.trigger ? sha256Hex(unguessable(options.trigger)) : null,
-      options?.replay ?? null,
+      options?.replay,
     );
     const headers = await this.sending("/incoming-payments", sent);
     if (options?.idempotencyKey) {
