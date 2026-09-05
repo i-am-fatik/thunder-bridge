@@ -32,9 +32,7 @@ export async function mint(
 		subject.kind === "trigger"
 			? { tag: TRIGGER, name: subject.trigger, replay: subject.replay }
 			: { tag: PAYMENT, name: subject.paymentId, replay: 0 };
-	const claim = [VERSION, named.tag, named.name, String(expiresAt), jti, String(named.replay)].join(
-		".",
-	);
+	const claim = [VERSION, named.tag, named.name, expiresAt, jti, named.replay].join(".");
 
 	return { ticket: `${claim}.${await hmacHex(key, claim)}`, expiresAt, jti };
 }
