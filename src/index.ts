@@ -570,7 +570,7 @@ async function create(
 	}
 
 	if (asked.replay > serving.maxReplay) {
-		return invalidRequest(replayCeiling(serving.maxReplay));
+		return tooManyToKeep(serving.maxReplay);
 	}
 	if (store.full(caller)) {
 		return tooMany(caller, store.info().maxPending);
@@ -719,7 +719,7 @@ async function watchOnly(
 	}
 
 	if (asked.replay > serving.maxReplay) {
-		return invalidRequest(replayCeiling(serving.maxReplay));
+		return tooManyToKeep(serving.maxReplay);
 	}
 	if (store.full(caller)) {
 		return tooMany(caller, store.info().maxPending);
@@ -800,10 +800,6 @@ function pathOf(incoming: IncomingMessage): string {
 	return new URL(incoming.url ?? "/", "http://app").pathname;
 }
 
-function replayCeiling(max: number): string {
-	return `replay must be ${max} or fewer, which is how many settlements this gateway keeps per trigger`;
-}
-
 async function asRequest(incoming: IncomingMessage): Promise<Request> {
 	if (Number(incoming.headers["content-length"] ?? 0) > MAX_INBOUND_BYTES) {
 		throw new BodyTooLarge();
@@ -871,6 +867,12 @@ function problem(status: number, body: Record<string, unknown>): Response {
 
 function invalidRequest(detail: string): Response {
 	return problem(400, { type: INVALID_REQUEST, title: "The request could not be read", detail });
+}
+
+function tooManyToKeep(max: number): Response {
+	return invalidRequest(
+		`replay must be ${max} or fewer, which is how many settlements this gateway keeps per trigger`,
+	);
 }
 
 function conflict(type: string, title: string): Response {
