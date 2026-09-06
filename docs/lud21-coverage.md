@@ -1,134 +1,110 @@
-# Who actually implements LUD-21
+# Which wallets work with this gateway
 
-This service can only serve a recipient whose LNURL server returns a `verify`
-URL **and** releases the preimage through it. Everything below was measured, not
-read: docs are useless here, only two pages on the whole web name any
-implementer.
+The gateway can watch a payment only when the recipient's lightning address
+publishes a LUD-21 `verify` URL **and** releases the preimage through it. Which
+wallets do is measured rather than read off a changelog: docs are useless here,
+only two pages on the whole web name any implementer.
+[`tools/lud21-harvest.ts`](../tools/lud21-harvest.ts) harvests live lightning
+addresses from nostr `lud16` fields, mints a throwaway invoice at each and reads
+what `verify` answers. `.github/workflows/lud21.yml` runs it on the first of each
+month, `tools/lud21-report.ts` prints the overview and fails the run on the only
+two changes that cost anybody, a wallet promised below that stopped releasing a
+preimage and a wallet refused below that now does, and
+[`lud21-measured.json`](lud21-measured.json) is the snapshot the lists read from.
 
-Surveyed 2026-08-01. Method: harvest real lightning addresses from nostr `lud16`
-fields, call each LNURL callback, keep the ones carrying `verify`, then GET every
-one of those URLs and check the real `{status, settled, preimage, pr}` shape.
+Measured 2026-08-12, 505 addresses across 96 domains, or by hand on 2026-08-01
+where the sample held no address of that wallet. Read the lists as of those
+dates: a wallet that shipped LUD-21 since is still refused here until the next
+run says so.
 
-That method is now [`tools/lud21-harvest.ts`](../tools/lud21-harvest.ts) rather
-than prose, and `.github/workflows/lud21.yml` runs it on the first of each month.
-`tools/lud21-report.ts` prints the overview and fails the run on the only two
-changes that cost anybody: a domain these lists promise that no longer releases a
-preimage, and a domain the denylist refuses that now answers like LUD-21. The
-machine-written snapshot is [`lud21-measured.json`](lud21-measured.json), and the
-prose below is the reading of it.
+Support belongs to the address domain, not to the app. The same wallet on another
+domain can answer differently, so every row names what the address ends with.
 
-**Read every list below as of its date, not as of today.** A wallet that shipped
-LUD-21 last month is still refused here, and the refusal comes from this snapshot
-rather than from anything measured. The denylist is the one part of it that costs a
-real recipient.
+## Wallets that work
 
-## Re-surveyed 2026-08-12, by the tool rather than by hand
-
-505 addresses across 96 domains: 31 usable, 44 answering no `verify` at all, 20 whose
-every sampled account was broken, and one answering `verify` without a preimage. The
-first run of the committed harvest, and it agrees with the hand-made ones. Every
-domain the lists below promise measured usable again, every domain they clear of
-`verify` answered the same way, and `zeuspay.com` still answers `pr,settled,status`
-with no `preimage` key, so the denylist entry that refuses it is still right.
-`zeusnuts.com` and `ecash.love` drew no address again and stay unrefuted.
-
-Usable and not named below: `basspistol.org`, `chilitum.com`, `learntheropes.xyz`,
-`nostr.fan`. Absent from the sample this time rather than changed: `enesis.md` and
-`stacker.news`.
-
-## Re-surveyed 2026-08-10
-
-The harvest again, wider: 643 addresses across 97 domains from six relays, sampling
-two addresses per domain because support belongs to the domain rather than the
-account, then a deeper pass of up to six addresses on every domain the thin sample
-could not settle.
-
-**The denylist costs nobody, as far as this can tell.** `zeuspay.com` still answers
-`verify` with no `preimage` key at all, so the entry that refuses it is still right.
-`zeusnuts.com` and `ecash.love` appeared in no profile in this harvest, so they are
-unrefuted rather than confirmed. Nothing turned up a wallet that shipped LUD-21 since
-and is being refused from a stale list, which was the fear behind the gap.
-
-**A trap worth writing down.** A domain looks like it has no LUD-21 when the sampled
-account is simply broken. `king21@getalby.com` answers `Recipient wallet error`,
-`satoshiplanet@stacker.news` answers `could not generate invoice to customer's
-attached wallet`. On two addresses Alby therefore read as unreachable, and Alby is one
-of the largest providers here at 90 of the 643. Six addresses in, it answers `verify`
-with a preimage field, exactly as in the first survey. Never conclude a provider from a
-thin sample.
-
-### Still usable, measured again
-
-`getalby.com`, `coinos.io` and `coinos.pro`, `blink.sv`, `minibits.cash`, `cake.cash`,
-`breez.tips`, `blitzwalletapp.com`, `cluborange.org`, `radar.cash`,
-`sats.zap.cooking`, and the BTCPay instances `pay.aerarium.money`,
-`btcpay.fiattolightning.de`, `pay.bbw.sv`, `pay.sdbitcoiners.com`.
-
-### Usable and new to this survey
-
-`speed.app`, which the first survey could only list as untested for want of a live
-address. Plus `arkzap.me`, `stacked.cash`, `sidecar.top`, `nostrplebs.com`,
-`orangem.art`, and the self-hosted `bencousens.com`, `cyberguy.fyi`, `enesis.md`,
-`mwaters.net`, `onyxcatpottery.com`, `rodbishop.nz`, `vitorpamplona.com`.
-
-### Still no verify at all
-
-Every name the first survey listed that appeared again answers the same way:
-`walletofsatoshi.com`, `strike.me`, `cash.app`, `zbd.gg`, `primal.net`,
-`fountain.fm`, `npub.cash`, `npubx.cash`, `wallet.yakihonne.com`, `sats.mobi`,
-`rizful.com`, and every LNbits instance in the sample. New to the list and answering
-the same: `linky.fit`, `sendsats.lol`, `satpicks.com`, `safebox.dev`,
-`nostrcheck.me`, `nostrdvm.com`, `btcmap.org`, `orangepillapp.com`, `nextblock.city`,
-`nostrcade.com`, `bitcointxoko.org`, `westernbtc.com`.
-
-### Settled nothing either way
-
-`stacker.news`, `pay.blink.sv`, `phoenixwallet.me`, `noahwallet.io`, `breez.fun`,
-`zap.stream` and a dozen small self-hosted domains: every address sampled had a
-broken wallet behind it, so these are unmeasured rather than refused. The first
-survey called Stacker News usable and nothing here contradicts it.
-
-## Usable: verify present, preimage released
-
-| Provider | verify URL shape |
+| Wallet | Address ends with |
 |---|---|
-| BTCPay Server >= v2.3.8 | `/lnurlp/verify/{hash}` (live: pay.aerarium.money) |
-| Alby (getalby.com) | `/lnurlp/{user}/verify/{id}` |
-| coinos.io | `/api/lnurl/verify/{uuid}` |
-| Blink (blink.sv) | `lnurl.blink.sv/verify/{hash}` |
-| Stacker News | `/api/lnurlp/{user}/verify/{hash}` |
+| Blink | `@blink.sv` |
+| Alby | `@getalby.com` |
+| coinos | `@coinos.io`, `@coinos.pro` |
+| Minibits | `@minibits.cash` |
+| Cake Wallet | `@cake.cash` |
+| Breez | `@breez.tips` |
+| Blitz Wallet | `@blitzwalletapp.com` |
+| Speed | `@speed.app` |
+
+Blink is the easiest to point somebody at: non-custodial accounts shipped
+2026-06-24 on Spark, and the address stays `username@blink.sv` whether the
+account holds its own keys or not. Cake, Breez and Blitz resolve to the same
+Spark SSP node, one implementation under three brands, so they stand or fall
+together. A BTCPay Server of your own answers too from v2.3.8 on, shipped
+2026-04-23 as a per-store toggle that is on by default.
+
+## Wallets that do not work
+
+Their addresses carry no `verify` at all, so the gateway refuses them at creation
+rather than leaving a payment pending until the watcher gives up:
+
+Wallet of Satoshi, Strike, Cash App, ZBD, Primal, Fountain, Yakihonne, Noah,
+Shockwallet, npub.cash, npubx.cash, sats.mobi, vipsats.app, vlt.ge, and every
+LNbits wallet, bare on a live instance and with no `verify` anywhere in the
+lnbits/lnurlp source.
+
+ZEUS Pay (`zeuspay.com`, `zeusnuts.com`) and ecash.love answer `verify` without
+a preimage. A `settled: true` with no preimage proves nothing, there is no hash
+binding, so the gateway treats them exactly like a wallet with no `verify` and
+refuses them from the denylist in [`core/lnurl.ts`](../core/lnurl.ts). That
+denylist is the one part of this page that costs a real recipient, and every run
+of the tool checks it is still right.
+
+## Wallets not measured yet
+
+Phoenix, Pouch, AQUA and Fedi: no live address of theirs turned up in any sample,
+so they are unmeasured rather than refused.
+
+## Your own wallet needs none of this
+
+Every list above is about a recipient reached at an address somebody else hosts.
+A recipient who owns the wallet does not need one: `nwcRail` mints over NIP-47
+and `nwcVerifyEndpoint` answers the LUD-21 shape from `lookup_invoice`, so ZEUS
+Pay, Wallet of Satoshi and every other name on the refused list is watchable
+through a connection string instead of through its address. The preimage then
+comes from the recipient's own node rather than from a hosted service, which is
+a shorter chain of trust than anything measured here. It costs a client that
+runs a server, which is why the survey and not this is what the gateway is built
+around.
+
+## How this was measured
+
+Harvest real lightning addresses from nostr `lud16` fields across six relays,
+group them by domain because support belongs to the domain rather than the
+account, sample two addresses per domain and up to six where two settled
+nothing, call each LNURL callback for a throwaway invoice, keep the ones carrying
+`verify`, then GET every one of those URLs and check the real
+`{status, settled, preimage, pr}` shape.
+
+**A trap worth writing down.** A domain looks like it has no LUD-21 when the
+sampled account is simply broken. `king21@getalby.com` answers `Recipient wallet
+error`, `satoshiplanet@stacker.news` answers `could not generate invoice to
+customer's attached wallet`. On two addresses Alby therefore read as unreachable,
+and Alby is one of the largest providers in the harvest. Six addresses in, it
+answers `verify` with a preimage field, exactly as in the first survey. Never
+conclude a provider from a thin sample: a domain whose every sampled address was
+broken is unmeasured, not refused.
+
+The `verify` URL shapes seen, for whoever debugs a client against them:
+
+| Wallet | verify URL shape |
+|---|---|
+| Alby | `/lnurlp/{user}/verify/{id}` |
+| coinos | `/api/lnurl/verify/{uuid}` |
+| Blink | `lnurl.blink.sv/verify/{hash}` |
 | Minibits | `/.well-known/lnurlp/verify/{hash}` |
-| Cake Wallet (cake.cash) | `/verify/{hash}` |
-| Breez (breez.tips) | `/verify/{hash}` |
+| Cake, Breez and the Spark-hosted brands | `/verify/{hash}` |
 | Blitz Wallet | `/.well-known/lnurlverify/...` (also returns `expired`) |
-| Spark-SSP hosted (sats.zap.cooking, radar.cash, pay-spark.*) | `/verify/{hash}` |
+| BTCPay Server >= v2.3.8 | `/lnurlp/verify/{hash}` |
 
-Cake, Breez, Blitz, cluborange, zap.cooking and radar all resolve to the same
-Spark SSP node. One implementation, many brands, so they stand or fall together.
-
-## Useless: verify present, no preimage
-
-A `settled: true` with no preimage proves nothing. There is no hash binding, so
-this service treats it exactly like a server with no `verify` at all.
-
-- ZEUS Pay (zeuspay.com, zeusnuts.com, Cashu `/verify/nut/` path)
-- ecash.love
-
-## No verify at all
-
-Wallet of Satoshi, Strike, Cash App, ZBD, Primal, Fountain.fm, Wavlake,
-Bitrefill, npub.cash, npubx.cash, Yakihonne, Shockwallet, Noah, vlt.ge,
-sats.mobi, vipsats.app, LNbits (bare on a live instance, and no `verify`
-anywhere in the lnbits/lnurlp source), plus every BTCPay older than v2.3.8
-(hrf.org, rizful.com, derekross.me).
-
-## Broken
-
-- libernet.app ships `"verify": null`. Check the value, never the key.
-
-## Untested, no live address found
-
-Phoenix (phoenixwallet.me did not resolve), Speed, Pouch, Geyser, AQUA, Fedi.
+libernet.app ships `"verify": null`. Check the value, never the key.
 
 ## What this costs the service
 
@@ -205,17 +181,6 @@ and Loop run this on. CLN needs a plugin, because stock `invoice` settles on rec
 Two nodes fix the collision and break the economics: one accumulates while the
 other drains, so the fronted amount stops returning and a rebalance treadmill
 starts. One node with LND keeps the loop closed.
-
-## When none of this applies
-
-Every list above is about a recipient reached at an address somebody else hosts.
-A recipient who owns the wallet does not need one: `nwcRail` mints over NIP-47 and
-`nwcVerifyEndpoint` answers the LUD-21 shape from `lookup_invoice`, so ZEUS Pay,
-Wallet of Satoshi and every other name on the refused lists is watchable through a
-connection string instead of through their address. The preimage then comes from
-the recipient's own node rather than from a hosted service, which is a shorter
-chain of trust than anything measured here. It costs a client that runs a server,
-which is why the survey and not this is what the gateway is built around.
 
 ## How the code uses this
 

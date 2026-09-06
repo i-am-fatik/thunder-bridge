@@ -190,10 +190,10 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
 - **The recipient must implement LUD-21.** Blink is the easiest recipient to
   point somebody at: non-custodial accounts shipped 2026-06-24 on Spark, the
   address stays `username@blink.sv` whether the account holds its own keys or
-  not, and that domain answers `verify` at `lnurl.blink.sv`. BTCPay v2.3.8+ on a
-  node of your own, Alby, coinos, stacker.news, Minibits, Blitz and the
-  Spark-hosted wallets answer too. Wallet of Satoshi, Strike, Cash App, ZBD and
-  Primal do not, and their users are refused at creation. Measured coverage is in
+  not, and that domain answers `verify` at `lnurl.blink.sv`. Alby, coinos,
+  Minibits, Cake, Breez, Blitz and Speed answer too, and so does BTCPay v2.3.8+
+  on a node of your own. Wallet of Satoshi, Strike, Cash App, ZBD and Primal do
+  not, and their users are refused at creation. Which wallets work is in
   [docs/lud21-coverage.md](docs/lud21-coverage.md), re-measured against live
   wallets on the first of each month rather than read off anyone's changelog.
 - **Unless you own the wallet, in which case use NWC instead.** `nwcRail` mints on
