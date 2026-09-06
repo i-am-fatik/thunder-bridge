@@ -170,7 +170,7 @@ gates it with `npm ci`, the whole test suite, and `tsc --noEmit`.
 ## Railway
 
 Live at
-[thunder-bridge-production.up.railway.app](https://thunder-bridge-production.up.railway.app/health).
+[thunder-bridge.agora.gripe](https://thunder-bridge.agora.gripe/health).
 That instance is a demo. It runs with no `GATEWAY_TOKEN`, so it answers anyone, it
 keeps no durability promise, and its ledger may be wiped whenever. Point nothing you
 care about at it: run your own, and the client refuses a gateway that serves

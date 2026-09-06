@@ -22,7 +22,7 @@ a documentation question rather than a vulnerability.
 
 ## What is not in scope
 
-The live instance at `thunder-bridge-production.up.railway.app` is a demo. It runs with
+The live instance at `thunder-bridge.agora.gripe` is a demo. It runs with
 no `GATEWAY_TOKEN`, keeps no durability promise, and has no rate limit in front of it, all
 of which is written down in the README. That it can be flooded, filled, or wiped is the
 arrangement rather than a finding. Please do not test availability against it: run your own

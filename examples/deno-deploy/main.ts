@@ -17,8 +17,7 @@ function randomSecret(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-const GATEWAY_URL =
-  Deno.env.get("GATEWAY_URL") ?? "https://thunder-bridge-production.up.railway.app";
+const GATEWAY_URL = Deno.env.get("GATEWAY_URL") ?? "https://thunder-bridge.agora.gripe";
 const LN_ADDRESSES = (Deno.env.get("LN_ADDRESSES") ?? "")
   .split(",")
   .map((address) => address.trim())

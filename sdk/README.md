@@ -37,7 +37,7 @@ CORS open, so the proof fetches work from a browser too.
 ```ts
 import { ThunderBridge, invoiceToSvg, type CreatePaymentParams } from "thunder-bridge";
 
-const gateway = new ThunderBridge("https://thunder-bridge-production.up.railway.app");
+const gateway = new ThunderBridge("https://thunder-bridge.agora.gripe");
 
 const request: CreatePaymentParams = {
   lnAddresses: ["alice@coinos.io", "alice@getalby.com"],
