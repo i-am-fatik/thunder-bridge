@@ -295,8 +295,7 @@ and `publicWatchTicketEndpoint`, rather than one taking a `public` flag.
 
 The flag was the first design and it is the wrong one here. A public ticket
 endpoint makes a trigger's whole stream readable by strangers, preimages included,
-and `examples/deno-deploy` gates content on exactly those preimages in
-`unlockOnSettlement`. So the difference between the two calls is the difference
+and a paywall gates content on exactly those preimages when it settles. So the difference between the two calls is the difference
 between a tip jar and a giveaway, and `watchTicketEndpoint(config, true)` states
 that difference as a bare `true`. Two names state it instead.
 

@@ -1,9 +1,0 @@
-{
-  "tasks": {
-    "dev": "deno run --allow-net --allow-env --watch main.ts",
-    "deploy": "deployctl deploy --prod --env-file"
-  },
-  "imports": {
-    "thunder-bridge": "npm:thunder-bridge@1.4.0"
-  }
-}

@@ -1,7 +1,6 @@
 # thunder-bridge
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/Nq9_0q)
-[![Deploy the example on Deno](https://deno.com/deploy.svg)](https://console.deno.com/new?clone=https://github.com/i-am-fatik/thunder-bridge&path=examples/deno-deploy)
 
 Lightning payments with no node and no database server. Post a priority list of
 lightning addresses and an amount, and the gateway asks each address's own
@@ -244,11 +243,5 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   durability actually depends on, for whoever runs one of these for somebody else.
 - [sdk/](sdk) - the JavaScript client, which proves an invoice before the payer
   sees it.
-- [examples/deno-deploy](examples/deno-deploy) - a paywall and a lightning
-  address in one Fetch handler.
-- [examples/bank-transfer](examples/bank-transfer) - the same shop on a Czech QR
-  platba, settled by the same rule.
-- [examples/trigger-watcher](examples/trigger-watcher) - one socket that hears
-  every settlement.
 
 MIT.

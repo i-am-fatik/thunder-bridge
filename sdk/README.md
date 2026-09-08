@@ -437,7 +437,6 @@ from somewhere other than the delivery.
   and their failure codes, what settlement means, making the gateway poll nobody but
   you, the NWC rail, wrapped invoices, and webhooks in full
 - [the gateway](../README.md) - one level up in this repository
-- [examples](../examples) - a paywall on Deno Deploy, a trigger watcher, a bank rail
 
 ## Development
 
