@@ -1,6 +1,7 @@
 import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
 import { resolve } from "../../core/lnurl.js";
 import { seal } from "../../core/sealed.js";
+import { sha256Hex } from "../../core/sha256.js";
 import type { ThunderBridge } from "./client.js";
 import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
 
@@ -66,6 +67,26 @@ export interface Minted {
 }
 
 /**
+ * A trigger's live stream is opened with a ticket rather than with the watch
+ * secret, so something has to hold the secret and trade it for tickets. That is
+ * what these two endpoints are, and they are the only place the gateway's token
+ * has to be
+ */
+export interface WatchTicketConfig {
+  /** The gateway that mints the ticket, holding the token this keeps off the wire */
+  gateway: ThunderBridge;
+
+  /** The trigger to open, the same secret `lnurlPayEndpoint` groups its payments under */
+  watchSecret: string;
+
+  /**
+   * How many of this trigger's settlements the socket replays on connect, so a
+   * page opened late still shows what it missed, up to the gateway's ceiling
+   */
+  replay?: number;
+}
+
+/**
  * An LNURL-pay endpoint standing in front of a priority list of addresses, as a
  * Fetch handler so it runs on Deno Deploy, Workers, Hono, Next and Node alike.
  *
@@ -88,6 +109,42 @@ export function lnurlPayEndpoint(config: TriggerConfig): (request: Request) => P
       return refuse(failure instanceof Error ? failure.message : "the trigger could not be served");
     }
   };
+}
+
+/**
+ * Trades the watch secret for a socket ticket, for a board that is not public.
+ * The caller has to know the secret already, so all this adds is that the secret
+ * stops travelling in socket URLs, where the gateway, every proxy in front of it
+ * and the browser's own history all keep a copy. Anyone without it gets a 403.
+ *
+ * POST to it before every connect, because a ticket lives one minute.
+ */
+export function watchTicketEndpoint(
+  config: WatchTicketConfig,
+): (request: Request) => Promise<Response> {
+  return async (request: Request) => {
+    const offered = await offeredSecret(request);
+    if (!equalInConstantTime(sha256Hex(offered), sha256Hex(config.watchSecret))) {
+      return Response.json({ reason: "not the watch secret" }, { status: 403 });
+    }
+
+    return await issue(config);
+  };
+}
+
+/**
+ * Mints a socket ticket for anybody who asks, for a board meant to be read by
+ * strangers. It reads no body and refuses nobody, which makes the trigger's
+ * whole stream public: every viewer gets each settlement's preimage, verify url
+ * and payment hash.
+ *
+ * Only for a trigger where that is the point. Gate anything on those preimages
+ * and a viewer of the board is holding the unlock.
+ */
+export function publicWatchTicketEndpoint(
+  config: WatchTicketConfig,
+): (request: Request) => Promise<Response> {
+  return () => issue(config);
 }
 
 async function offer(config: TriggerConfig, url: URL): Promise<Response> {
@@ -200,4 +257,22 @@ function randomNonce(): string {
 
 function refuse(reason: string): Response {
   return Response.json({ status: "ERROR", reason });
+}
+
+async function issue(config: WatchTicketConfig): Promise<Response> {
+  const issued = await config.gateway.createSocketTicket({
+    trigger: config.watchSecret,
+    replay: config.replay,
+  });
+
+  return Response.json({
+    ticket: issued.ticket,
+    expires_at: new Date(issued.expiresAt * 1000).toISOString(),
+  });
+}
+
+async function offeredSecret(request: Request): Promise<string> {
+  const body = (await request.json().catch(() => null)) as { secret?: unknown } | null;
+
+  return typeof body?.secret === "string" ? body.secret : "";
 }

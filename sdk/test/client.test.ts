@@ -1028,7 +1028,7 @@ describe("waitForPayment through a dropped socket", () => {
   it("mints a fresh ticket for every attempt, because a minute-old one is expired", async () => {
     const calls = stubFetch({
       [`${GATEWAY}/ws-tickets`]: () =>
-        jsonResponse({ ticket: "1.p.abc.9.ff.mac", expires_at: "x" }),
+        jsonResponse({ ticket: "1.p.abc.9.ff.mac", expires_at: new Date(Date.now() + 60_000).toISOString() }),
     });
     track(new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }).waitForPayment("pay_0001"));
     await vi.advanceTimersByTimeAsync(0);
@@ -1378,7 +1378,7 @@ describe("followTrigger with tickets", () => {
 
   function minting(routes: Routes = {}): FetchCall[] {
     return stubFetch({
-      [`${GATEWAY}/ws-tickets`]: () => jsonResponse({ ticket: TICKET, expires_at: "x" }),
+      [`${GATEWAY}/ws-tickets`]: () => jsonResponse({ ticket: TICKET, expires_at: new Date(Date.now() + 60_000).toISOString() }),
       ...routes,
     });
   }
@@ -1477,7 +1477,7 @@ describe("waitForPayment with tickets", () => {
 
   function minting(routes: Routes = {}): FetchCall[] {
     return stubFetch({
-      [`${GATEWAY}/ws-tickets`]: () => jsonResponse({ ticket: TICKET, expires_at: "x" }),
+      [`${GATEWAY}/ws-tickets`]: () => jsonResponse({ ticket: TICKET, expires_at: new Date(Date.now() + 60_000).toISOString() }),
       ...routes,
     });
   }

@@ -98,6 +98,7 @@ them and this table does not repeat them.
 | `gateway.firstToSettle(ids, options?)` | wait on several legs, keep the first really paid, drop the losers |
 | `gateway.watchPayment(params)` | hand over an invoice you obtained yourself, without the address or the amount |
 | `gateway.followTrigger(secret, options)` | stream every payment carrying one trigger, reconnecting on its own. `replay` asks for how many past settlements on connect |
+| `gateway.createSocketTicket(params)` | a one minute pass onto one trigger's stream, to hand something that must not hold the secret |
 | `gateway.isPrivate` | whether a token was given |
 
 **Proving it** - [`src/verify.ts`](src/verify.ts)
@@ -115,6 +116,8 @@ them and this table does not repeat them.
 | Export | What it does |
 |---|---|
 | `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your domain. `replay` keeps its last settlements on the gateway for a page that opens later. From `thunder-bridge/server` |
+| `watchTicketEndpoint(config)` | mints socket tickets for callers who already know the watch secret, 403 for the rest. From `thunder-bridge/server` |
+| `publicWatchTicketEndpoint(config)` | the same for a board strangers are meant to read, minting for anyone. From `thunder-bridge/server` |
 | `seal(secret, plaintext)`, `unseal` | the blob the gateway stores and cannot read |
 | `toLnurl(url)` | bech32-encode an endpoint url |
 | `bankTransfer(params)` | register a Czech QR platba as a watched payment. Refuses a gateway that serves strangers |
@@ -122,6 +125,16 @@ them and this table does not repeat them.
 | `fioStatement(config)` | a `Statement` reading a Fio account, several tokens used strictly in turn |
 | `lightningVerifyEndpoint(config)` | the same shape for Lightning, asking the wallet on the gateway's behalf. From `thunder-bridge/server` |
 | `relayedVerifyUrl(mount, wallet, secret)` | the URL to hand the gateway instead of the wallet's, with the wallet's sealed inside |
+
+There are two ticket endpoints rather than one taking a flag, so the call site
+says which board this is. Mount one on its own path and POST to it from the page
+before every connect, because a ticket lives a minute. Whichever you mount, the
+page never holds the watch secret, which is the reason to mount either.
+
+A public board is public in full: every viewer of that socket gets each
+settlement's preimage, verify url and payment hash. Fine for a tip jar, wrong the
+moment anything is gated behind those preimages, because then a viewer holds the
+unlock.
 
 What your service answers once those handlers are mounted is written out in
 [`openapi.yaml`](openapi.yaml), shipped with this package.

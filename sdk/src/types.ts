@@ -93,6 +93,25 @@ export interface WatchPaymentParams {
   webhookUrl?: string;
 }
 
+/**
+ * A one minute pass onto one trigger's stream. It opens that trigger and nothing
+ * else, which is what makes it the thing to hand a browser when the trigger
+ * secret is not. `expiresAt` is unix seconds, like every other time here
+ */
+export interface SocketTicket {
+  ticket: string;
+  expiresAt: number;
+}
+
+/**
+ * Which trigger the ticket opens, and how many of its settlements the socket
+ * replays on connect, up to the ceiling the gateway's operator set
+ */
+export interface SocketTicketParams {
+  trigger: string;
+  replay?: number;
+}
+
 /** Why one wallet in the list could not be used */
 export type WalletReason =
   | "address-unusable"

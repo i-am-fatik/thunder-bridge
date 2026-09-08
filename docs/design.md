@@ -288,6 +288,30 @@ between the payRequest and the callback fails that payment, with no fallback
 behind it. The priority list buys availability at create time, not for the length
 of one payer's hesitation.
 
+## Which board this is, at the call site
+
+The SDK serves the socket ticket exchange as two functions, `watchTicketEndpoint`
+and `publicWatchTicketEndpoint`, rather than one taking a `public` flag.
+
+The flag was the first design and it is the wrong one here. A public ticket
+endpoint makes a trigger's whole stream readable by strangers, preimages included,
+and `examples/deno-deploy` gates content on exactly those preimages in
+`unlockOnSettlement`. So the difference between the two calls is the difference
+between a tip jar and a giveaway, and `watchTicketEndpoint(config, true)` states
+that difference as a bare `true`. Two names state it instead.
+
+Three other shapes were considered. A route inside `lnurlPayEndpoint` would make
+one handler answer three differently authorised questions, and would deny a board
+to anyone who does not want an LNURL endpoint. A server-side rebroadcast that
+strips the payload is the right answer once a paywall and a public board share a
+trigger, and the wrong one before that, because it puts a socket and a fan-out in
+the SDK to solve a problem nobody has yet. Leaving the exchange in each operator's
+app is what we had, and it asks every operator to write a constant-time comparison
+and to keep a gateway token off a public wire.
+
+The deployment switch does not disappear. It moves to the operator's own app as a
+ternary choosing one of the two, so the SDK carries no mode of its own.
+
 ## Two rails, one order
 
 A shop can offer the same thing for Lightning and for a Czech QR platba at once

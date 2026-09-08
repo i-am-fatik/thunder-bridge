@@ -59,6 +59,8 @@ export type {
   PaymentStatus,
   Quote,
   Settlement,
+  SocketTicket,
+  SocketTicketParams,
   TriggerEvent,
   WalletFailure,
   WalletReason,

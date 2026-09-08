@@ -18,6 +18,8 @@ import type {
   Payment,
   PaymentStatus,
   Quote,
+  SocketTicket,
+  SocketTicketParams,
   TriggerEvent,
   WalletFailure,
   WatchPaymentParams,
@@ -28,6 +30,7 @@ import {
   paymentFromWire,
   quoteFromWire,
   quoteRequestBody,
+  socketTicketFromWire,
   triggerEventFromWire,
   watchRequestBody,
 } from "./wire.js";
@@ -668,11 +671,31 @@ export class ThunderBridge {
     };
   }
 
+  /**
+   * A one minute pass onto one trigger's stream, for something that must hold
+   * neither the token nor the trigger secret. Mint it in a handler and answer
+   * with the ticket alone, because that is all a browser needs to connect and
+   * all it can do anything with. `watchTicketEndpoint` is this method already
+   * wrapped in a route
+   */
+  async createSocketTicket(params: SocketTicketParams): Promise<SocketTicket> {
+    return await this.mintedTicket({
+      trigger_secret: unguessable(params.trigger),
+      replay: params.replay,
+    });
+  }
+
   private needsTicket(asked?: boolean): boolean {
     return asked === true || this.token !== null;
   }
 
   private async wsTicket(body: Record<string, string | number | undefined>): Promise<string> {
+    return encodeURIComponent((await this.mintedTicket(body)).ticket);
+  }
+
+  private async mintedTicket(
+    body: Record<string, string | number | undefined>,
+  ): Promise<SocketTicket> {
     const sent = JSON.stringify(body);
     const response = await fetch(`${this.baseUrl}/ws-tickets`, {
       method: "POST",
@@ -683,14 +706,14 @@ export class ThunderBridge {
       throw await problemFrom(response);
     }
 
-    const minted = (await response.json().catch(() => null)) as { ticket?: unknown } | null;
-    if (typeof minted?.ticket !== "string") {
+    const ticket = socketTicketFromWire(await response.json().catch(() => null));
+    if (ticket === null) {
       throw new ProblemError({
         status: response.status,
         title: "The gateway answered with something that is not a ticket",
       });
     }
-    return encodeURIComponent(minted.ticket);
+    return ticket;
   }
 
   private async sending(path: string, body: string): Promise<Record<string, string>> {

@@ -6,6 +6,7 @@ import type {
   PaymentStatus,
   Quote,
   Settlement,
+  SocketTicket,
   TriggerEvent,
   WalletFailure,
   WalletReason,
@@ -201,6 +202,21 @@ export function triggerEventFromWire(body: unknown): TriggerEvent | null {
     lnAddress: text(wire["ln_address"]),
     amountMsat: wire["incoming_amount"] === undefined ? null : msatFrom(wire["incoming_amount"], 1),
   };
+}
+
+export function socketTicketFromWire(body: unknown): SocketTicket | null {
+  const wire = asObject(body);
+  if (wire === null) {
+    return null;
+  }
+
+  const ticket = text(wire["ticket"]);
+  const expiresAt = secondsFrom(wire["expires_at"]);
+  if (ticket === null || expiresAt === null) {
+    return null;
+  }
+
+  return { ticket, expiresAt };
 }
 
 function kindOf(wire: Record<string, unknown>): PaymentKind {

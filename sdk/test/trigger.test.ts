@@ -2,9 +2,15 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThunderBridge } from "../src/client";
 import { unseal } from "../../core/sealed.js";
-import { lnurlPayEndpoint } from "../src/trigger";
+import { ProblemError } from "../src/errors";
+import {
+  lnurlPayEndpoint,
+  publicWatchTicketEndpoint,
+  watchTicketEndpoint,
+  type WatchTicketConfig,
+} from "../src/trigger";
 import { bolt11 } from "./encode";
-import { jsonResponse, stubFetch, type Routes } from "./harness";
+import { type FetchCall, jsonResponse, problemResponse, stubFetch, type Routes } from "./harness";
 
 const GATEWAY = "https://gateway.example.net";
 const MOUNT = "https://tips.example.org/pay/coffee";
@@ -518,5 +524,96 @@ describe("what a wallet is told when it cannot be served", () => {
 
     expect(refused["status"]).toBe("ERROR");
     expect(typeof refused["reason"]).toBe("string");
+  });
+});
+
+describe("the watch ticket endpoints, which trade the secret for a pass that expires", () => {
+  const WATCH_SECRET = "the-board-holds-this";
+  const TOKEN = "only-the-endpoint-holds-this";
+  const TICKET = "2.t.abc.1900000060.ff.10.mac";
+  const EXPIRES_AT = "2030-03-08T19:07:40.000Z";
+
+  function minting(routes: Routes = {}): FetchCall[] {
+    return stubFetch({
+      [`${GATEWAY}/ws-tickets`]: () => jsonResponse({ ticket: TICKET, expires_at: EXPIRES_AT }),
+      ...routes,
+    });
+  }
+
+  function asking(secret?: string): Request {
+    return new Request(`${MOUNT}/ticket`, {
+      method: "POST",
+      body: secret === undefined ? "" : JSON.stringify({ secret }),
+    });
+  }
+
+  function board(replay?: number): WatchTicketConfig {
+    return {
+      gateway: new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }),
+      watchSecret: WATCH_SECRET,
+      replay,
+    };
+  }
+
+  it("hands back the gateway's own ticket and expiry when the secret is right", async () => {
+    minting();
+
+    const answer = await watchTicketEndpoint(board())(asking(WATCH_SECRET));
+
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ ticket: TICKET, expires_at: EXPIRES_AT });
+  });
+
+  it("refuses a wrong secret and a body with none, without troubling the gateway", async () => {
+    const calls = minting();
+
+    expect((await watchTicketEndpoint(board())(asking("nearly-the-one"))).status).toBe(403);
+    expect((await watchTicketEndpoint(board())(asking())).status).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("mints for a caller offering nothing when the board is public", async () => {
+    minting();
+
+    const answer = await publicWatchTicketEndpoint(board())(asking());
+
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ ticket: TICKET, expires_at: EXPIRES_AT });
+  });
+
+  it("mints for a wrong secret when the board is public, because it reads no body", async () => {
+    minting();
+
+    const answer = await publicWatchTicketEndpoint(board())(asking("nearly-the-one"));
+
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ ticket: TICKET, expires_at: EXPIRES_AT });
+  });
+
+  it("refuses a gateway that says no, and one that says yes without a ticket", async () => {
+    minting({ [`${GATEWAY}/ws-tickets`]: () => problemResponse({ title: "Unauthorized" }, 401) });
+
+    await expect(watchTicketEndpoint(board())(asking(WATCH_SECRET))).rejects.toThrow(ProblemError);
+
+    minting({ [`${GATEWAY}/ws-tickets`]: () => jsonResponse({ ticket: TICKET }) });
+
+    await expect(watchTicketEndpoint(board())(asking(WATCH_SECRET))).rejects.toThrow(
+      /not a ticket/,
+    );
+  });
+
+  it("asks the gateway for a replay depth only when one was configured", async () => {
+    const asked = minting();
+    await publicWatchTicketEndpoint(board(25))(asking());
+
+    expect(JSON.parse(String(asked[0]?.init?.body))).toEqual({
+      trigger_secret: WATCH_SECRET,
+      replay: 25,
+    });
+
+    const bare = minting();
+    await publicWatchTicketEndpoint(board())(asking());
+
+    expect(JSON.parse(String(bare[0]?.init?.body))).toEqual({ trigger_secret: WATCH_SECRET });
   });
 });
