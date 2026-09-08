@@ -1,12 +1,27 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:thunder-bridge@1.1.0": "1.1.0"
+    "npm:thunder-bridge@1.4.0": "1.4.0"
   },
   "npm": {
-    "thunder-bridge@1.1.0": {
-      "integrity": "sha512-+vhhsB9aBDppgbszusjKbP8zMW2plClVtmmuvRiZ4eUAZHvJWR6d4JuEQy8Z9rEPwDTEFoOA3yjICPoItNo6Zg==",
+    "@noble/ciphers@2.4.0": {
+      "integrity": "sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw=="
+    },
+    "@noble/curves@2.4.0": {
+      "integrity": "sha512-P4/62zrgfH33CneE3Dn4WhJVA22YUU0eR51wKIan4NVRvwsA0YnPTwWGpNbpuacSujmSFLvyzpyuR30+fbq2Ew==",
       "dependencies": [
+        "@noble/hashes"
+      ]
+    },
+    "@noble/hashes@2.4.0": {
+      "integrity": "sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA=="
+    },
+    "thunder-bridge@1.4.0": {
+      "integrity": "sha512-fLwQg8iEneLNnpTzJIHmubw29C3+t3qDd4+gNuRkUpCw6bjkctvZKyUL+wn0Cn/NQuqiU6VHkoggHbZbUjX2PA==",
+      "dependencies": [
+        "@noble/ciphers",
+        "@noble/curves",
+        "@noble/hashes",
         "uqr"
       ]
     },
@@ -16,7 +31,7 @@
   },
   "workspace": {
     "dependencies": [
-      "npm:thunder-bridge@1.1.0"
+      "npm:thunder-bridge@1.4.0"
     ]
   }
 }
