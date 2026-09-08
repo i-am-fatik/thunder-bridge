@@ -38,6 +38,18 @@ jobs:
       - run: npx tsc --noEmit
       - name: a body somebody wrote without braces, anywhere in the repository
         run: npm run lint
+      - name: a readme claim the code stopped backing
+        run: node tools/readme-check.ts .
+      - name: a readme example that no longer compiles against the client it documents
+        run: |
+          fences=$(mktemp -d)
+          node tools/readme-check.ts . --fences "$fences"
+          (cd sdk && npm pack --pack-destination "$fences" >/dev/null)
+          cd "$fences"
+          printf '{"type":"module","private":true}' > package.json
+          npm install --silent ./thunder-bridge-*.tgz typescript@5 @types/node
+          npx tsc --strict --noEmit --skipLibCheck --target ES2022 --module NodeNext \
+            --moduleResolution nodenext --lib ES2022,DOM --types node src/*.ts
       - name: one version for the gateway and the client it talks to
         run: |
           stated() { awk '/^info:/ { inside = 1 } inside && /^  version:/ { print $2; exit }' "$1"; }
