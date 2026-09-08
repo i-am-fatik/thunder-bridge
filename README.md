@@ -167,14 +167,20 @@ docker run -d -p 3000:3000 -v thunder-data:/data \
 One image, one process: `node:26.8.1-slim` running `src/index.ts`. The build stage
 gates it with `npm ci`, the whole test suite, and `tsc --noEmit`.
 
-## Railway
+## Live
 
-Live at
-[thunder-bridge.agora.gripe](https://thunder-bridge.agora.gripe/health).
-That instance is a demo. It runs with no `GATEWAY_TOKEN`, so it answers anyone, it
-keeps no durability promise, and its ledger may be wiped whenever. Point nothing you
-care about at it: run your own, and the client refuses a gateway that serves
-strangers unless you say otherwise.
+[public.thunder-bridge.agora.gripe](https://public.thunder-bridge.agora.gripe/health)
+runs with no `GATEWAY_TOKEN`, so it answers anyone. Its ledger is an `emptyDir` that a
+restart or a flood wipes, it is rate limited, and nothing about it is backed up. Point
+nothing you care about at it. The client refuses it unless you pass `allowPublicGateway`,
+because an operator who answers strangers would read the amount and the reference off
+every verify URL you handed over, and `bankTransfer` refuses it outright for the same
+reason, so the bank rail cannot be tried there at all.
+
+It holds no funds. A minted invoice is payable to the address the caller named, so the
+most a stranger takes out of it is an invoice of their own.
+
+## Railway
 
 The template carries this repo, a volume at `/data`, and a `CLUSTER_KEY`
 generated per deploy, so there is nothing to fill in. Copy that key somewhere

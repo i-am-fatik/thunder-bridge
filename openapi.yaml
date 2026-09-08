@@ -27,8 +27,8 @@ info:
     access to.
 
 servers:
-  - url: https://thunder-bridge-production.up.railway.app
-    description: Production
+  - url: https://public.thunder-bridge.agora.gripe
+    description: The public demo, no token, ledger wiped whenever
   - url: http://localhost:3000
     description: A local instance
 

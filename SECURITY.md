@@ -22,11 +22,13 @@ a documentation question rather than a vulnerability.
 
 ## What is not in scope
 
-The live instance at `thunder-bridge.agora.gripe` is a demo. It runs with
-no `GATEWAY_TOKEN`, keeps no durability promise, and has no rate limit in front of it, all
-of which is written down in the README. That it can be flooded, filled, or wiped is the
-arrangement rather than a finding. Please do not test availability against it: run your own
-instance, which takes one command.
+`public.thunder-bridge.agora.gripe` runs with no `GATEWAY_TOKEN` on purpose, so it answers
+anyone, and its ledger is ephemeral. That it can be flooded, filled, or wiped is the
+arrangement rather than a finding, and neither is its rate limit refusing you.
+
+No live host is a test target, that one included. What is in scope is the code, and a
+finding stands on its own without a demonstration against somebody's gateway. Run your
+own instance, which takes one command.
 
 Anything about the BTCPay plugin belongs in its own repository, and its README says which
 gateway it was written against.

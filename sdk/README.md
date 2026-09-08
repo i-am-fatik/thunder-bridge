@@ -34,10 +34,16 @@ A page can run the whole flow with no backend of its own. The gateway answers
 every origin, and coinos, Alby and Stacker News serve their LNURL endpoints with
 CORS open, so the proof fetches work from a browser too.
 
+The url below is a shared demo that answers anyone and forgets everything on
+restart. It is there so this snippet runs as written. It is a base url rather than a
+page, so opening it in a browser gives a `404` and
+[`/health`](https://public.thunder-bridge.agora.gripe/health) is what tells you it is
+up. Point production at a gateway of your own, which takes one command.
+
 ```ts
 import { ThunderBridge, invoiceToSvg, type CreatePaymentParams } from "thunder-bridge";
 
-const gateway = new ThunderBridge("https://thunder-bridge.agora.gripe");
+const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe");
 
 const request: CreatePaymentParams = {
   lnAddresses: ["alice@coinos.io", "alice@getalby.com"],
@@ -167,8 +173,12 @@ BOLT12 offer is not handled, because this gateway never returns one.
 import { invoiceToSvg, lnurlToSvg } from "thunder-bridge";
 
 const toPay = invoiceToSvg(payment.bolt11, { size: 320, color: "#1a1a2e" });
-const tipJar = lnurlToSvg("https://agora.gripe/tip");
+const tipJar = lnurlToSvg("https://thunder-bridge.agora.gripe/.well-known/lnurlp/21sats");
 ```
+
+That second url is live and built with this library, a fixed 21 sat tip served by
+`lnurlPayEndpoint`, so the QR it returns is one you can scan to see the whole flow
+end to end.
 
 **Minting your own invoice** - [`src/rail.ts`](src/rail.ts): `invoiceFrom`, from
 `thunder-bridge/server`. A gateway that does not mint is one that never sees an
