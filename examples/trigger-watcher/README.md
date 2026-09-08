@@ -15,13 +15,13 @@ there. `tickets: true` swaps it for a short-lived ticket per connection when a u
 log is a worry. Either way the secret stays off anything a payer sees.
 
 ```bash
-GATEWAY_URL=https://thunder-bridge.agora.gripe \
+GATEWAY_URL=https://public.thunder-bridge.agora.gripe \
 WATCH_SECRET=<the same 32 characters the endpoint got> \
   deno task watch
 ```
 
 ```
-watching https://thunder-bridge.agora.gripe, ctrl-c to stop
+watching https://public.thunder-bridge.agora.gripe, ctrl-c to stop
 21 sat to you@blink.sv, preimage 9f3c1ab5e70d2c84
 ```
 

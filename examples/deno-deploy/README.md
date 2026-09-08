@@ -35,7 +35,7 @@ wallet rather than asking the gateway to.
 Nothing here asks the gateway to mint. `invoiceFrom` resolves the address list and
 takes the invoice from the wallet itself, so the gateway is handed a payment hash and
 a URL to poll and learns neither the address nor the amount. That is why it works
-against an instance running with `MINTING` unset, which is how the public one runs.
+against an instance running with `MINTING` unset, and against one that mints too.
 
 The URL it polls is this app's own `/verify`, not the wallet's. `relayedVerifyUrl`
 seals the wallet's LUD-21 URL into the query, `lightningVerifyEndpoint` unseals it and

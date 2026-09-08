@@ -1,6 +1,6 @@
 import { ThunderBridge, type TriggerEvent } from "thunder-bridge";
 
-const GATEWAY_URL = Deno.env.get("GATEWAY_URL") ?? "https://thunder-bridge.agora.gripe";
+const GATEWAY_URL = Deno.env.get("GATEWAY_URL") ?? "https://public.thunder-bridge.agora.gripe";
 const WATCH_SECRET = Deno.env.get("WATCH_SECRET") ?? "";
 
 if (WATCH_SECRET === "") {
