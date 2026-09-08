@@ -26,8 +26,12 @@ info:
 
     `bankVerifyEndpoint` is the other handler, and it puts a second rail behind the same
     contract: a bank transfer, proved to the gateway by the LUD-21 shape a Lightning wallet
-    would have answered with. Both paths below are therefore yours to mount and yours to
-    serve, and neither of them is the gateway.
+    would have answered with.
+
+    `watchTicketEndpoint` and `publicWatchTicketEndpoint` are the third, and they exist so a
+    browser can read a trigger's live stream without holding the credentials that open it.
+    Every path below is therefore yours to mount and yours to serve, and none of them is the
+    gateway.
 
     The gateway's own API is a separate document, `openapi.yaml` in the repository root, and
     the webhook your server receives is described there under `webhooks`.
@@ -43,6 +47,8 @@ tags:
     description: The two halves of LUD-06, on the one path a lightning address resolves to.
   - name: bank-transfer
     description: The settlement proof for money that arrived over a bank rail instead of Lightning.
+  - name: live-board
+    description: The exchange that lets a page watch a trigger without being given its secret.
 
 paths:
   /.well-known/lnurlp/{name}:
@@ -136,6 +142,57 @@ paths:
                   - $ref: "#/components/schemas/pay_request"
                   - $ref: "#/components/schemas/invoice"
                   - $ref: "#/components/schemas/refusal"
+
+  /watch/ticket:
+    post:
+      tags: [live-board]
+      operationId: mintWatchTicket
+      summary: Trade the watch secret for a socket ticket a browser may hold
+      description: |
+        Mounted wherever you like by `watchTicketEndpoint`, or by
+        `publicWatchTicketEndpoint` when the board is meant to be read by strangers. Which
+        one you mounted is the whole difference: the first compares the offered secret in
+        constant time and answers 403 without it, the second reads no body and refuses
+        nobody.
+
+        It exists because the socket is opened at the gateway's `/ws/tickets/{ticket}`, and
+        minting a ticket needs the bearer token and the watch secret. Neither may reach a
+        browser, so this endpoint holds both and hands back only the ticket, which opens one
+        trigger and nothing else.
+
+        The answer is the gateway's own, passed through unchanged. A ticket lives one minute,
+        so a page POSTs here immediately before every connect rather than caching one.
+
+        A public board is public in full. Every viewer of that socket gets each settlement's
+        preimage, verify url and payment hash, which is fine for a tip jar and wrong the
+        moment anything is gated behind those preimages.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                secret:
+                  type: string
+                  description: |
+                    The same watch secret the trigger groups its payments under. Required by
+                    `watchTicketEndpoint` and ignored by `publicWatchTicketEndpoint`.
+      responses:
+        "200":
+          description: A ticket, good for one socket on one trigger for one minute.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/socket_ticket"
+        "403":
+          description: |
+            The body did not carry the watch secret. Never answered by
+            `publicWatchTicketEndpoint`, which does not read one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/not_the_secret"
 
   /verify/bank:
     get:
@@ -273,6 +330,30 @@ components:
           type: boolean
           const: false
       required: [settled]
+
+    socket_ticket:
+      type: object
+      description: The gateway's ticket, passed through so a page reading `.ticket` needs no change.
+      properties:
+        ticket:
+          type: string
+          description: |
+            Goes in the gateway's `/ws/tickets/{ticket}` path. Signed, not stored, and bound
+            to the one trigger it was minted for.
+        expires_at:
+          type: string
+          format: date-time
+          description: A minute from minting. A ticket presented after it is refused at the handshake.
+      required: [ticket, expires_at]
+
+    not_the_secret:
+      type: object
+      description: A refusal that says only that the secret was wrong, never what was expected.
+      properties:
+        reason:
+          type: string
+          const: not the watch secret
+      required: [reason]
 
     ln_address:
       type: string
