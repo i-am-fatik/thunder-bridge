@@ -102,8 +102,9 @@ const settled = await gateway.waitForPayment(payment.id, {
 const preimage = settled.status === "paid" ? await proveSettlement(settled, request) : null;
 ```
 
-Keep the `request` object. Every proof takes it, because what you asked for is the
-side of each comparison the gateway did not supply. `waitForPayment` tells you what
+Keep the `request` object. Every proof that asks the recipient takes it, because
+what you asked for is the side of each comparison the gateway did not supply.
+`proveWrapped` is the exception, since it compares two invoices and asks nobody. `waitForPayment` tells you what
 the gateway says. `proveSettlement` goes to the recipient's own server. Only the
 second is evidence the money arrived, and
 [docs/proving-a-payment.md](../docs/proving-a-payment.md) is the whole argument for
@@ -117,19 +118,19 @@ preimage, and which side does the checking.
 
 | `lightningRail` | the gateway asks, at the recipient's LNURL callback |
 |---|---|
-| the gateway is told | the address, the amount, the hash and the wallet's `verify` URL |
+| the gateway is told | the address list and the amount, and nothing else. It derives the hash and the `verify` URL by resolving the address, and hands both back |
 | the invoice is checked by | you, `proveOrigin` runs five checks against the recipient's own domain |
 | the gateway probes first | nothing, it resolved the address itself |
 | the gateway polls | the wallet, directly |
 | `settled` comes from | the wallet releasing its preimage |
-| the pace is set by | the wallet's `Cache-Control` |
+| the pace is set by | the wallet, when it sends `Cache-Control: max-age`. When it sends none the gateway's own schedule decides |
 
 | `blindLightningRail` | you ask, with `invoiceFrom` on your server |
 |---|---|
 | the gateway is told | a hash, an expiry and your URL, with the wallet's sealed inside |
 | the invoice is checked by | nobody needs to, you resolved the address yourself |
 | the gateway probes first | `speaksVerify`: a GET on the URL, then a signed POST nonce it must echo |
-| the gateway polls | your `lightningVerifyEndpoint` |
+| the gateway polls | your `lightningVerifyEndpoint`, once `relayVerifyThrough` is set. Leave it off and the gateway polls the wallet directly, as on the minted rail |
 | `settled` comes from | your endpoint, which unseals, asks the wallet and relays the answer |
 | the pace is set by | you, `pollEverySecs` |
 
@@ -154,8 +155,8 @@ preimage, and which side does the checking.
 Two things are worth reading off those blocks rather than inferring.
 
 **The checking side flips.** On the minted path the gateway resolved the address, so
-it runs no probe and no challenge, and `proveOrigin` on your side is the whole
-defence. On every watched path the gateway resolved nothing, so it probes the URL
+it runs no verify probe and no verify challenge, and `proveOrigin` on your side is
+the whole defence. A `webhookUrl` is challenged on both paths. On every watched path the gateway resolved nothing, so it probes the URL
 and challenges it with a nonce before accepting the watch, refusing with `424` if
 nothing answers. Deploy the endpoint before you register it. The challenge is on
 unless the operator set `VERIFY_CHALLENGE=0`, which is also why a bare wallet
@@ -243,10 +244,11 @@ Four sharp edges, worth reading before you build:
   and the gateway are the same party, then whoever holds the money also serves the
   metadata and answers the verify requests. Every check passes. This protects a
   payer against the operator, never against the recipient's own custodian.
-- **The host guard vets the first hop and no further.** Both fetches use the
-  runtime's default redirect handling, so a public https host answering `302` to a
-  private address is followed there. Keep egress control outside this package if
-  that matters to you.
+- **The two proof fetches vet the first hop and no further.** `proveOrigin` and
+  `proveSettlement` use the runtime's default redirect handling, so a public https
+  host answering `302` to a private address is followed there. `invoiceFrom` is not
+  like this: it resolves through the outbound guard, which sets `redirect: "manual"`
+  and re-vets every hop. Keep egress control outside this package if that matters.
 - **A payment read cold is only as pinned as its creation.** `getPayment` checks
   the preimage against the `paymentHash` in the same record, and it was
   `proveOrigin` at creation, against the request you wrote, that tied that hash to
@@ -271,7 +273,7 @@ your editor has them and this table does not repeat them.
 
 | Export | What it does |
 |---|---|
-| `new ThunderBridge(baseUrl, options?)` | a gateway handle. `{ secret }` makes every call speak as you, `{ token }` makes the instance yours, `{ verify: false }` turns off the automatic proof |
+| `new ThunderBridge(baseUrl, options?)` | a gateway handle. `{ secret }` signs the calls that create something, so a payment you create comes back to you and nobody else, while the reads and `webhookKey` stay unsigned, `{ token }` makes the instance yours, `{ verify: false }` turns off the automatic proof |
 | `gateway.createPayment(params, options?)` | mint an invoice on the first address that can prove one, and prove it before returning |
 | `gateway.watchPayment(params)` | hand over an invoice you obtained yourself, so the gateway never learns the address or the amount |
 | `gateway.waitForPayment(id, options?)` | follow one payment over WebSocket until it is paid or expired. `waitForWatched` is the same for a watched one |
@@ -321,17 +323,19 @@ SDK exports as constants are named in the last column.
 | `idempotency-key-reused` | 409 | that key was used for a different request. `IdempotencyConflictError`, `IDEMPOTENCY_KEY_REUSED` |
 | `payment-already-watched` | 409 | that payment hash is already watched here. `PAYMENT_ALREADY_WATCHED` |
 | `caller-unknown` | 403 | the instance keeps a list of callers and your key is not on it |
-| `verify-host-refused` | 403 | the verify URL is not a public https host |
+| `verify-host-refused` | 403 | this instance will not mint, because minting is off or `VERIFY_HOSTS` pins it to a list. Resolve the address yourself and use `watchPayment`. A verify URL that is not public https is `invalid-request` instead |
 | `verify-unconfirmed` | 424 | the URL did not answer the LUD-21 shape |
 | `verify-unconsented` | 424 | the URL did not echo the challenge nonce |
 | `webhook-unconfirmed` | 424 | the webhook URL did not answer its challenge |
 | `too-many-pending` | 429, with `ratelimit-limit` and `ratelimit-remaining` set | the caller is over its share of the instance's `MAX_PENDING` |
 
-The rest carry no `type` at all, so they arrive as `about:blank`: `401` when the
-bearer token does not match, `404` for an id this gateway never heard of, where
-`getPayment` returns `null` rather than throwing, `410` when you replay an
+The rest carry `about:blank` as their type, which the gateway seeds into every
+problem body: `401` when the bearer token does not match, `404` both for an id this
+gateway never heard of and for one it knows that belongs to a different caller key,
+so a `403` can never confirm an id exists, `410` when you replay an
 `Idempotency-Key` whose payment has since been pruned, `500`, and `503` while the
-instance is draining or its own health check reads stalled.
+instance is draining or its own health check reads stalled. On a `404` `getPayment`
+returns `null` rather than throwing.
 
 `GatewayCheatError` is different in kind. It reports a gateway that demonstrably
 misbehaved, and `code` names the check that caught it. `UnverifiedRecipientError` is
