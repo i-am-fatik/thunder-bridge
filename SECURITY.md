@@ -16,7 +16,7 @@ things worth reporting are a way to make `paid` mean something it should not, to
 payment without its id, to reach an address the outbound guard is supposed to refuse, or
 to get a preimage out of an instance that never saw one.
 
-Read [what is still trusted](sdk/README.md#what-is-still-trusted) first. Several
+Read [who you still have to trust](sdk/README.md#who-you-still-have-to-trust) first. Several
 properties are deliberately not promised, and a report that one of them does not hold is
 a documentation question rather than a vulnerability.
 
