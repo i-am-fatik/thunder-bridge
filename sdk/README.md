@@ -187,11 +187,13 @@ without saying whether either invoice was paid.
 
 - a service of your own that has to stay up, so a browser-only integration cannot
   use this rail at all
-- one long-lived sealing secret
+- one long-lived sealing secret, which `seal` refuses under 32 characters, so
+  `openssl rand -hex 16` is the shortest thing that works
 - your endpoint being down means the gateway cannot verify and the payment sits
   `pending`
-- a wallet you cannot reach answers `502` rather than "not settled", which is the
-  honest failure of the two
+- a wallet you cannot reach answers `502`, so the gateway retries instead of
+  concluding the invoice went unpaid. The body still reads `settled: false`, and the
+  status is what separates "could not ask" from "asked, and no"
 
 **`nwcRail`**
 
@@ -273,7 +275,7 @@ your editor has them and this table does not repeat them.
 | `gateway.createPayment(params, options?)` | mint an invoice on the first address that can prove one, and prove it before returning |
 | `gateway.watchPayment(params)` | hand over an invoice you obtained yourself, so the gateway never learns the address or the amount |
 | `gateway.waitForPayment(id, options?)` | follow one payment over WebSocket until it is paid or expired. `waitForWatched` is the same for a watched one |
-| `gateway.followTrigger(secret, options)` | stream every payment carrying one trigger, reconnecting on its own |
+| `gateway.followTrigger(secret, options)` | stream every payment carrying one trigger, reconnecting on its own. The secret is the only thing guarding that stream and nothing rate limits a guess, so it is refused under 16 characters |
 | `proveSettlement(payment, request)` | ask the recipient whether it settled, returns the preimage or `null` |
 | `invoiceFrom(lnAddresses, amountMsat)` | get a provable invoice yourself, from `thunder-bridge/server` |
 | `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your own domain. From `thunder-bridge/server` |
