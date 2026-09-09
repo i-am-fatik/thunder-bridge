@@ -2,23 +2,22 @@ import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
 import { resolve } from "../../core/lnurl.js";
 import { seal } from "../../core/sealed.js";
 import { sha256Hex } from "../../core/sha256.js";
+import type { Amount } from "./amount.js";
+import { millisatoshi } from "./amount.js";
 import type { ThunderBridge } from "./client.js";
 import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
 
 const NONCE_BYTES = 16;
 
 export interface TriggerConfig {
-  /** The gateway that quotes the addresses and mints the invoice */
-  gateway: ThunderBridge;
-
   /** Priority list, quoted at payRequest and then pinned for the callback */
-  lnAddresses: string[];
+  to: string | string[];
 
   /**
-   * What this trigger costs right now, called once per payRequest. A plain
-   * function, so a fiat peg or a time of day rule is just code you write
+   * What this trigger costs right now, asked once per payRequest. `fiat` makes it
+   * a live rate, and any function of your own makes it a time of day rule
    */
-  amountMsat: () => number | Promise<number>;
+  amount: Amount;
 
   /**
    * Signs the callback URL. Without it anyone could call the callback and make
@@ -26,7 +25,7 @@ export interface TriggerConfig {
    */
   secret: string;
 
-  /** Groups every payment here so `followTrigger` can watch the place, keep it off the QR */
+  /** Groups every payment here so `follow` can watch the place, keep it off the QR */
   watchSecret?: string;
 
   /**
@@ -44,9 +43,19 @@ export interface TriggerConfig {
    * instead of asking it to mint. It then cannot tell who is being paid beyond
    * the domain in the verify URL, nor how much at all, so the only refusal left
    * to it is refusing everyone. Costs one more round trip and gives up the
-   * gateway's CORS proxying, which a server does not need anyway
+   * gateway's CORS proxying, which a server does not need anyway.
+   *
+   * A gateway that enforces its verify challenge will not poll a wallet's own
+   * LUD-21 URL, so pass `relayThrough` as well and the poll comes to you
    */
   blind?: boolean;
+
+  /**
+   * Where your own `serve.verify` endpoint is mounted, and the secret it was
+   * given. The wallet's URL is sealed inside the one the gateway is handed, so
+   * the gateway polls you and learns neither the wallet nor its provider
+   */
+  relayThrough?: { endpoint: string; secret: string };
 
   /**
    * What the watcher needs and the gateway must not have. `data` returns it and
@@ -73,10 +82,7 @@ export interface Minted {
  * has to be
  */
 export interface WatchTicketConfig {
-  /** The gateway that mints the ticket, holding the token this keeps off the wire */
-  gateway: ThunderBridge;
-
-  /** The trigger to open, the same secret `lnurlPayEndpoint` groups its payments under */
+  /** The trigger to open, the same secret `serve.lnurlPay` groups its payments under */
   watchSecret: string;
 
   /**
@@ -98,13 +104,18 @@ export interface WatchTicketConfig {
  *
  * Nothing is stored between the two, so this holds no state of its own.
  */
-export function lnurlPayEndpoint(config: TriggerConfig): (request: Request) => Promise<Response> {
+export function lnurlPayEndpoint(
+  gateway: ThunderBridge,
+  config: TriggerConfig,
+): (request: Request) => Promise<Response> {
   return async (request: Request) => {
     const url = new URL(request.url);
     const asked = url.searchParams.get("to");
 
     try {
-      return asked === null ? await offer(config, url) : await mint(config, url, asked);
+      return asked === null
+        ? await offer(gateway, config, url)
+        : await mint(gateway, config, url, asked);
     } catch (failure: unknown) {
       return refuse(failure instanceof Error ? failure.message : "the trigger could not be served");
     }
@@ -120,6 +131,7 @@ export function lnurlPayEndpoint(config: TriggerConfig): (request: Request) => P
  * POST to it before every connect, because a ticket lives one minute.
  */
 export function watchTicketEndpoint(
+  gateway: ThunderBridge,
   config: WatchTicketConfig,
 ): (request: Request) => Promise<Response> {
   return async (request: Request) => {
@@ -128,7 +140,7 @@ export function watchTicketEndpoint(
       return Response.json({ reason: "not the watch secret" }, { status: 403 });
     }
 
-    return await issue(config);
+    return await issue(gateway, config);
   };
 }
 
@@ -142,17 +154,15 @@ export function watchTicketEndpoint(
  * and a viewer of the board is holding the unlock.
  */
 export function publicWatchTicketEndpoint(
+  gateway: ThunderBridge,
   config: WatchTicketConfig,
 ): (request: Request) => Promise<Response> {
-  return () => issue(config);
+  return () => issue(gateway, config);
 }
 
-async function offer(config: TriggerConfig, url: URL): Promise<Response> {
-  const amountMsat = await config.amountMsat();
-  const quote = await config.gateway.createQuote({
-    lnAddresses: config.lnAddresses,
-    amountMsat,
-  });
+async function offer(gateway: ThunderBridge, config: TriggerConfig, url: URL): Promise<Response> {
+  const amountMsat = await millisatoshi(config.amount);
+  const quote = await gateway.quote({ to: config.to, amount: amountMsat });
 
   const nonce = randomNonce();
   const callback = new URL(config.baseUrl ?? `${url.origin}${url.pathname}`);
@@ -170,7 +180,12 @@ async function offer(config: TriggerConfig, url: URL): Promise<Response> {
   });
 }
 
-async function mint(config: TriggerConfig, url: URL, address: string): Promise<Response> {
+async function mint(
+  gateway: ThunderBridge,
+  config: TriggerConfig,
+  url: URL,
+  address: string,
+): Promise<Response> {
   const amountMsat = Number(url.searchParams.get("msat"));
   const nonce = url.searchParams.get("n") ?? "";
   const signature = url.searchParams.get("sig") ?? "";
@@ -185,8 +200,8 @@ async function mint(config: TriggerConfig, url: URL, address: string): Promise<R
   }
 
   const minted = config.blind
-    ? await mintBlind(config, address, amountMsat)
-    : await mintThroughGateway(config, address, amountMsat, nonce);
+    ? await mintBlind(gateway, config, address, amountMsat)
+    : await mintThroughGateway(gateway, config, address, amountMsat, nonce);
 
   return Response.json({
     status: "OK",
@@ -197,13 +212,14 @@ async function mint(config: TriggerConfig, url: URL, address: string): Promise<R
 }
 
 async function mintThroughGateway(
+  gateway: ThunderBridge,
   config: TriggerConfig,
   address: string,
   amountMsat: number,
   nonce: string,
 ): Promise<{ bolt11: string; verifyUrl: string }> {
-  const payment = await config.gateway.createPayment(
-    { lnAddresses: [address], amountMsat },
+  const payment = await gateway.mint(
+    { to: address, amount: amountMsat },
     { idempotencyKey: nonce, trigger: config.watchSecret, replay: config.replay },
   );
 
@@ -211,6 +227,7 @@ async function mintThroughGateway(
 }
 
 async function mintBlind(
+  gateway: ThunderBridge,
   config: TriggerConfig,
   address: string,
   amountMsat: number,
@@ -218,11 +235,18 @@ async function mintBlind(
   const resolved = await resolve([address], amountMsat);
   const minted: Minted = { ...resolved, amountMsat, lnAddress: resolved.address };
   const locked = config.sealed;
+  const relay = config.relayThrough;
 
   try {
-    await config.gateway.watchPayment({
+    await gateway.watch({
       paymentHash: resolved.paymentHash,
-      verifyUrl: resolved.verifyUrl,
+      verifyUrl: relay
+        ? await gateway.serve.verifyUrl(
+            relay.endpoint,
+            { url: resolved.verifyUrl, hash: resolved.paymentHash },
+            relay.secret,
+          )
+        : resolved.verifyUrl,
       expiresAt: resolved.expiresAt,
       trigger: config.watchSecret,
       replay: config.replay,
@@ -259,11 +283,8 @@ function refuse(reason: string): Response {
   return Response.json({ status: "ERROR", reason });
 }
 
-async function issue(config: WatchTicketConfig): Promise<Response> {
-  const issued = await config.gateway.createSocketTicket({
-    trigger: config.watchSecret,
-    replay: config.replay,
-  });
+async function issue(gateway: ThunderBridge, config: WatchTicketConfig): Promise<Response> {
+  const issued = await gateway.ticket(config.watchSecret, { replay: config.replay });
 
   return Response.json({
     ticket: issued.ticket,

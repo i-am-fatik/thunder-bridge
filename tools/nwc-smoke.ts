@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { preimageMatchesHash } from "../core/bolt11.ts";
-import { nwcConnection, nwcInvoice, nwcVerifyEndpoint, nwcVerifyUrl } from "../sdk/dist/server.js";
+import { nwcConnection, nwcInvoice, nwcVerifyEndpoint, nwcVerifyUrl } from "../sdk/dist/nwc.js";
 
 const SEALING_SECRET = "smoke_secret_a41f7c02be93d5681047ff2c";
 const PORT = Number(process.env.PORT ?? 8477);

@@ -3,7 +3,7 @@ import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
 import { sha256 } from "../../core/sha256.js";
 import type { ThunderBridge } from "./client.js";
 import { minorScaleOf, minorUnitsOf } from "./currency.js";
-import { answerVerifyChallengeRequest } from "./webhook.js";
+import { answerVerifyChallenge } from "./webhook.js";
 
 const DEFAULT_CURRENCY = "CZK";
 const DEFAULT_LOOK_BACK_SECS = 7 * 24 * 60 * 60;
@@ -34,12 +34,6 @@ export interface Credit {
 export type Statement = (sinceUnix: number) => Promise<Credit[]>;
 
 export interface BankTransferParams {
-  /**
-   * The gateway that will watch this transfer. It has to be one of your own,
-   * meaning one you gave a token, unless `allowPublicGateway` says otherwise
-   */
-  gateway: ThunderBridge;
-
   /** Long lived and server side. The preimage is derived from it, so losing it loses every proof */
   secret: string;
 
@@ -147,10 +141,13 @@ export interface BankVerifyConfig {
  * amount and the reference, so whoever runs the gateway can read your order book
  * from the watches alone.
  */
-export async function bankTransfer(params: BankTransferParams): Promise<BankTransfer> {
+export async function bankTransfer(
+  gateway: ThunderBridge,
+  params: BankTransferParams,
+): Promise<BankTransfer> {
   const currency = params.currency ?? DEFAULT_CURRENCY;
   refuseUnusable(params, currency);
-  await refuseAnOpenGateway(params);
+  await refuseAnOpenGateway(gateway, params);
   const spd = shortPaymentDescriptor(params, currency);
   const subject = subjectOf(params.reference, params.amountMinor, currency);
 
@@ -161,7 +158,7 @@ export async function bankTransfer(params: BankTransferParams): Promise<BankTran
   polling.searchParams.set("sig", await hmacHex(params.secret, `verify|${subject}`));
   const verifyUrl = polling.toString();
 
-  const watched = await params.gateway.watchPayment({
+  const watched = await gateway.watch({
     paymentHash: hashOf(await hmacHex(params.secret, `preimage|${subject}`)),
     verifyUrl,
     expiresAt: params.expiresAt,
@@ -194,7 +191,7 @@ export function bankVerifyEndpoint(
   };
 
   return async (request: Request) => {
-    const consented = await answerVerifyChallengeRequest(request);
+    const consented = await answerVerifyChallenge(request);
     if (consented !== null) {
       return consented;
     }
@@ -279,11 +276,14 @@ function major(amountMinor: number, currency: string): string {
   return (amountMinor / minorScaleOf(currency)).toFixed(minorUnitsOf(currency));
 }
 
-async function refuseAnOpenGateway(params: BankTransferParams): Promise<void> {
+async function refuseAnOpenGateway(
+  gateway: ThunderBridge,
+  params: BankTransferParams,
+): Promise<void> {
   if (params.allowPublicGateway === true) {
     return;
   }
-  if (await params.gateway.refusesStrangers()) {
+  if (await gateway.refusesStrangers()) {
     return;
   }
 

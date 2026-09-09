@@ -1,6 +1,6 @@
 import { checkSettled } from "../../core/lnurl.js";
 import { seal, unseal } from "../../core/sealed.js";
-import { answerVerifyChallengeRequest } from "./webhook.js";
+import { answerVerifyChallenge } from "./webhook.js";
 
 const DEFAULT_POLL_EVERY_SECS = 5;
 const WALLET = "w";
@@ -48,7 +48,7 @@ export function lightningVerifyEndpoint(
   };
 
   return async (request: Request) => {
-    const consented = await answerVerifyChallengeRequest(request);
+    const consented = await answerVerifyChallenge(request);
     if (consented !== null) {
       return consented;
     }

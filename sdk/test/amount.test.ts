@@ -1,0 +1,109 @@
+import { describe, expect, it, vi } from "vitest";
+import { fiat, millisatoshi, msat, sats } from "../src/amount";
+
+const RATE_CZK = 134_883_815;
+const AT_100K_USD = 10_000_000;
+
+describe("sats", () => {
+  it("is a thousand millisatoshi each", () => {
+    expect(sats(21)).toBe(21_000);
+    expect(sats(1)).toBe(1_000);
+  });
+
+  it("refuses a fraction of a satoshi, because Lightning cannot move one", () => {
+    expect(() => sats(0.5)).toThrow("whole number of satoshi");
+    expect(() => sats(1.0001)).toThrow("whole number of satoshi");
+  });
+
+  it("refuses nothing and less than nothing", () => {
+    expect(() => sats(0)).toThrow("whole number of satoshi");
+    expect(() => sats(-1)).toThrow("whole number of satoshi");
+  });
+
+  it("refuses more satoshi than a millisatoshi count can hold safely", () => {
+    expect(() => sats(Number.MAX_SAFE_INTEGER)).toThrow("whole number of satoshi");
+  });
+});
+
+describe("msat", () => {
+  it("passes an exact count straight through", () => {
+    expect(msat(21_000)).toBe(21_000);
+    expect(msat(1)).toBe(1);
+  });
+
+  it("refuses a fraction, a zero and an unsafe integer", () => {
+    expect(() => msat(1.5)).toThrow("whole number of millisatoshi");
+    expect(() => msat(0)).toThrow("whole number of millisatoshi");
+    expect(() => msat(2 ** 53)).toThrow("whole number of millisatoshi");
+  });
+});
+
+describe("fiat", () => {
+  it("asks the rate only when the price is needed, not when it is named", async () => {
+    const rate = vi.fn(async () => RATE_CZK);
+    const amount = fiat("480.55", "CZK", { rate });
+
+    expect(rate).not.toHaveBeenCalled();
+
+    await millisatoshi(amount);
+
+    expect(rate).toHaveBeenCalledWith("CZK");
+  });
+
+  it("reads a decimal string exactly, digit by digit, never through a float", async () => {
+    const rate = async () => AT_100K_USD;
+
+    await expect(millisatoshi(fiat("1.00", "USD", { rate }))).resolves.toBe(1_000_000);
+    await expect(millisatoshi(fiat("0.01", "USD", { rate }))).resolves.toBe(10_000);
+  });
+
+  it("rounds a number to the currency's own minor unit", async () => {
+    const rate = async () => AT_100K_USD;
+
+    await expect(millisatoshi(fiat(4.99, "USD", { rate }))).resolves.toBe(4_990_000);
+  });
+
+  it("refuses more decimals than the currency has", () => {
+    expect(() => fiat("1.005", "USD")).toThrow("more decimals than USD");
+    expect(() => fiat("1.5", "JPY")).toThrow("more decimals than JPY");
+  });
+
+  it("refuses a currency whose minor unit nobody here knows", () => {
+    expect(() => fiat("1.00", "XYZ")).toThrow("ISO 4217");
+  });
+
+  it("refuses a price that rounds away to nothing", () => {
+    expect(() => fiat(0, "USD")).toThrow("price this can charge");
+    expect(() => fiat("0.00", "USD")).toThrow("price this can charge");
+  });
+
+  it("asks the rate again for every payment, because a fiat price moves", async () => {
+    const quotes = [RATE_CZK, RATE_CZK * 2];
+    const amount = fiat("100.00", "CZK", { rate: async () => quotes.shift() ?? 0 });
+
+    const first = await millisatoshi(amount);
+    const second = await millisatoshi(amount);
+
+    expect(second).toBeLessThan(first);
+  });
+
+  it("adds the spread the shop asked for, in basis points", async () => {
+    const rate = async () => AT_100K_USD;
+
+    const plain = await millisatoshi(fiat("1.00", "USD", { rate }));
+    const wider = await millisatoshi(fiat("1.00", "USD", { rate, spreadBps: 100 }));
+
+    expect(wider).toBe(plain + plain / 100);
+  });
+});
+
+describe("millisatoshi", () => {
+  it("takes a bare number, so a caller already holding millisatoshi passes it through", async () => {
+    await expect(millisatoshi(21_000)).resolves.toBe(21_000);
+  });
+
+  it("refuses whatever a function hands back if it is not a payable count", async () => {
+    await expect(millisatoshi(() => 0)).rejects.toThrow("whole number of millisatoshi");
+    await expect(millisatoshi(async () => 1.5)).rejects.toThrow("whole number of millisatoshi");
+  });
+});

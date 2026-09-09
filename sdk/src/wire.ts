@@ -1,16 +1,15 @@
 import type {
-  CreatePaymentParams,
-  CreateQuoteParams,
+  Handover,
+  MintedPayment,
   Payment,
   PaymentKind,
   PaymentStatus,
+  Priced,
   Quote,
   Settlement,
   SocketTicket,
-  TriggerEvent,
   WalletFailure,
   WalletReason,
-  WatchPaymentParams,
 } from "./types.js";
 
 const ASSET_CODE = "BTC";
@@ -25,23 +24,24 @@ const REASONS: ReadonlySet<string> = new Set<WalletReason>([
 ]);
 
 export function createRequestBody(
-  params: CreatePaymentParams,
+  priced: Priced,
+  webhookUrl: string | undefined,
   trigger: string | null,
   replay: number | undefined,
 ): string {
   return JSON.stringify({
-    ln_addresses: params.lnAddresses,
-    incoming_amount: toAmount(params.amountMsat),
-    webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
+    ln_addresses: priced.to,
+    incoming_amount: toAmount(priced.amountMsat),
+    webhook: webhookUrl ? { url: webhookUrl } : undefined,
     trigger: trigger ?? undefined,
     replay,
   });
 }
 
-export function quoteRequestBody(params: CreateQuoteParams): string {
+export function quoteRequestBody(priced: Priced): string {
   return JSON.stringify({
-    ln_addresses: params.lnAddresses,
-    amount: toAmount(params.amountMsat),
+    ln_addresses: priced.to,
+    amount: toAmount(priced.amountMsat),
   });
 }
 
@@ -69,99 +69,13 @@ export function quoteFromWire(body: unknown): Quote | null {
   return { lnAddress, amountMsat, feeMsat, minMsat, maxMsat, metadata, refusals };
 }
 
-export function paymentFromWire(body: unknown): Payment | null {
-  const wire = asObject(body);
-  if (wire === null) {
-    return null;
-  }
-
-  const id = text(wire["id"]);
-  const lnAddress = text(wire["ln_address"]);
-  const bolt11 = text(wire["bolt11"]);
-  const paymentHash = text(wire["payment_hash"]);
-  const verifyUrl = text(wire["verify_url"]);
-  const amountMsat = msatFrom(wire["incoming_amount"], 1);
-  const expiresAt = secondsFrom(wire["expires_at"]);
-  const createdAt = secondsFrom(wire["created_at"]);
-  const status = wire["status"];
-  const preimage = wire["preimage"] ?? null;
-
-  if (id === null || lnAddress === null || bolt11 === null) {
-    return null;
-  }
-  if (paymentHash === null || verifyUrl === null) {
-    return null;
-  }
-  if (amountMsat === null || expiresAt === null || createdAt === null) {
-    return null;
-  }
-  if (!isStatus(status)) {
-    return null;
-  }
-  if (preimage !== null && typeof preimage !== "string") {
-    return null;
-  }
-
-  return {
-    id,
-    lnAddress,
-    amountMsat,
-    status,
-    paymentHash,
-    bolt11,
-    preimage,
-    expiresAt,
-    createdAt,
-    verifyUrl,
-  };
-}
-
-export function watchRequestBody(params: WatchPaymentParams, trigger: string | null): string {
-  const expiresAt = new Date(params.expiresAt * 1000);
-  if (Number.isNaN(expiresAt.getTime())) {
-    throw new TypeError(`expiresAt must be a usable unix time in seconds, got ${params.expiresAt}`);
-  }
-
-  return JSON.stringify({
-    payment_hash: params.paymentHash,
-    verify_url: params.verifyUrl,
-    expires_at: expiresAt.toISOString(),
-    trigger: trigger ?? undefined,
-    replay: params.replay,
-    sealed: params.sealed,
-    webhook: params.webhookUrl ? { url: params.webhookUrl } : undefined,
-  });
-}
-
 /**
- * A delivery says the least it can and still be worth having: the name, how it
- * ended, and a preimage against the hash it has to match. No verify url, because
- * you named it, and no sealed record, because the size of a retry should not
- * depend on what you put in it
+ * One payment out of the wire, whatever made it. The address, the amount and the
+ * invoice come back null when the gateway was never told them or does not repeat
+ * them, so a minted payment, a handed-over one and a trigger frame all read the
+ * same way
  */
-export function settlementFromWire(body: unknown): Settlement | null {
-  const wire = asObject(body);
-  if (wire === null) {
-    return null;
-  }
-
-  const id = text(wire["id"]);
-  const paymentHash = text(wire["payment_hash"]);
-  const settledAt = secondsFrom(wire["settled_at"]);
-  const status = wire["status"];
-  const preimage = wire["preimage"] ?? null;
-
-  if (id === null || paymentHash === null || settledAt === null || !isStatus(status)) {
-    return null;
-  }
-  if (preimage !== null && typeof preimage !== "string") {
-    return null;
-  }
-
-  return { id, status, paymentHash, preimage, settledAt };
-}
-
-export function triggerEventFromWire(body: unknown): TriggerEvent | null {
+export function paymentFromWire(body: unknown): Payment | null {
   const wire = asObject(body);
   if (wire === null) {
     return null;
@@ -192,16 +106,87 @@ export function triggerEventFromWire(body: unknown): TriggerEvent | null {
   return {
     id,
     kind: kindOf(wire),
+    status,
     paymentHash,
     verifyUrl,
-    status,
     preimage,
     expiresAt,
     createdAt,
     sealed,
     lnAddress: text(wire["ln_address"]),
     amountMsat: wire["incoming_amount"] === undefined ? null : msatFrom(wire["incoming_amount"], 1),
+    bolt11: text(wire["bolt11"]),
   };
+}
+
+/**
+ * The same, refusing anything that does not carry the address, the amount and
+ * the invoice. That is what minting answers with, and refusing the rest is what
+ * lets `mint` promise them
+ */
+export function mintedFromWire(body: unknown): MintedPayment | null {
+  const payment = paymentFromWire(body);
+  if (payment === null) {
+    return null;
+  }
+  if (payment.lnAddress === null || payment.amountMsat === null || payment.bolt11 === null) {
+    return null;
+  }
+
+  return {
+    ...payment,
+    kind: "minted",
+    lnAddress: payment.lnAddress,
+    amountMsat: payment.amountMsat,
+    bolt11: payment.bolt11,
+  };
+}
+
+export function watchRequestBody(handover: Handover, trigger: string | null): string {
+  const expiresAt = new Date(handover.expiresAt * 1000);
+  if (Number.isNaN(expiresAt.getTime())) {
+    throw new TypeError(
+      `expiresAt must be a usable unix time in seconds, got ${handover.expiresAt}`,
+    );
+  }
+
+  return JSON.stringify({
+    payment_hash: handover.paymentHash,
+    verify_url: handover.verifyUrl,
+    expires_at: expiresAt.toISOString(),
+    trigger: trigger ?? undefined,
+    replay: handover.replay,
+    sealed: handover.sealed,
+    webhook: handover.webhookUrl ? { url: handover.webhookUrl } : undefined,
+  });
+}
+
+/**
+ * A delivery says the least it can and still be worth having: the name, how it
+ * ended, and a preimage against the hash it has to match. No verify url, because
+ * you named it, and no sealed record, because the size of a retry should not
+ * depend on what you put in it
+ */
+export function settlementFromWire(body: unknown): Settlement | null {
+  const wire = asObject(body);
+  if (wire === null) {
+    return null;
+  }
+
+  const id = text(wire["id"]);
+  const paymentHash = text(wire["payment_hash"]);
+  const settledAt = secondsFrom(wire["settled_at"]);
+  const status = wire["status"];
+  const preimage = wire["preimage"] ?? null;
+
+  if (id === null || paymentHash === null || settledAt === null || !isStatus(status)) {
+    return null;
+  }
+  if (preimage !== null && typeof preimage !== "string") {
+    return null;
+  }
+
+  return { id, status, paymentHash, preimage, settledAt };
 }
 
 export function socketTicketFromWire(body: unknown): SocketTicket | null {

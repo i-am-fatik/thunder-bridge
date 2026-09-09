@@ -1,7 +1,7 @@
-import { preimageMatchesHash } from "../../core/bolt11.js";
 import { callerKey, paymentNamedBy, signedAs } from "../../core/caller.js";
 import type { SigningKey } from "../../core/ed25519.js";
 import { sha256Hex } from "../../core/sha256.js";
+import { priced } from "./charge.js";
 import {
   GatewayCheatError,
   IDEMPOTENCY_KEY_REUSED,
@@ -12,26 +12,27 @@ import {
   ProblemError,
   REQUEST_IN_FLIGHT,
 } from "./errors.js";
+import { Rails } from "./rail.js";
+import { type Sale, type SellOrder, saleOf } from "./sale.js";
+import { Serve } from "./serving.js";
 import type {
-  CreatePaymentParams,
-  CreateQuoteParams,
+  Charge,
+  Handover,
+  MintedPayment,
   Payment,
   PaymentStatus,
   Quote,
   SocketTicket,
-  SocketTicketParams,
-  TriggerEvent,
   WalletFailure,
-  WatchPaymentParams,
 } from "./types.js";
-import { isProvablyPaid, proveOrigin } from "./verify.js";
+import { carriesProof, proveOrigin } from "./verify.js";
 import {
   createRequestBody,
+  mintedFromWire,
   paymentFromWire,
   quoteFromWire,
   quoteRequestBody,
   socketTicketFromWire,
-  triggerEventFromWire,
   watchRequestBody,
 } from "./wire.js";
 
@@ -96,6 +97,14 @@ export interface WaitOptions {
   tickets?: boolean;
 }
 
+export interface TicketOptions {
+  /**
+   * How many of this trigger's settlements the socket replays on connect, up to
+   * the ceiling the gateway's operator set
+   */
+  replay?: number;
+}
+
 export interface CreateOptions {
   /**
    * Makes the POST safe to retry. A repeat of a finished request replays its
@@ -107,7 +116,7 @@ export interface CreateOptions {
 
   /**
    * Groups this payment with every other one carrying the same secret, so
-   * `followTrigger` can watch the place rather than the payment. Registering
+   * `follow` can watch the place rather than the payment. Registering
    * sends only its sha256, which is also all the gateway stores, so a stolen
    * ledger cannot subscribe. Following sends the secret itself, because the
    * gateway hashes what it is given to find the stream, so the operator of a
@@ -126,7 +135,7 @@ export interface CreateOptions {
 
 export interface FollowOptions {
   /** Called for the recent settlements replayed on connect, then for each new one */
-  onPayment: (settled: TriggerEvent) => void;
+  onPayment: (settled: Payment) => void;
 
   /**
    * How many settlements to ask for on connect, defaults to the gateway's ten.
@@ -166,12 +175,21 @@ export class ThunderBridge {
   private readonly secret: string | null;
   private strangers: Promise<boolean> | null = null;
   private speaks: Promise<SigningKey> | null = null;
+  private published: Promise<string> | null = null;
+
+  /** Everything this gateway lets you mount, from an LNURL endpoint to a webhook route */
+  readonly serve: Serve;
+
+  /** One call per sale, whatever the rail moves */
+  readonly rails: Rails;
 
   constructor(baseUrl: string, options?: ThunderBridgeOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.verify = options?.verify ?? true;
     this.token = options?.token ?? null;
     this.secret = options?.secret ?? null;
+    this.serve = new Serve(this);
+    this.rails = new Rails(this);
   }
 
   /**
@@ -203,13 +221,24 @@ export class ThunderBridge {
   }
 
   /**
+   * Sell one thing. It mints the invoice, proves it came from the address you
+   * asked for, draws the QR and hands back one object with a way to wait for the
+   * money. This is `mint` plus the two things every caller does next
+   */
+  async sell(order: SellOrder): Promise<Sale> {
+    return saleOf(this, await this.mint(order, order), order);
+  }
+
+  /**
    * Ask the gateway for an invoice payable to the first address on your list
    * that can issue a provable one, throws `NoWalletAvailableError` when none can
    * and `GatewayCheatError` when what comes back is not what you asked for
    */
-  async createPayment(params: CreatePaymentParams, options?: CreateOptions): Promise<Payment> {
+  async mint(charge: Charge, options?: CreateOptions): Promise<MintedPayment> {
+    const asked = await priced(charge);
     const sent = createRequestBody(
-      params,
+      asked,
+      charge.webhookUrl,
       options?.trigger ? sha256Hex(unguessable(options.trigger)) : null,
       options?.replay,
     );
@@ -227,10 +256,11 @@ export class ThunderBridge {
       throw await problemFrom(response);
     }
 
-    const payment = await paymentFrom(response);
+    const payment = await mintedFrom(response);
     if (this.verify) {
-      await proveOrigin(payment, params);
+      await proveOrigin(payment, asked);
     }
+
     return payment;
   }
 
@@ -241,8 +271,8 @@ export class ThunderBridge {
    * whether a wallet returns a provable invoice cannot be known without asking
    * it for one, and asking mints it
    */
-  async createQuote(params: CreateQuoteParams): Promise<Quote> {
-    const sent = quoteRequestBody(params);
+  async quote(charge: Charge): Promise<Quote> {
+    const sent = quoteRequestBody(await priced(charge));
     const response = await fetch(`${this.baseUrl}/quotes`, {
       method: "POST",
       headers: await this.sending("/quotes", sent),
@@ -262,13 +292,18 @@ export class ThunderBridge {
     return quote;
   }
 
-  /** Read a payment back, null when the gateway has never heard of it */
   /**
-   * The key this gateway signs webhooks with when you registered none of your own,
-   * ready to hand to `parseWebhookRequest` as `{ publicKey }`. Fetch it once and
-   * keep it: it is the same for every instance in the cluster
+   * The key this gateway signs webhooks with when you registered none of your own.
+   * `serve.webhook` reads it for you. Asked once and kept, because it is the same
+   * for every instance in the cluster
    */
   async webhookKey(): Promise<string> {
+    this.published ??= this.publishedKey();
+
+    return await this.published;
+  }
+
+  private async publishedKey(): Promise<string> {
     const response = await fetch(`${this.baseUrl}/webhook-key`);
     if (!response.ok) {
       throw await problemFrom(response);
@@ -288,26 +323,12 @@ export class ThunderBridge {
     return body.public_key;
   }
 
-  async getPayment(id: string): Promise<Payment | null> {
-    const path = `/incoming-payments/${encodeURIComponent(id)}`;
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      headers: await this.reading("GET", path),
-    });
-    if (response.status === 404) {
-      return null;
-    }
-    if (!response.ok) {
-      throw await problemFrom(response);
-    }
-    return this.checked(await paymentFrom(response));
-  }
-
   /**
-   * Read back a payment the gateway is only watching, null when it has never
-   * heard of it. A watched payment carries no address, amount or invoice, so
-   * `getPayment` refuses it and this reads the shape both rails share
+   * Read a payment back, null when the gateway has never heard of it. One method
+   * for both sorts: `kind` says whether the gateway minted it or was handed it,
+   * and the address, amount and invoice are null on one it was never told
    */
-  async getWatched(id: string): Promise<TriggerEvent | null> {
+  async payment(id: string): Promise<Payment | null> {
     const path = `/incoming-payments/${encodeURIComponent(id)}`;
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: await this.reading("GET", path),
@@ -319,15 +340,7 @@ export class ThunderBridge {
       throw await problemFrom(response);
     }
 
-    const watched = triggerEventFromWire(await response.json().catch(() => null));
-    if (watched === null) {
-      throw new ProblemError({
-        status: response.status,
-        title: "The gateway answered with something that is not a payment",
-      });
-    }
-
-    return this.proven(watched);
+    return this.proven(await paymentFrom(response));
   }
 
   /**
@@ -339,7 +352,7 @@ export class ThunderBridge {
    * Anything older than that window is not in the answer, and the list does not
    * pretend otherwise
    */
-  async listPayments(limit?: number): Promise<{ payments: TriggerEvent[]; scanned: number }> {
+  async payments(limit?: number): Promise<{ payments: Payment[]; scanned: number }> {
     const path = `/incoming-payments${limit === undefined ? "" : `?limit=${limit}`}`;
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: await this.reading("GET", path),
@@ -353,7 +366,7 @@ export class ThunderBridge {
       settled_scanned?: unknown;
     } | null;
     const listed = Array.isArray(body?.payments)
-      ? body.payments.map(triggerEventFromWire).filter((one): one is TriggerEvent => one !== null)
+      ? body.payments.map(paymentFromWire).filter((one): one is Payment => one !== null)
       : null;
     if (listed === null || typeof body?.settled_scanned !== "number") {
       throw new ProblemError({
@@ -371,37 +384,16 @@ export class ThunderBridge {
    * one that has answered is followed until its own expiry, so the wait always
    * ends by itself
    */
-  async waitForPayment(id: string, options?: WaitOptions): Promise<Payment> {
-    const payment = paymentFromWire(await this.followed(id, options));
-    if (payment === null) {
-      throw new ProblemError({
-        status: 200,
-        title: `payment ${id} is watched rather than minted here, read it with waitForWatched`,
-      });
-    }
-
-    return this.checked(payment);
-  }
-
-  /**
-   * Follow a payment the gateway is only watching, one it did not mint, until it
-   * is paid or expired.
-   *
-   * A watched payment carries no address, no amount and no invoice, because the
-   * gateway was told none of them, so it reads back as the shape a trigger
-   * streams rather than as a `Payment`. That is every bank transfer, and every
-   * Lightning invoice registered with `watchPayment` instead of `createPayment`.
-   */
-  async waitForWatched(id: string, options?: WaitOptions): Promise<TriggerEvent> {
-    const watched = triggerEventFromWire(await this.followed(id, options));
-    if (watched === null) {
+  async settled(id: string, options?: WaitOptions): Promise<Payment> {
+    const ended = paymentFromWire(await this.followed(id, options));
+    if (ended === null) {
       throw new ProblemError({
         status: 200,
         title: "The gateway answered with something that is not a payment",
       });
     }
 
-    return this.proven(watched);
+    return this.proven(ended);
   }
 
   private followed(id: string, options?: WaitOptions): Promise<unknown> {
@@ -476,7 +468,7 @@ export class ThunderBridge {
         opened.onmessage = (event: MessageEvent) => {
           try {
             const frame: unknown = JSON.parse(String(event.data));
-            const watched = triggerEventFromWire(frame);
+            const watched = paymentFromWire(frame);
             if (watched === null) {
               return;
             }
@@ -508,16 +500,16 @@ export class ThunderBridge {
    * what you want is the one that arrives and nothing further from the other.
    *
    * A leg that expires is a loser, not a winner, which is the whole reason this is
-   * not a race: `waitForPayment` ends on `paid` and on `expired` alike, and a
+   * not a race: `settled` ends on `paid` and on `expired` alike, and a
    * Lightning invoice expires in an hour while a bank transfer takes days. `null`
    * means every leg ended without being paid.
    *
    * Stopping the wait is not revoking the invoice. Nobody can revoke one, because
    * the recipient's own wallet minted it, so a payer who pays the loser afterwards
-   * really does pay twice and that shows up on `followTrigger` as a second
-   * settlement to refund.
+   * really does pay twice and that shows up on `follow` as a second settlement to
+   * refund.
    */
-  async firstToSettle(ids: string[], options?: WaitOptions): Promise<TriggerEvent | null> {
+  async firstSettled(ids: string[], options?: WaitOptions): Promise<Payment | null> {
     if (ids.length === 0) {
       return null;
     }
@@ -529,7 +521,7 @@ export class ThunderBridge {
     let refused: unknown = null;
 
     try {
-      const winner = await new Promise<TriggerEvent | null>((resolve) => {
+      const winner = await new Promise<Payment | null>((resolve) => {
         let waiting = ids.length;
         const lost = () => {
           waiting -= 1;
@@ -538,7 +530,7 @@ export class ThunderBridge {
           }
         };
         for (const id of ids) {
-          this.waitForWatched(id, { ...options, signal })
+          this.settled(id, { ...options, signal })
             .then((watched) => (watched.status === "paid" ? resolve(watched) : lost()))
             .catch((failure: unknown) => {
               refused ??= failure;
@@ -562,10 +554,10 @@ export class ThunderBridge {
    * rather than one recipient, which is what makes leaving it cheap. Anything
    * the watcher needs goes in `sealed`, which the gateway cannot read
    */
-  async watchPayment(params: WatchPaymentParams): Promise<TriggerEvent> {
+  async watch(handover: Handover): Promise<Payment> {
     const sent = watchRequestBody(
-      params,
-      params.trigger ? sha256Hex(unguessable(params.trigger)) : null,
+      handover,
+      handover.trigger ? sha256Hex(unguessable(handover.trigger)) : null,
     );
     const response = await fetch(`${this.baseUrl}/watched-payments`, {
       method: "POST",
@@ -576,14 +568,14 @@ export class ThunderBridge {
       throw await problemFrom(response);
     }
 
-    const watched = triggerEventFromWire(await response.json().catch(() => null));
+    const watched = paymentFromWire(await response.json().catch(() => null));
     if (watched === null) {
       throw new ProblemError({
         status: response.status,
         title: "The gateway answered with something that is not a watched payment",
       });
     }
-    const named = await this.nameFor(params.paymentHash);
+    const named = await this.nameFor(handover.paymentHash);
     if (named !== null && watched.id !== named) {
       throw new GatewayCheatError("id_not_mine", watched.id);
     }
@@ -608,7 +600,7 @@ export class ThunderBridge {
    * connect and then live, reconnecting on its own until the returned function
    * is called. A trigger has no terminal state, so this never resolves
    */
-  followTrigger(secret: string, options: FollowOptions): () => void {
+  follow(secret: string, options: FollowOptions): () => void {
     const base = this.baseUrl.replace(/^http/, "ws");
     const asked = options.replay === undefined ? "" : `?replay=${options.replay}`;
     const direct = `${base}/ws/triggers/${encodeURIComponent(unguessable(secret))}${asked}`;
@@ -651,7 +643,7 @@ export class ThunderBridge {
       };
       socket.onmessage = (event: MessageEvent) => {
         try {
-          const settled = triggerEventFromWire(JSON.parse(String(event.data)));
+          const settled = paymentFromWire(JSON.parse(String(event.data)));
           if (settled !== null) {
             options.onPayment(this.proven(settled));
           }
@@ -675,13 +667,13 @@ export class ThunderBridge {
    * A one minute pass onto one trigger's stream, for something that must hold
    * neither the token nor the trigger secret. Mint it in a handler and answer
    * with the ticket alone, because that is all a browser needs to connect and
-   * all it can do anything with. `watchTicketEndpoint` is this method already
+   * all it can do anything with. `serve.watchTicket` is this method already
    * wrapped in a route
    */
-  async createSocketTicket(params: SocketTicketParams): Promise<SocketTicket> {
+  async ticket(trigger: string, options?: TicketOptions): Promise<SocketTicket> {
     return await this.mintedTicket({
-      trigger_secret: unguessable(params.trigger),
-      replay: params.replay,
+      trigger_secret: unguessable(trigger),
+      replay: options?.replay,
     });
   }
 
@@ -733,21 +725,11 @@ export class ThunderBridge {
     return await this.speaks;
   }
 
-  private proven(settled: TriggerEvent): TriggerEvent {
-    const unproven =
-      settled.status === "paid" &&
-      (settled.preimage === null || !preimageMatchesHash(settled.preimage, settled.paymentHash));
-    if (this.verify && unproven) {
-      throw new GatewayCheatError("preimage_mismatch", settled.id);
-    }
-
-    return settled;
-  }
-
-  private checked(payment: Payment): Payment {
-    if (this.verify && payment.status === "paid" && !isProvablyPaid(payment)) {
+  private proven<T extends Payment>(payment: T): T {
+    if (this.verify && payment.status === "paid" && !carriesProof(payment)) {
       throw new GatewayCheatError("preimage_mismatch", payment.id);
     }
+
     return payment;
   }
 }
@@ -760,6 +742,18 @@ async function paymentFrom(response: Response): Promise<Payment> {
       title: "The gateway answered with something that is not a payment",
     });
   }
+  return payment;
+}
+
+async function mintedFrom(response: Response): Promise<MintedPayment> {
+  const payment = mintedFromWire(await response.json().catch(() => null));
+  if (payment === null) {
+    throw new ProblemError({
+      status: response.status,
+      title: "The gateway answered with something that is not a minted payment",
+    });
+  }
+
   return payment;
 }
 

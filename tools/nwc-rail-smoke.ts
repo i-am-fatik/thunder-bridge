@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
 import { preimageMatchesHash } from "../core/bolt11.ts";
 import { ThunderBridge } from "../sdk/dist/index.js";
-import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "../sdk/dist/server.js";
+import type { Order } from "../sdk/dist/index.js";
+import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "../sdk/dist/nwc.js";
 
 const SEALING_SECRET = "rail_smoke_secret_b73e4f19ac0d258614fa";
 const PORT = Number(process.env.PORT ?? 8477);
@@ -33,12 +34,11 @@ console.log(`wallet   ${connection.walletPubkey}`);
 console.log(`gateway  ${gatewayUrl}`);
 console.log(`endpoint ${publicEndpoint}\n`);
 
-const rail = nwcRail({
-	gateway: new ThunderBridge(gatewayUrl),
+const rail = nwcRail(new ThunderBridge(gatewayUrl), {
 	connection,
-	amountMsat: () => AMOUNT_MSAT,
+	amount: () => AMOUNT_MSAT,
 	verifyThrough: { endpoint: publicEndpoint, secret: SEALING_SECRET },
-	description: (order) => `thunder-bridge rail smoke ${order.reference}`,
+	description: (order: Order) => `thunder-bridge rail smoke ${order.reference}`,
 });
 
 const leg = await rail({ reference: "rail-smoke-1", amountMinor: 1, currency: "CZK" });
@@ -55,7 +55,7 @@ for (let attempt = 1; ; attempt++) {
 		process.exit(2);
 	}
 
-	const seen = await watching.getWatched(leg.id).catch(() => null);
+	const seen = await watching.payment(leg.id).catch(() => null);
 	console.log(`  ${attempt}  ${seen?.status ?? "unreachable"}`);
 
 	if (seen?.preimage) {

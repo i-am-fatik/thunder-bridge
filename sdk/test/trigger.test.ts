@@ -6,6 +6,8 @@ import { ProblemError } from "../src/errors";
 import {
   lnurlPayEndpoint,
   publicWatchTicketEndpoint,
+  type Minted,
+  type TriggerConfig,
   watchTicketEndpoint,
   type WatchTicketConfig,
 } from "../src/trigger";
@@ -69,11 +71,10 @@ function gatewayServing(overrides: Record<string, unknown> = {}): Routes {
   };
 }
 
-function endpoint(overrides: Partial<Parameters<typeof lnurlPayEndpoint>[0]> = {}) {
-  return lnurlPayEndpoint({
-    gateway: new ThunderBridge(GATEWAY, { verify: false }),
-    lnAddresses: [FALLBACK, WINNER],
-    amountMsat: () => AMOUNT_MSAT,
+function endpoint(overrides: Partial<TriggerConfig> = {}) {
+  return lnurlPayEndpoint(new ThunderBridge(GATEWAY, { verify: false }), {
+    to: [FALLBACK, WINNER],
+    amount: () => AMOUNT_MSAT,
     secret: SECRET,
     ...overrides,
   });
@@ -123,7 +124,7 @@ describe("the payRequest half", () => {
   it("calls the price function once per payRequest, so a fiat peg can move between them", async () => {
     stubFetch(gatewayServing());
     const prices = [21_000, 42_000];
-    const handler = endpoint({ amountMsat: () => prices.shift() ?? 0 });
+    const handler = endpoint({ amount: () => prices.shift() ?? 0 });
 
     expect((await payRequest(handler))["minSendable"]).toBe(21_000);
     expect((await payRequest(handler))["minSendable"]).toBe(42_000);
@@ -365,7 +366,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
       blind: true,
       sealed: {
         secret: SEALING_SECRET,
-        data: (minted) => ({ amountMsat: minted.amountMsat, lnAddress: minted.lnAddress }),
+        data: (minted: Minted) => ({ amountMsat: minted.amountMsat, lnAddress: minted.lnAddress }),
       },
     });
 
@@ -386,7 +387,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
     const calls = stubFetch(recipientAndBlindGateway());
     const handler = endpoint({
       blind: true,
-      sealed: { secret: SEALING_SECRET, data: (minted) => ({ amountMsat: minted.amountMsat }) },
+      sealed: { secret: SEALING_SECRET, data: (minted: Minted) => ({ amountMsat: minted.amountMsat }) },
     });
 
     await handler(new Request((await payRequest(handler)).callback));
@@ -494,7 +495,11 @@ describe("the binding finding 1 is about", () => {
         jsonResponse({ status: "OK", settled: false, preimage: null, pr: fallbackInvoice }),
     });
 
-    const handler = endpoint({ gateway: new ThunderBridge(GATEWAY) });
+    const handler = lnurlPayEndpoint(new ThunderBridge(GATEWAY), {
+      to: [FALLBACK, WINNER],
+      amount: () => AMOUNT_MSAT,
+      secret: SECRET,
+    });
     const offer = await payRequest(handler);
     const answer = (await (
       await handler(new Request(offer.callback))
@@ -547,18 +552,18 @@ describe("the watch ticket endpoints, which trade the secret for a pass that exp
     });
   }
 
+  function owner(): ThunderBridge {
+    return new ThunderBridge(GATEWAY, { token: TOKEN, verify: false });
+  }
+
   function board(replay?: number): WatchTicketConfig {
-    return {
-      gateway: new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }),
-      watchSecret: WATCH_SECRET,
-      replay,
-    };
+    return { watchSecret: WATCH_SECRET, replay };
   }
 
   it("hands back the gateway's own ticket and expiry when the secret is right", async () => {
     minting();
 
-    const answer = await watchTicketEndpoint(board())(asking(WATCH_SECRET));
+    const answer = await watchTicketEndpoint(owner(), board())(asking(WATCH_SECRET));
 
     expect(answer.status).toBe(200);
     expect(await answer.json()).toEqual({ ticket: TICKET, expires_at: EXPIRES_AT });
@@ -567,15 +572,15 @@ describe("the watch ticket endpoints, which trade the secret for a pass that exp
   it("refuses a wrong secret and a body with none, without troubling the gateway", async () => {
     const calls = minting();
 
-    expect((await watchTicketEndpoint(board())(asking("nearly-the-one"))).status).toBe(403);
-    expect((await watchTicketEndpoint(board())(asking())).status).toBe(403);
+    expect((await watchTicketEndpoint(owner(), board())(asking("nearly-the-one"))).status).toBe(403);
+    expect((await watchTicketEndpoint(owner(), board())(asking())).status).toBe(403);
     expect(calls).toHaveLength(0);
   });
 
   it("mints for a caller offering nothing when the board is public", async () => {
     minting();
 
-    const answer = await publicWatchTicketEndpoint(board())(asking());
+    const answer = await publicWatchTicketEndpoint(owner(), board())(asking());
 
     expect(answer.status).toBe(200);
     expect(await answer.json()).toEqual({ ticket: TICKET, expires_at: EXPIRES_AT });
@@ -584,7 +589,7 @@ describe("the watch ticket endpoints, which trade the secret for a pass that exp
   it("mints for a wrong secret when the board is public, because it reads no body", async () => {
     minting();
 
-    const answer = await publicWatchTicketEndpoint(board())(asking("nearly-the-one"));
+    const answer = await publicWatchTicketEndpoint(owner(), board())(asking("nearly-the-one"));
 
     expect(answer.status).toBe(200);
     expect(await answer.json()).toEqual({ ticket: TICKET, expires_at: EXPIRES_AT });
@@ -593,18 +598,18 @@ describe("the watch ticket endpoints, which trade the secret for a pass that exp
   it("refuses a gateway that says no, and one that says yes without a ticket", async () => {
     minting({ [`${GATEWAY}/ws-tickets`]: () => problemResponse({ title: "Unauthorized" }, 401) });
 
-    await expect(watchTicketEndpoint(board())(asking(WATCH_SECRET))).rejects.toThrow(ProblemError);
+    await expect(watchTicketEndpoint(owner(), board())(asking(WATCH_SECRET))).rejects.toThrow(ProblemError);
 
     minting({ [`${GATEWAY}/ws-tickets`]: () => jsonResponse({ ticket: TICKET }) });
 
-    await expect(watchTicketEndpoint(board())(asking(WATCH_SECRET))).rejects.toThrow(
+    await expect(watchTicketEndpoint(owner(), board())(asking(WATCH_SECRET))).rejects.toThrow(
       /not a ticket/,
     );
   });
 
   it("asks the gateway for a replay depth only when one was configured", async () => {
     const asked = minting();
-    await publicWatchTicketEndpoint(board(25))(asking());
+    await publicWatchTicketEndpoint(owner(), board(25))(asking());
 
     expect(JSON.parse(String(asked[0]?.init?.body))).toEqual({
       trigger_secret: WATCH_SECRET,
@@ -612,7 +617,7 @@ describe("the watch ticket endpoints, which trade the secret for a pass that exp
     });
 
     const bare = minting();
-    await publicWatchTicketEndpoint(board())(asking());
+    await publicWatchTicketEndpoint(owner(), board())(asking());
 
     expect(JSON.parse(String(bare[0]?.init?.body))).toEqual({ trigger_secret: WATCH_SECRET });
   });

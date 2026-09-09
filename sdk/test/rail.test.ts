@@ -90,8 +90,7 @@ function railsServing(overrides: Routes = {}): Routes {
 }
 
 function bank(overrides: Partial<BankRailConfig> = {}): Rail {
-  return bankRail({
-    gateway: new ThunderBridge(GATEWAY, { token: "hunter2" }),
+  return bankRail(new ThunderBridge(GATEWAY, { token: "hunter2" }), {
     secret: SECRET,
     iban: IBAN,
     verifyUrl: MOUNT,
@@ -101,19 +100,17 @@ function bank(overrides: Partial<BankRailConfig> = {}): Rail {
 }
 
 function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
-  return lightningRail({
-    gateway: new ThunderBridge(GATEWAY, { verify: false }),
-    lnAddresses: [LN_ADDRESS],
-    amountMsat: () => AMOUNT_MSAT,
+  return lightningRail(new ThunderBridge(GATEWAY, { verify: false }), {
+    to: [LN_ADDRESS],
+    amount: () => AMOUNT_MSAT,
     ...overrides,
   });
 }
 
 function blind(overrides: Partial<BlindLightningRailConfig> = {}): Rail {
-  return blindLightningRail({
-    gateway: new ThunderBridge(GATEWAY, { verify: false, token: "hunter2" }),
-    lnAddresses: [LN_ADDRESS],
-    amountMsat: () => AMOUNT_MSAT,
+  return blindLightningRail(new ThunderBridge(GATEWAY, { verify: false, token: "hunter2" }), {
+    to: [LN_ADDRESS],
+    amount: () => AMOUNT_MSAT,
     ...overrides,
   });
 }
@@ -254,7 +251,7 @@ describe("lightningRail", () => {
     stubFetch(railsServing());
     const priced = vi.fn(() => AMOUNT_MSAT);
 
-    await lightning({ amountMsat: priced })(ORDER);
+    await lightning({ amount: priced })(ORDER);
 
     expect(priced).toHaveBeenCalledWith(ORDER);
   });

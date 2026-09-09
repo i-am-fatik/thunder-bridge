@@ -17,7 +17,8 @@ import {
   nwcVerifyEndpoint,
   nwcVerifyUrl,
 } from "../src/nwc";
-import { nwcRail } from "../src/rail";
+import {  } from "../src/rail";
+import { nwcRail } from "../src/nwc";
 
 const WALLET_KEY = "11".repeat(32);
 const CLIENT_KEY = "22".repeat(32);
@@ -398,7 +399,7 @@ describe("the rail", () => {
 
   function gatewayTaking(watched: Record<string, unknown>[]) {
     return {
-      watchPayment: async (params: Record<string, unknown>) => {
+      watch: async (params: Record<string, unknown>) => {
         watched.push(params);
         return { id: "wp_1" };
       },
@@ -408,10 +409,9 @@ describe("the rail", () => {
   it("mints on the wallet and hands the gateway a url of ours", async () => {
     relaySpeaking({ answer: () => ({ result: { invoice: INVOICE_1000 } }) });
     const watched: Record<string, unknown>[] = [];
-    const leg = await nwcRail({
-      gateway: gatewayTaking(watched),
+    const leg = await nwcRail(gatewayTaking(watched), {
       connection: nwcConnection(uriFor()),
-      amountMsat: () => 1000,
+      amount: () => 1000,
       verifyThrough: { endpoint: MOUNT, secret: SEALING_SECRET },
     })(order);
 
@@ -423,10 +423,9 @@ describe("the rail", () => {
   it("tells the gateway nothing about the wallet it just used", async () => {
     relaySpeaking({ answer: () => ({ result: { invoice: INVOICE_1000 } }) });
     const watched: Record<string, unknown>[] = [];
-    await nwcRail({
-      gateway: gatewayTaking(watched),
+    await nwcRail(gatewayTaking(watched), {
       connection: nwcConnection(uriFor()),
-      amountMsat: () => 1000,
+      amount: () => 1000,
       verifyThrough: { endpoint: MOUNT, secret: SEALING_SECRET },
     })(order);
 

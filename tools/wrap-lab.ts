@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { decodeInvoice, preimageMatchesHash } from "../core/bolt11.ts";
 import { checkSettled } from "../core/lnurl.ts";
 import { proveWrapped, wrapFeeCeiling } from "../sdk/dist/index.js";
-import { askWallet, nwcConnection, nwcHoldInvoice, nwcPay } from "../sdk/dist/server.js";
+import { askWallet, nwcConnection, nwcHoldInvoice, nwcPay } from "../sdk/dist/nwc.js";
 import { type Bridged, ledgerAt, settleWhatIsOwed } from "./wrap-ledger.ts";
 
 const PORT = Number(process.env.PORT ?? 8480);
@@ -184,7 +184,7 @@ server.listen(PORT, async () => {
  */
 async function offered(asked: { address: string; amountMsat: number }) {
 	const real = await payRequested(asked.address, asked.amountMsat);
-	const { qrToSvg } = await import("../sdk/dist/index.js");
+	const { qrToSvg } = await import("../sdk/dist/qr.js");
 	const shared = {
 		address: asked.address,
 		paymentHash: real.paymentHash,

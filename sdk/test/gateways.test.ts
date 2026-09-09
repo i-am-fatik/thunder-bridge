@@ -50,7 +50,7 @@ describe("Gateways", () => {
   it("hands the same invoice to every gateway and gets one name back", async () => {
     const calls = stubFetch(await allWatching());
 
-    const watched = await new Gateways([ONE, TWO, THREE], { secret: SECRET }).watchPayment(
+    const watched = await new Gateways([ONE, TWO, THREE], { secret: SECRET }).watch(
       watchable(),
     );
 
@@ -71,7 +71,7 @@ describe("Gateways", () => {
     const watched = await new Gateways([ONE, TWO, THREE], {
       secret: SECRET,
       onRefused: (baseUrl) => refusals.push(baseUrl),
-    }).watchPayment(watchable());
+    }).watch(watchable());
 
     expect(watched.id).toBe(await named());
     expect(refusals).toEqual([TWO]);
@@ -87,7 +87,7 @@ describe("Gateways", () => {
     stubFetch(routes);
 
     const rejection = await new Gateways([ONE, TWO], { secret: SECRET })
-      .watchPayment(watchable())
+      .watch(watchable())
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(Error);
@@ -98,16 +98,16 @@ describe("Gateways", () => {
     const gateways = new Gateways([ONE, TWO, THREE], { secret: SECRET });
     const paid = { ...(await watching("paid")), preimage: "cd".repeat(32) };
 
-    vi.spyOn(gateways.each[0]!, "waitForWatched").mockImplementation(
+    vi.spyOn(gateways.each[0]!, "settled").mockImplementation(
       () => new Promise(() => {}) as Promise<never>,
     );
-    vi.spyOn(gateways.each[1]!, "waitForWatched").mockResolvedValue({
-      ...(paid as unknown as Awaited<ReturnType<typeof gateways.waitForWatched>>),
+    vi.spyOn(gateways.each[1]!, "settled").mockResolvedValue({
+      ...(paid as unknown as Awaited<ReturnType<typeof gateways.settled>>),
       status: "paid",
     });
-    vi.spyOn(gateways.each[2]!, "waitForWatched").mockRejectedValue(new Error("unreachable"));
+    vi.spyOn(gateways.each[2]!, "settled").mockRejectedValue(new Error("unreachable"));
 
-    const settled = await gateways.waitForWatched(await named());
+    const settled = await gateways.settled(await named());
     expect(settled.status).toBe("paid");
   });
 
@@ -116,15 +116,15 @@ describe("Gateways", () => {
     const gateways = new Gateways([ONE, TWO], { secret: SECRET });
 
     for (const gateway of gateways.each) {
-      vi.spyOn(gateway, "waitForWatched").mockResolvedValue({
+      vi.spyOn(gateway, "settled").mockResolvedValue({
         ...(((await watching("expired")) as unknown) as Awaited<
-          ReturnType<typeof gateways.waitForWatched>
+          ReturnType<typeof gateways.settled>
         >),
         status: "expired",
       });
     }
 
-    expect((await gateways.waitForWatched(await named())).status).toBe("expired");
+    expect((await gateways.settled(await named())).status).toBe("expired");
   });
 
   it("throws when every gateway failed rather than reporting nothing happened", async () => {
@@ -132,10 +132,10 @@ describe("Gateways", () => {
     const gateways = new Gateways([ONE, TWO], { secret: SECRET });
 
     for (const gateway of gateways.each) {
-      vi.spyOn(gateway, "waitForWatched").mockRejectedValue(new Error("unreachable"));
+      vi.spyOn(gateway, "settled").mockRejectedValue(new Error("unreachable"));
     }
 
-    await expect(gateways.waitForWatched(await named())).rejects.toThrow("unreachable");
+    await expect(gateways.settled(await named())).rejects.toThrow("unreachable");
   });
 
   it("refuses to be built with no gateway at all", () => {

@@ -1,6 +1,8 @@
 import { decodeInvoice, preimageMatchesHash } from "../../core/bolt11.js";
 import { type WalletReason, WalletRefused } from "../../core/refusal.js";
 import { seal, unseal } from "../../core/sealed.js";
+import type { Amount } from "./amount.js";
+import type { ThunderBridge } from "./client.js";
 import {
   conversationKeyFor,
   decryptNip44,
@@ -10,7 +12,10 @@ import {
   signEvent,
   verifyEvent,
 } from "./nostr.js";
-import { answerVerifyChallengeRequest } from "./webhook.js";
+import type { Ticker } from "./price.js";
+import { encodeForQr } from "./qr.js";
+import { type Leg, type Order, pricedFor, type Rail, type RailConfig } from "./rail.js";
+import { answerVerifyChallenge } from "./webhook.js";
 
 const REQUEST_KIND = 23194;
 const RESPONSE_KIND = 23195;
@@ -241,7 +246,7 @@ export function nwcVerifyEndpoint(
   };
 
   return async (request: Request) => {
-    const consented = await answerVerifyChallengeRequest(request);
+    const consented = await answerVerifyChallenge(request);
     if (consented !== null) {
       return consented;
     }
@@ -466,4 +471,67 @@ function isSecureRelay(relay: string): boolean {
   } catch {
     return false;
   }
+}
+
+export interface NwcRailConfig extends RailConfig {
+  /** The wallet that mints, which never leaves this process */
+  connection: NwcConnection;
+
+  /**
+   * What to charge for one order, the order's own price converted at `rate` by
+   * default. Give it a function and the price is whatever you say
+   */
+  amount?: (order: Order) => Amount;
+
+  /** Where the default conversion gets its rate, the median of four venues by default */
+  rate?: Ticker;
+
+  /** Where `nwcVerifyEndpoint` is mounted, and the secret the hash is sealed with */
+  verifyThrough: { endpoint: string; secret: string };
+
+  /** What the payer's wallet shows, the order's reference by default */
+  description?: (order: Order) => string;
+
+  /** Sealed before the gateway sees it, the way the blind Lightning rail does */
+  sealed?: (order: Order) => string | Promise<string>;
+}
+
+/**
+ * Sell for Lightning against a wallet of your own over NIP-47, for a wallet that
+ * has no LUD-21 address to be watched at. Your node mints the invoice and releases
+ * the preimage, so the proof comes from one hop nearer than any hosted address can
+ * manage, and the gateway sees a hash and a URL of yours.
+ *
+ * This rail lives here rather than on `gateway.rails` because NIP-47 needs the
+ * nostr crypto in this module, and a browser showing a QR should not download it
+ */
+export function nwcRail(gateway: ThunderBridge, config: NwcRailConfig): Rail {
+  return async (order) => {
+    const invoice = await nwcInvoice(
+      config.connection,
+      await pricedFor(order, config.amount, config.rate),
+      config.description?.(order) ?? order.reference,
+    );
+    const watched = await gateway.watch({
+      paymentHash: invoice.paymentHash,
+      verifyUrl: await nwcVerifyUrl(
+        config.verifyThrough.endpoint,
+        invoice.paymentHash,
+        config.verifyThrough.secret,
+      ),
+      expiresAt: invoice.expiresAt,
+      trigger: config.trigger,
+      replay: config.replay,
+      sealed: await config.sealed?.(order),
+      webhookUrl: config.webhookUrl,
+    });
+
+    return {
+      id: watched.id,
+      rail: config.name ?? "lightning",
+      scan: invoice.bolt11,
+      qr: encodeForQr(invoice.bolt11),
+      expiresAt: invoice.expiresAt,
+    };
+  };
 }

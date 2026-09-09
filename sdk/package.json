@@ -1,6 +1,6 @@
 {
   "name": "thunder-bridge",
-  "version": "1.4.2",
+  "version": "2.0.0",
   "description": "Trustless JavaScript client for the Thunder Bridge Lightning payment gateway. Proves the invoice came from your own wallet before the payer sees it.",
   "author": "i-am-fatik",
   "homepage": "https://agora.gripe/en/tools/thunder-bridge",
@@ -17,8 +17,17 @@
   "types": "./dist/index.d.ts",
   "typesVersions": {
     "*": {
-      "server": [
-        "./dist/server.d.ts"
+      "qr": [
+        "./dist/qr.d.ts"
+      ],
+      "price": [
+        "./dist/price.d.ts"
+      ],
+      "bank": [
+        "./dist/bank.d.ts"
+      ],
+      "nwc": [
+        "./dist/nwc.d.ts"
       ]
     }
   },
@@ -33,14 +42,44 @@
         "default": "./dist/index.cjs"
       }
     },
-    "./server": {
+    "./qr": {
       "import": {
-        "types": "./dist/server.d.ts",
-        "default": "./dist/server.js"
+        "types": "./dist/qr.d.ts",
+        "default": "./dist/qr.js"
       },
       "require": {
-        "types": "./dist/server.d.cts",
-        "default": "./dist/server.cjs"
+        "types": "./dist/qr.d.cts",
+        "default": "./dist/qr.cjs"
+      }
+    },
+    "./price": {
+      "import": {
+        "types": "./dist/price.d.ts",
+        "default": "./dist/price.js"
+      },
+      "require": {
+        "types": "./dist/price.d.cts",
+        "default": "./dist/price.cjs"
+      }
+    },
+    "./bank": {
+      "import": {
+        "types": "./dist/bank.d.ts",
+        "default": "./dist/bank.js"
+      },
+      "require": {
+        "types": "./dist/bank.d.cts",
+        "default": "./dist/bank.cjs"
+      }
+    },
+    "./nwc": {
+      "import": {
+        "types": "./dist/nwc.d.ts",
+        "default": "./dist/nwc.js"
+      },
+      "require": {
+        "types": "./dist/nwc.d.cts",
+        "default": "./dist/nwc.cjs"
       }
     }
   },
@@ -52,7 +91,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/server.ts --format esm,cjs --dts --clean --splitting=false",
+    "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",

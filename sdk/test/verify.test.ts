@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GatewayCheatCode } from "../src/errors";
 import { GatewayCheatError, UnverifiedRecipientError } from "../src/errors";
-import type { CreatePaymentParams, Payment } from "../src/types";
+import type { MintedPayment, Priced } from "../src/types";
 import { preimageMatchesHash } from "../../core/bolt11.js";
-import { isProvablyPaid, proveOrigin, proveSettlement } from "../src/verify";
+import { carriesProof, proveOrigin, proveSettlement } from "../src/verify";
 import { bolt11 } from "./encode";
 
 const ADDRESS = "fatik@agora.gripe";
@@ -31,13 +31,15 @@ const HONEST_INVOICE = bolt11({
   descriptionHash: sha256OfText(METADATA),
 });
 
-function asked(lnAddresses: string[], amountMsat = AMOUNT_MSAT): CreatePaymentParams {
-  return { lnAddresses, amountMsat };
+function asked(to: string[], amountMsat = AMOUNT_MSAT): Priced {
+  return { to, amountMsat };
 }
 
-function payment(overrides: Partial<Payment> = {}): Payment {
+function payment(overrides: Partial<MintedPayment> = {}): MintedPayment {
   return {
     id: "pay_7f3a2c",
+    kind: "minted",
+    sealed: null,
     lnAddress: ADDRESS,
     amountMsat: AMOUNT_MSAT,
     status: "pending",
@@ -354,35 +356,35 @@ describe("the SSRF guard", () => {
 
 describe("isProvablyPaid", () => {
   it("is true for a paid payment whose preimage hashes to the payment hash", () => {
-    expect(isProvablyPaid(payment({ status: "paid", preimage: PREIMAGE }))).toBe(true);
+    expect(carriesProof(payment({ status: "paid", preimage: PREIMAGE }))).toBe(true);
   });
 
   it("is false for a paid payment whose preimage hashes to something else", () => {
-    expect(isProvablyPaid(payment({ status: "paid", preimage: "00".repeat(32) }))).toBe(false);
+    expect(carriesProof(payment({ status: "paid", preimage: "00".repeat(32) }))).toBe(false);
   });
 
   it("is false for a paid payment that reports no preimage", () => {
-    expect(isProvablyPaid(payment({ status: "paid", preimage: null }))).toBe(false);
+    expect(carriesProof(payment({ status: "paid", preimage: null }))).toBe(false);
   });
 
   it("is false for a pending payment even when a matching preimage is somehow present", () => {
-    expect(isProvablyPaid(payment({ status: "pending", preimage: PREIMAGE }))).toBe(false);
+    expect(carriesProof(payment({ status: "pending", preimage: PREIMAGE }))).toBe(false);
   });
 
   it("is false for an expired payment even when a matching preimage is somehow present", () => {
-    expect(isProvablyPaid(payment({ status: "expired", preimage: PREIMAGE }))).toBe(false);
+    expect(carriesProof(payment({ status: "expired", preimage: PREIMAGE }))).toBe(false);
   });
 
   it("is false for a paid payment whose preimage is not hexadecimal", () => {
-    expect(isProvablyPaid(payment({ status: "paid", preimage: "zz".repeat(32) }))).toBe(false);
+    expect(carriesProof(payment({ status: "paid", preimage: "zz".repeat(32) }))).toBe(false);
   });
 
   it("is false for a paid payment whose preimage has an odd number of hex digits", () => {
-    expect(isProvablyPaid(payment({ status: "paid", preimage: PREIMAGE.slice(1) }))).toBe(false);
+    expect(carriesProof(payment({ status: "paid", preimage: PREIMAGE.slice(1) }))).toBe(false);
   });
 
   it("is false for a paid payment whose preimage is empty", () => {
-    expect(isProvablyPaid(payment({ status: "paid", preimage: "" }))).toBe(false);
+    expect(carriesProof(payment({ status: "paid", preimage: "" }))).toBe(false);
   });
 });
 
@@ -500,7 +502,7 @@ describe("a settlement the gateway invented for itself", () => {
       paymentHash: sha256OfHex(invented),
     });
 
-    expect(isProvablyPaid(forged)).toBe(false);
+    expect(carriesProof(forged)).toBe(false);
   });
 });
 

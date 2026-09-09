@@ -77,6 +77,20 @@ export class UnverifiedRecipientError extends Error {
 
 /** An RFC 9457 problem document the gateway answered with */
 export class ProblemError extends Error {
+  static readonly NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge:no-wallet-available";
+  static readonly REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge:request-in-flight";
+  static readonly IDEMPOTENCY_KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reused";
+  static readonly PAYMENT_ALREADY_WATCHED =
+    "urn:problem-type:thunder-bridge:payment-already-watched";
+
+  /**
+   * Whether a problem carries this type. Branch on the type, never on the prose,
+   * and reach for `instanceof` first: every type this SDK gives a class to has one
+   */
+  static is(problem: { type?: string }, type: string): boolean {
+    return problem.type === type;
+  }
+
   readonly type: string;
   readonly title: string;
   readonly status: number;

@@ -1,11 +1,11 @@
 import { type Resolved, resolve } from "../../core/lnurl.js";
 import { NoWalletAvailable } from "../../core/refusal.js";
-import { bankTransfer } from "./bank.js";
+import { type Amount, millisatoshi } from "./amount.js";
+import { type BankTransfer, type BankTransferParams, bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
-import { type NwcConnection, nwcInvoice, nwcVerifyUrl } from "./nwc.js";
+import { medianOf, msatFor, type Ticker } from "./price.js";
 import { encodeForQr } from "./qr.js";
-import { relayedVerifyUrl } from "./relay.js";
 
 const BANK = "bank";
 const LIGHTNING = "lightning";
@@ -18,13 +18,13 @@ export interface Order {
   /** The price in the smallest unit of `currency`, so 48055 is 480.55 CZK */
   amountMinor: number;
 
-  /** ISO 4217. The bank rail moves this, Lightning reads it only through your own `amountMsat` */
+  /** ISO 4217. The bank rail moves this, Lightning converts it at `rate` */
   currency: string;
 }
 
 /** One way to pay one order, already registered with the gateway */
 export interface Leg {
-  /** The watched payment's id, which is what `firstToSettle`, `getWatched` and `waitForWatched` take */
+  /** The watched payment's id, which is what `firstSettled`, `payment` and `settled` take */
   id: string;
 
   /** Which rail made it, so a shop can label a leg without knowing how it was built */
@@ -45,155 +45,90 @@ export interface Leg {
  */
 export type Rail = (order: Order) => Promise<Leg>;
 
-export interface BankRailConfig {
-  /** The gateway that will watch these transfers. It has to be one of your own */
-  gateway: ThunderBridge;
+/** What every rail takes, whatever it moves */
+export interface RailConfig {
+  /** Groups every payment from this rail so `follow` can watch the shop */
+  trigger?: string;
 
+  /** How many of that trigger's settlements the gateway keeps replayable past the hour */
+  replay?: number;
+
+  /** Where the gateway posts once the money lands, a public https URL */
+  webhookUrl?: string;
+
+  /** What `Leg.rail` says, so two rails of one kind can be told apart */
+  name?: string;
+}
+
+export interface LightningRailConfig extends RailConfig {
+  /** Priority list, the first address that can prove an invoice wins */
+  to: string | string[];
+
+  /**
+   * What to charge for one order, the order's own price converted at `rate` by
+   * default. Give it a function and the price is whatever you say
+   */
+  amount?: (order: Order) => Amount;
+
+  /** Where the default conversion gets its rate, the median of four venues by default */
+  rate?: Ticker;
+
+  /** Makes the mint safe to retry, the order's reference by default */
+  idempotencyKey?: (order: Order) => string | undefined;
+}
+
+export interface BlindLightningRailConfig extends LightningRailConfig {
+  /**
+   * What the watcher needs and the gateway must not read, sealed with `seal`
+   * before it goes anywhere near the gateway
+   */
+  sealed?: (order: Order) => string | Promise<string>;
+
+  /**
+   * Where your own `serve.verify` endpoint is mounted, and its secret. Without
+   * it the gateway is handed the wallet's own URL, which a gateway enforcing its
+   * verify challenge will refuse to poll
+   */
+  relayThrough?: { endpoint: string; secret: string };
+}
+
+export interface BankRailConfig extends RailConfig {
   /** Long lived and server side. Every preimage is derived from it, so losing it loses every proof */
   secret: string;
 
   /** The account the money goes to, as an IBAN */
   iban: string;
 
-  /** Where `bankVerifyEndpoint` is mounted, a public https URL with no query of its own */
+  /** Where `serve.bankVerify` is mounted, a public https URL with no query of its own */
   verifyUrl: string;
 
-  /**
-   * When this order stops being payable, in unix seconds. Re-offering one order
-   * has to return the same second every time, because the gateway compares the
-   * expiry to decide whether a repeated watch is the same watch
-   */
+  /** When this leg stops being payable, in unix seconds */
   expiresAt: (order: Order) => number;
 
-  /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
-  trigger?: string;
-
-  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
-  replay?: number;
-
-  /** Handed back untouched on that stream. Stable across re-offers, for the reason `expiresAt` is */
+  /** Sealed before the gateway sees it, the way the blind Lightning rail does */
   sealed?: (order: Order) => string | Promise<string>;
 
-  /** Up to ten digits, for accounting systems that still want one */
+  /** The Czech variable symbol, taken off the reference's digits by default */
   variableSymbol?: (order: Order) => string | undefined;
 
-  webhookUrl?: string;
-
-  /** Register on a gateway you do not own anyway, on the terms `bankTransfer` sets out */
+  /**
+   * Register on a gateway you do not own anyway. The verify URL names the amount
+   * and the reference, so its operator could read your order book off the watches
+   */
   allowPublicGateway?: boolean;
-
-  /** What `Leg.rail` reads, for a shop running more than one account */
-  name?: string;
-}
-
-export interface LightningRailConfig {
-  /** The gateway that mints the invoice */
-  gateway: ThunderBridge;
-
-  /** Priority list, the gateway takes the first that can issue a provable invoice */
-  lnAddresses: string[];
-
-  /** What this order costs in millisatoshi. A shop pricing in fiat writes `msatFor` and its own ticker */
-  amountMsat: (order: Order) => number | Promise<number>;
-
-  /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
-  trigger?: string;
-
-  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
-  replay?: number;
-
-  /**
-   * Makes the mint safe to retry. Unset nothing is sent, because a key stable
-   * across re-offers is one the gateway can join against the bank leg's reference
-   */
-  idempotencyKey?: (order: Order) => string | undefined;
-
-  webhookUrl?: string;
-
-  /** What `Leg.rail` reads, for a shop running more than one wallet */
-  name?: string;
-}
-
-export interface BlindLightningRailConfig {
-  /** The gateway that watches an invoice it was never allowed to mint */
-  gateway: ThunderBridge;
-
-  /** Priority list, resolved here rather than by the gateway */
-  lnAddresses: string[];
-
-  /** What this order costs in millisatoshi */
-  amountMsat: (order: Order) => number | Promise<number>;
-
-  /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
-  trigger?: string;
-
-  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
-  replay?: number;
-
-  /** Only a watched leg has anywhere to carry this */
-  sealed?: (order: Order) => string | Promise<string>;
-
-  webhookUrl?: string;
-
-  /**
-   * Where your own `lightningVerifyEndpoint` is mounted, and the secret it
-   * unseals with. Set both and the gateway is handed your URL rather than the
-   * wallet's, so it polls you, never a third party, and learns nothing about
-   * which provider the recipient uses. Leave them out and it polls the wallet
-   */
-  relayVerifyThrough?: { endpoint: string; secret: string };
-
-  /** What `Leg.rail` reads, for a shop running more than one wallet */
-  name?: string;
-}
-
-export interface NwcRailConfig {
-  /** The gateway that watches an invoice your own wallet minted */
-  gateway: ThunderBridge;
-
-  /** Your wallet over NIP-47, from `nwcConnection`. It never reaches the gateway */
-  connection: NwcConnection;
-
-  /** What this order costs in millisatoshi */
-  amountMsat: (order: Order) => number | Promise<number>;
-
-  /**
-   * Where your own `nwcVerifyEndpoint` is mounted, and the secret it unseals
-   * with. The gateway is handed this URL rather than a wallet's, so it polls you
-   * and learns neither the connection nor which wallet is behind it
-   */
-  verifyThrough: { endpoint: string; secret: string };
-
-  /** What the payer reads on the invoice, and what your wallet files it under */
-  description?: (order: Order) => string;
-
-  /** Groups every leg on the same secret, so one `followTrigger` socket hears them all */
-  trigger?: string;
-
-  /** How many settlements of that trigger the gateway keeps replayable past the hour, needs `trigger` */
-  replay?: number;
-
-  /** Only a watched leg has anywhere to carry this */
-  sealed?: (order: Order) => string | Promise<string>;
-
-  webhookUrl?: string;
-
-  /** What `Leg.rail` reads, for a shop running more than one wallet */
-  name?: string;
 }
 
 /**
  * Sell for a bank transfer. The money moves straight to your account and the
  * gateway is told a hash, a URL and an expiry, never the amount or the reference.
  *
- * Which bank is read back is `bankVerifyEndpoint`'s business, not this one's, so
+ * Which bank is read back is `serve.bankVerify`'s business, not this one's, so
  * a rail built here serves Fio and anything else behind a `Statement`.
  */
-export function bankRail(config: BankRailConfig): Rail {
+export function bankRail(gateway: ThunderBridge, config: BankRailConfig): Rail {
   return async (order) => {
     const expiresAt = config.expiresAt(order);
-    const transfer = await bankTransfer({
-      gateway: config.gateway,
+    const transfer = await bankTransfer(gateway, {
       secret: config.secret,
       iban: config.iban,
       verifyUrl: config.verifyUrl,
@@ -221,15 +156,15 @@ export function bankRail(config: BankRailConfig): Rail {
 
 /**
  * Sell for Lightning, with the gateway minting the invoice. It is told the
- * address list and the amount, which is the round trip `blindLightningRail`
- * spends to avoid.
+ * address list and the amount, which is the round trip `blindLightning` spends
+ * to avoid.
  */
-export function lightningRail(config: LightningRailConfig): Rail {
+export function lightningRail(gateway: ThunderBridge, config: LightningRailConfig): Rail {
   return async (order) => {
-    const payment = await config.gateway.createPayment(
+    const payment = await gateway.mint(
       {
-        lnAddresses: config.lnAddresses,
-        amountMsat: await config.amountMsat(order),
+        to: config.to,
+        amount: await pricedFor(order, config.amount, config.rate),
         webhookUrl: config.webhookUrl,
       },
       {
@@ -255,14 +190,17 @@ export function lightningRail(config: LightningRailConfig): Rail {
  * neither who is being paid nor how much, so the only refusal left to it is
  * refusing everyone.
  */
-export function blindLightningRail(config: BlindLightningRailConfig): Rail {
+export function blindLightningRail(gateway: ThunderBridge, config: BlindLightningRailConfig): Rail {
   return async (order) => {
-    const resolved = await invoiceFrom(config.lnAddresses, await config.amountMsat(order));
-    const relay = config.relayVerifyThrough;
-    const watched = await config.gateway.watchPayment({
+    const resolved = await invoiceFrom(
+      config.to,
+      await pricedFor(order, config.amount, config.rate),
+    );
+    const relay = config.relayThrough;
+    const watched = await gateway.watch({
       paymentHash: resolved.paymentHash,
       verifyUrl: relay
-        ? await relayedVerifyUrl(
+        ? await gateway.serve.verifyUrl(
             relay.endpoint,
             { url: resolved.verifyUrl, hash: resolved.paymentHash },
             relay.secret,
@@ -286,43 +224,6 @@ export function blindLightningRail(config: BlindLightningRailConfig): Rail {
 }
 
 /**
- * Sell for Lightning against a wallet of your own over NIP-47, for a wallet that
- * has no LUD-21 address to be watched at. Your node mints the invoice and releases
- * the preimage, so the proof comes from one hop nearer than any hosted address can
- * manage, and the gateway sees a hash and a URL of yours.
- */
-export function nwcRail(config: NwcRailConfig): Rail {
-  return async (order) => {
-    const invoice = await nwcInvoice(
-      config.connection,
-      await config.amountMsat(order),
-      config.description?.(order) ?? order.reference,
-    );
-    const watched = await config.gateway.watchPayment({
-      paymentHash: invoice.paymentHash,
-      verifyUrl: await nwcVerifyUrl(
-        config.verifyThrough.endpoint,
-        invoice.paymentHash,
-        config.verifyThrough.secret,
-      ),
-      expiresAt: invoice.expiresAt,
-      trigger: config.trigger,
-      replay: config.replay,
-      sealed: await config.sealed?.(order),
-      webhookUrl: config.webhookUrl,
-    });
-
-    return {
-      id: watched.id,
-      rail: config.name ?? LIGHTNING,
-      scan: invoice.bolt11,
-      qr: encodeForQr(invoice.bolt11),
-      expiresAt: invoice.expiresAt,
-    };
-  };
-}
-
-/**
  * A provable invoice from the first address on the list that will issue one, which
  * is what a client mints for itself rather than asking a gateway to. Everything the
  * gateway needs to watch it comes back with everything you need to prove it came
@@ -331,13 +232,65 @@ export function nwcRail(config: NwcRailConfig): Rail {
  * Server side: it resolves hostnames and refuses a private one, which no browser can
  * do. Throws `NoWalletAvailableError` when no address on the list would serve
  */
-export async function invoiceFrom(lnAddresses: string[], amountMsat: number): Promise<Resolved> {
+export async function invoiceFrom(to: string | string[], amount: Amount): Promise<Resolved> {
+  const addresses = typeof to === "string" ? [to] : to;
   try {
-    return await resolve(lnAddresses, amountMsat);
+    return await resolve(addresses, await millisatoshi(amount));
   } catch (refused: unknown) {
     if (refused instanceof NoWalletAvailable) {
       throw new NoWalletAvailableError({ title: refused.message }, refused.wallets);
     }
     throw refused;
+  }
+}
+
+/**
+ * What one order costs on a Lightning rail: whatever the rail says, or the
+ * order's own fiat price converted at the rate when nothing says otherwise
+ */
+export async function pricedFor(
+  order: Order,
+  amount: ((order: Order) => Amount) | undefined,
+  rate: Ticker | undefined,
+): Promise<number> {
+  if (amount !== undefined) {
+    return await millisatoshi(amount(order));
+  }
+
+  return msatFor(order.amountMinor, await (rate ?? medianOf())(order.currency));
+}
+
+/**
+ * One call per sale, whatever the rail moves. Each of these was a free function
+ * taking the gateway as a config field, and reaching them through the gateway is
+ * what deleted that field
+ */
+export class Rails {
+  constructor(private readonly gateway: ThunderBridge) {}
+
+  /** Lightning, with the gateway minting against a priority list of addresses */
+  lightning(config: LightningRailConfig): Rail {
+    return lightningRail(this.gateway, config);
+  }
+
+  /**
+   * Lightning, with the invoice resolved here so the gateway is told neither the
+   * address nor the amount
+   */
+  blindLightning(config: BlindLightningRailConfig): Rail {
+    return blindLightningRail(this.gateway, config);
+  }
+
+  /** A bank transfer, proved the way a Lightning payment is */
+  bank(config: BankRailConfig): Rail {
+    return bankRail(this.gateway, config);
+  }
+
+  /**
+   * One bank transfer without building a rail first, for a shop that asks for
+   * them one at a time rather than beside another payment method
+   */
+  transfer(params: BankTransferParams): Promise<BankTransfer> {
+    return bankTransfer(this.gateway, params);
   }
 }

@@ -8,7 +8,7 @@ import {
   type WrapRefusalCode,
   WrapRefusedError,
 } from "./errors.js";
-import type { CreatePaymentParams, Payment } from "./types.js";
+import type { MintedPayment, PaymentStatus, Priced } from "./types.js";
 
 const HTTP_TIMEOUT_MS = 15_000;
 const DEFAULT_WRAP_PROPORTION = 0.01;
@@ -46,16 +46,14 @@ interface Verification {
  * Throws `GatewayCheatError` when a check fails and `UnverifiedRecipientError`
  * when the recipient could not be reached to run one
  */
-export async function proveOrigin(payment: Payment, request: CreatePaymentParams): Promise<void> {
+export async function proveOrigin(payment: MintedPayment, asked: Priced): Promise<void> {
   const cheat = (code: GatewayCheatCode) => new GatewayCheatError(code, payment.id);
 
-  const listed = request.lnAddresses.find((address) =>
-    equalIgnoringCase(address, payment.lnAddress),
-  );
+  const listed = asked.to.find((address) => equalIgnoringCase(address, payment.lnAddress));
   if (listed === undefined) {
     throw cheat("address_not_requested");
   }
-  if (payment.amountMsat !== request.amountMsat) {
+  if (payment.amountMsat !== asked.amountMsat) {
     throw cheat("amount_mismatch");
   }
 
@@ -66,7 +64,7 @@ export async function proveOrigin(payment: Payment, request: CreatePaymentParams
   ) {
     throw cheat("hash_mismatch");
   }
-  if (invoice.amountMsat !== request.amountMsat) {
+  if (invoice.amountMsat !== asked.amountMsat) {
     throw cheat("amount_mismatch");
   }
 
@@ -94,10 +92,10 @@ export async function proveOrigin(payment: Payment, request: CreatePaymentParams
  * gateway made up would otherwise answer for itself
  */
 export async function proveSettlement(
-  payment: Payment,
-  request: CreatePaymentParams,
+  payment: MintedPayment,
+  asked: Priced,
 ): Promise<string | null> {
-  await proveOrigin(payment, request);
+  await proveOrigin(payment, asked);
 
   const verified = await reachable<Verification>(payment.verifyUrl, payment);
   if (verified.settled !== true || typeof verified.preimage !== "string") {
@@ -110,19 +108,34 @@ export async function proveSettlement(
 }
 
 /**
- * True when the gateway's own report of a settlement is at least self-consistent,
- * the preimage hashes to the payment hash the invoice itself carries, this is a
- * sanity check and not a proof, only `proveSettlement` asks the recipient
+ * Whether a report proves what it claims: it says paid, and it carries a preimage
+ * that hashes to the payment hash it itself names. Where an invoice comes with it,
+ * the invoice's own hash has to agree too.
+ *
+ * A payment, a settlement delivered to a webhook and a frame off a trigger all
+ * answer this, because all three carry those fields and no other question about
+ * one matters.
+ *
+ * It asks nobody anything, so it costs no round trip and is not a proof of
+ * arrival. Only `proveSettlement` asks the recipient
  */
-export function isProvablyPaid(payment: Payment): boolean {
-  if (payment.status !== "paid" || payment.preimage === null) {
+export function carriesProof(report: {
+  status: PaymentStatus;
+  preimage: string | null;
+  paymentHash: string;
+  bolt11?: string | null;
+}): boolean {
+  if (report.status !== "paid" || report.preimage === null) {
     return false;
   }
-  const invoiceHash = decodeInvoice(payment.bolt11).paymentHash;
-  if (invoiceHash === null || !equalIgnoringCase(invoiceHash, payment.paymentHash)) {
-    return false;
+  if (report.bolt11 !== undefined && report.bolt11 !== null) {
+    const invoiceHash = decodeInvoice(report.bolt11).paymentHash;
+    if (invoiceHash === null || !equalIgnoringCase(invoiceHash, report.paymentHash)) {
+      return false;
+    }
   }
-  return preimageMatchesHash(payment.preimage, invoiceHash);
+
+  return preimageMatchesHash(report.preimage, report.paymentHash);
 }
 
 /**
@@ -183,7 +196,7 @@ export function proveWrapped(wrapped: string, recipient: string, allowance?: Wra
   }
 }
 
-async function payRequestFor(listed: string, payment: Payment): Promise<PayRequest> {
+async function payRequestFor(listed: string, payment: MintedPayment): Promise<PayRequest> {
   const at = listed.indexOf("@");
   const name = listed.slice(0, at);
   const domain = listed.slice(at + 1).toLowerCase();
@@ -193,7 +206,7 @@ async function payRequestFor(listed: string, payment: Payment): Promise<PayReque
   return reachable<PayRequest>(`https://${domain}/.well-known/lnurlp/${name}`, payment);
 }
 
-async function reachable<T>(url: string, payment: Payment): Promise<T> {
+async function reachable<T>(url: string, payment: MintedPayment): Promise<T> {
   try {
     if (!publicHttps(url)) {
       throw new Error(`${url} is not a public https URL`);

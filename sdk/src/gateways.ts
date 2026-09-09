@@ -1,5 +1,5 @@
 import { ThunderBridge, type ThunderBridgeOptions, type WaitOptions } from "./client.js";
-import type { TriggerEvent, WatchPaymentParams } from "./types.js";
+import type { Handover, Payment } from "./types.js";
 
 export interface GatewaysOptions extends ThunderBridgeOptions {
   /**
@@ -46,11 +46,9 @@ export class Gateways {
    * carrying the first refusal, because one gateway that agreed is enough to be
    * watched
    */
-  async watchPayment(params: WatchPaymentParams): Promise<TriggerEvent> {
-    const asked = await Promise.allSettled(
-      this.each.map((gateway) => gateway.watchPayment(params)),
-    );
-    const taken: TriggerEvent[] = [];
+  async watch(handover: Handover): Promise<Payment> {
+    const asked = await Promise.allSettled(this.each.map((gateway) => gateway.watch(handover)));
+    const taken: Payment[] = [];
     const refusals: unknown[] = [];
 
     for (const [at, answer] of asked.entries()) {
@@ -74,16 +72,16 @@ export class Gateways {
    * saying so. When they all end without a payment, the first ending is the answer,
    * and when they all fail, the first failure is thrown
    */
-  async waitForWatched(id: string, options?: WaitOptions): Promise<TriggerEvent> {
+  async settled(id: string, options?: WaitOptions): Promise<Payment> {
     const stopLosers = new AbortController();
     const signal = options?.signal
       ? AbortSignal.any([stopLosers.signal, options.signal])
       : stopLosers.signal;
-    const unpaid: TriggerEvent[] = [];
+    const unpaid: Payment[] = [];
     let refused: unknown = null;
 
     try {
-      const settled = await new Promise<TriggerEvent | null>((resolve) => {
+      const settled = await new Promise<Payment | null>((resolve) => {
         let waiting = this.each.length;
         const lost = () => {
           waiting -= 1;
@@ -93,7 +91,7 @@ export class Gateways {
         };
         for (const gateway of this.each) {
           gateway
-            .waitForWatched(id, { ...options, signal })
+            .settled(id, { ...options, signal })
             .then((watched) => {
               if (watched.status === "paid") {
                 return resolve(watched);

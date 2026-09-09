@@ -75,9 +75,12 @@ function watching(
   return calls;
 }
 
+function owned(): ThunderBridge {
+  return new ThunderBridge(GATEWAY, { token: "hunter2" });
+}
+
 function asking(overrides: Partial<BankTransferParams> = {}): BankTransferParams {
   return {
-    gateway: new ThunderBridge(GATEWAY, { token: "hunter2" }),
     secret: SECRET,
     reference: REFERENCE,
     amountMinor: AMOUNT_MINOR,
@@ -91,7 +94,7 @@ function asking(overrides: Partial<BankTransferParams> = {}): BankTransferParams
 async function asked(overrides: Partial<BankTransferParams> = {}): Promise<BankTransfer> {
   watching();
 
-  return bankTransfer(asking(overrides));
+  return bankTransfer(owned(), asking(overrides));
 }
 
 async function verified(statement: Statement, url: string): Promise<Response> {
@@ -129,7 +132,7 @@ describe("bankTransfer", () => {
   it("registers the watch itself, with the hash and nothing else the gateway does not need", async () => {
     const calls = watching();
 
-    const transfer = await bankTransfer(asking());
+    const transfer = await bankTransfer(owned(), asking());
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe(`${GATEWAY}/watched-payments`);
@@ -144,7 +147,7 @@ describe("bankTransfer", () => {
   it("puts the trigger on the watch as a hash, so one socket hears both rails", async () => {
     const calls = watching();
 
-    await bankTransfer(asking({ trigger: "the-shop-holds-this", sealed: "v1.opaque" }));
+    await bankTransfer(owned(), asking({ trigger: "the-shop-holds-this", sealed: "v1.opaque" }));
 
     const body = JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
     expect(body["trigger"]).toBe(createHash("sha256").update("the-shop-holds-this").digest("hex"));
@@ -154,7 +157,7 @@ describe("bankTransfer", () => {
   it("asks the gateway to keep the trigger's settlements when the transfer says how many", async () => {
     const calls = watching();
 
-    await bankTransfer(asking({ trigger: "the-shop-holds-this", replay: 10 }));
+    await bankTransfer(owned(), asking({ trigger: "the-shop-holds-this", replay: 10 }));
 
     expect((JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>)["replay"]).toBe(10);
   });
@@ -162,7 +165,7 @@ describe("bankTransfer", () => {
   it("sends the bearer, because a gateway of your own asks for one", async () => {
     const calls = watching();
 
-    await bankTransfer(asking());
+    await bankTransfer(owned(), asking());
 
     expect((calls[0]!.init?.headers as Record<string, string>).authorization).toBe(
       "Bearer hunter2",
@@ -172,7 +175,7 @@ describe("bankTransfer", () => {
   it("refuses a gateway that serves strangers, because its operator would read the order book", async () => {
     watching(undefined, true);
 
-    await expect(bankTransfer(asking({ gateway: new ThunderBridge(GATEWAY) }))).rejects.toThrow(
+    await expect(bankTransfer(new ThunderBridge(GATEWAY), asking())).rejects.toThrow(
       "not yours",
     );
   });
@@ -181,14 +184,14 @@ describe("bankTransfer", () => {
     watching(undefined, true);
 
     await expect(
-      bankTransfer(asking({ gateway: new ThunderBridge(GATEWAY, { token: "wishful" }) })),
+      bankTransfer(new ThunderBridge(GATEWAY, { token: "wishful" }), asking()),
     ).rejects.toThrow("not yours");
   });
 
   it("accepts a gateway that refuses strangers, whatever the caller configured", async () => {
     watching();
 
-    const transfer = await bankTransfer(asking({ gateway: new ThunderBridge(GATEWAY) }));
+    const transfer = await bankTransfer(new ThunderBridge(GATEWAY), asking());
 
     expect(transfer.id).toBe(WATCH_ID);
   });
@@ -197,7 +200,8 @@ describe("bankTransfer", () => {
     const calls = watching(undefined, true);
 
     const transfer = await bankTransfer(
-      asking({ gateway: new ThunderBridge(GATEWAY), allowPublicGateway: true }),
+      new ThunderBridge(GATEWAY),
+      asking({ allowPublicGateway: true }),
     );
 
     expect(transfer.id).toBe(WATCH_ID);
@@ -207,12 +211,12 @@ describe("bankTransfer", () => {
   it("refuses before it registers anything, so a bad ask reaches no gateway", async () => {
     const calls = watching();
 
-    await expect(bankTransfer(asking({ iban: "12345" }))).rejects.toThrow("is not an IBAN");
-    await expect(bankTransfer(asking({ amountMinor: 0 }))).rejects.toThrow("above zero");
-    await expect(bankTransfer(asking({ amountMinor: 1.5 }))).rejects.toThrow("whole number");
-    await expect(bankTransfer(asking({ reference: "" }))).rejects.toThrow("no reference");
-    await expect(bankTransfer(asking({ reference: "A*B" }))).rejects.toThrow("asterisk");
-    await expect(bankTransfer(asking({ variableSymbol: "nope" }))).rejects.toThrow("ten digits");
+    await expect(bankTransfer(owned(), asking({ iban: "12345" }))).rejects.toThrow("is not an IBAN");
+    await expect(bankTransfer(owned(), asking({ amountMinor: 0 }))).rejects.toThrow("above zero");
+    await expect(bankTransfer(owned(), asking({ amountMinor: 1.5 }))).rejects.toThrow("whole number");
+    await expect(bankTransfer(owned(), asking({ reference: "" }))).rejects.toThrow("no reference");
+    await expect(bankTransfer(owned(), asking({ reference: "A*B" }))).rejects.toThrow("asterisk");
+    await expect(bankTransfer(owned(), asking({ variableSymbol: "nope" }))).rejects.toThrow("ten digits");
     expect(calls).toHaveLength(0);
   });
 });
@@ -426,7 +430,7 @@ describe("one statement read answers every order at once", () => {
     const orders = ["A", "B", "C", "D", "E"];
     const transfers = [];
     for (const order of orders) {
-      transfers.push(await bankTransfer(asking({ reference: `ORDER-${order}` })));
+      transfers.push(await bankTransfer(owned(), asking({ reference: `ORDER-${order}` })));
     }
 
     const statement = fioStatement({ token: "one-token" });

@@ -1,7 +1,6 @@
-import { preimageMatchesHash } from "../../core/bolt11.js";
 import { verifyHex } from "../../core/ed25519.js";
-import type { Payment, Settlement, TriggerEvent } from "./types.js";
-import { paymentFromWire, settlementFromWire, triggerEventFromWire } from "./wire.js";
+import type { Payment, Settlement } from "./types.js";
+import { paymentFromWire, settlementFromWire } from "./wire.js";
 
 const SIGNATURE_HEADER = "x-signature";
 const TIMESTAMP_HEADER = "x-timestamp";
@@ -21,207 +20,117 @@ export type WebhookOptions = { toleranceSecs?: number };
  */
 export type WebhookCredential = { publicKey: string };
 
-/** Verify the `X-Signature` header against the raw body and the `X-Timestamp` that came with it */
-export async function verifyWebhookSignature(
-  body: string | Uint8Array,
-  signature: string,
-  credential: WebhookCredential,
-  timestamp: string,
-  options: WebhookOptions = {},
-): Promise<boolean> {
-  if (!recent(timestamp, options.toleranceSecs ?? DEFAULT_TOLERANCE_SECS)) {
-    return false;
-  }
-  if (!signature.startsWith(GATEWAY_KEY_PREFIX)) {
-    return false;
-  }
-
-  return await verifyHex(
-    credential.publicKey.toLowerCase(),
-    signature.slice(GATEWAY_KEY_PREFIX.length).toLowerCase(),
-    signed(timestamp, body),
-  );
-}
-
-/** Verify and parse in one step, returns null on a bad signature or a body that is not a payment */
-export async function parseWebhook(
-  body: string | Uint8Array,
-  signature: string,
-  credential: WebhookCredential,
-  timestamp: string,
-  options: WebhookOptions = {},
-): Promise<Payment | null> {
-  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) {
-    return null;
-  }
-  const text = typeof body === "string" ? body : new TextDecoder().decode(body);
-  try {
-    return paymentFromWire(JSON.parse(text));
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Verify and parse from a Fetch API `Request` as used by Hono, Next, SvelteKit,
- * Cloudflare Workers and Deno, WebCrypto only so it runs anywhere fetch does
+ * Verify a delivery and read the payment out of it, from a Fetch API `Request` as
+ * used by Hono, Next, SvelteKit, Cloudflare Workers and Deno. WebCrypto only, so
+ * it runs anywhere fetch does.
+ *
+ * Null on a bad signature or a body that is not a payment, so a handler that gets
+ * null did not just miss a payment, it was handed something it had no reason to
+ * believe. The body is left unread on the way out, so the same handler can go on
+ * to read it as something else
  */
-export async function parseWebhookRequest(
+export async function readPayment(
   request: Request,
   credential: WebhookCredential,
   options: WebhookOptions = {},
 ): Promise<Payment | null> {
-  const signature = request.headers.get(SIGNATURE_HEADER);
-  const timestamp = request.headers.get(TIMESTAMP_HEADER);
-  if (signature === null || timestamp === null) {
-    return null;
-  }
-  return parseWebhook(await request.text(), signature, credential, timestamp, options);
+  const body = await believable(request, credential, options);
+
+  return body === null ? null : decoded(body, paymentFromWire);
 }
 
 /**
- * The same, for a payment the gateway only watched. A bank transfer and a blind
- * Lightning leg carry no address, amount or invoice, so they arrive in the shape
- * `followTrigger` and `getWatched` hand back rather than the minted one
+ * Verify a delivery and read the settlement out of it, which is the shape a
+ * webhook registered on a payment receives. Null on anything not worth believing,
+ * the way `readPayment` is
  */
-export async function parseWatchedWebhook(
-  body: string | Uint8Array,
-  signature: string,
-  credential: WebhookCredential,
-  timestamp: string,
-  options: WebhookOptions = {},
-): Promise<TriggerEvent | null> {
-  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) {
-    return null;
-  }
-  const text = typeof body === "string" ? body : new TextDecoder().decode(body);
-  try {
-    return triggerEventFromWire(JSON.parse(text));
-  } catch {
-    return null;
-  }
-}
-
-/** `parseWatchedWebhook` from a Fetch API `Request`, the way `parseWebhookRequest` is */
-export async function parseWatchedWebhookRequest(
-  request: Request,
-  credential: WebhookCredential,
-  options: WebhookOptions = {},
-): Promise<TriggerEvent | null> {
-  const signature = request.headers.get(SIGNATURE_HEADER);
-  const timestamp = request.headers.get(TIMESTAMP_HEADER);
-  if (signature === null || timestamp === null) {
-    return null;
-  }
-  return parseWatchedWebhook(await request.text(), signature, credential, timestamp, options);
-}
-
-/**
- * Verify a delivery and read the settlement out of it. Null on a bad signature or
- * on a body that is not a settlement, so a handler that gets null did not just
- * miss a payment, it was handed something it had no reason to believe
- */
-export async function parseSettlement(
-  body: string | Uint8Array,
-  signature: string,
-  credential: WebhookCredential,
-  timestamp: string,
-  options: WebhookOptions = {},
-): Promise<Settlement | null> {
-  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) {
-    return null;
-  }
-
-  try {
-    return settlementFromWire(JSON.parse(textOf(body)));
-  } catch {
-    return null;
-  }
-}
-
-/** {@link parseSettlement} from a Fetch API `Request` */
-export async function parseSettlementRequest(
+export async function readSettlement(
   request: Request,
   credential: WebhookCredential,
   options: WebhookOptions = {},
 ): Promise<Settlement | null> {
-  const signature = request.headers.get(SIGNATURE_HEADER);
-  const timestamp = request.headers.get(TIMESTAMP_HEADER);
-  if (signature === null || timestamp === null) {
-    return null;
-  }
+  const body = await believable(request, credential, options);
 
-  return await parseSettlement(await request.text(), signature, credential, timestamp, options);
-}
-
-/**
- * Whether a delivery proves what it claims, which is the only question that
- * matters about one: it says paid and it carries a preimage that hashes to the
- * payment hash the delivery itself names
- */
-export function isProvablySettled(settled: Settlement): boolean {
-  if (settled.status !== "paid" || settled.preimage === null) {
-    return false;
-  }
-
-  return preimageMatchesHash(settled.preimage, settled.paymentHash);
+  return body === null ? null : decoded(body, settlementFromWire);
 }
 
 /**
  * Answer the one challenge the gateway sends before it will watch a payment your
- * webhook is registered on. Returns the body to send back with a 200, or null when
- * this delivery is not a challenge, so a handler tries this first and then parses
+ * webhook is registered on. Returns the response to send back, or null when this
+ * delivery is not a challenge, so a handler tries this first and then reads.
+ *
+ * The request's body is left unread either way
  */
 export async function answerWebhookChallenge(
-  body: string | Uint8Array,
-  signature: string,
-  credential: WebhookCredential,
-  timestamp: string,
-  options: WebhookOptions = {},
-): Promise<string | null> {
-  if (!(await verifyWebhookSignature(body, signature, credential, timestamp, options))) {
-    return null;
-  }
-
-  const nonce = challenged(typeof body === "string" ? body : new TextDecoder().decode(body));
-
-  return nonce === null ? null : JSON.stringify({ nonce });
-}
-
-/**
- * `answerWebhookChallenge` from a Fetch API `Request`, leaving the body unread so
- * the same handler can go on to `parseWebhookRequest` when this was no challenge
- */
-export async function answerWebhookChallengeRequest(
   request: Request,
   credential: WebhookCredential,
   options: WebhookOptions = {},
 ): Promise<Response | null> {
+  const body = await believable(request, credential, options);
+  const nonce = body === null ? null : nonceOf(body, CHALLENGE);
+
+  return nonce === null ? null : answered(nonce);
+}
+
+/**
+ * Answer the challenge the gateway sends a verify URL before it will poll it,
+ * which is how a caller shows the endpoint agreed to the traffic rather than
+ * merely being named. Returns null for anything that is not a challenge, so a
+ * verify endpoint hands the request on to its own reading of a payment.
+ *
+ * The nonce is echoed to whoever asked, which grants them nothing, so there is
+ * no signature to check here and no secret to hold
+ */
+export async function answerVerifyChallenge(request: Request): Promise<Response | null> {
+  if (request.method !== "POST") {
+    return null;
+  }
+
+  const nonce = nonceOf(await request.clone().text(), VERIFY_CHALLENGE);
+
+  return nonce === null ? null : answered(nonce);
+}
+
+async function believable(
+  request: Request,
+  credential: WebhookCredential,
+  options: WebhookOptions,
+): Promise<string | null> {
   const signature = request.headers.get(SIGNATURE_HEADER);
   const timestamp = request.headers.get(TIMESTAMP_HEADER);
   if (signature === null || timestamp === null) {
     return null;
   }
+  if (!recent(timestamp, options.toleranceSecs ?? DEFAULT_TOLERANCE_SECS)) {
+    return null;
+  }
+  if (!signature.startsWith(GATEWAY_KEY_PREFIX)) {
+    return null;
+  }
 
-  const answer = await answerWebhookChallenge(
-    await request.clone().text(),
-    signature,
-    credential,
-    timestamp,
-    options,
+  const body = await request.clone().text();
+  const signed = await verifyHex(
+    credential.publicKey.toLowerCase(),
+    signature.slice(GATEWAY_KEY_PREFIX.length).toLowerCase(),
+    stamped(timestamp, body),
   );
 
-  return answer === null
-    ? null
-    : new Response(answer, { headers: { "content-type": "application/json" } });
+  return signed ? body : null;
 }
 
-function textOf(body: string | Uint8Array): string {
-  return typeof body === "string" ? body : new TextDecoder().decode(body);
+function decoded<T>(body: string, from: (wire: unknown) => T | null): T | null {
+  try {
+    return from(JSON.parse(body));
+  } catch {
+    return null;
+  }
 }
 
-function challenged(text: string): string | null {
-  return nonceOf(text, CHALLENGE);
+function answered(nonce: string): Response {
+  return new Response(JSON.stringify({ nonce }), {
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function nonceOf(text: string, type: string): string | null {
@@ -237,49 +146,15 @@ function nonceOf(text: string, type: string): string | null {
   }
 }
 
-/**
- * Answer the challenge the gateway sends a verify URL before it will poll it,
- * which is how a caller shows the endpoint agreed to the traffic rather than
- * merely being named. Returns null for anything that is not a challenge, so a
- * verify endpoint hands the request on to its own reading of a payment.
- *
- * The nonce is echoed to whoever asked, which grants them nothing, so there is
- * no signature to check here and no secret to hold
- */
-export function answerVerifyChallenge(body: string): string | null {
-  const nonce = nonceOf(body, VERIFY_CHALLENGE);
-
-  return nonce === null ? null : JSON.stringify({ nonce });
-}
-
-/** {@link answerVerifyChallenge} against a `Request`, leaving its body unread */
-export async function answerVerifyChallengeRequest(request: Request): Promise<Response | null> {
-  if (request.method !== "POST") {
-    return null;
-  }
-
-  const answer = answerVerifyChallenge(await request.clone().text());
-
-  return answer === null
-    ? null
-    : new Response(answer, { headers: { "content-type": "application/json" } });
-}
-
 function recent(timestamp: string, toleranceSecs: number): boolean {
   const sent = Number(timestamp);
   if (!Number.isFinite(sent)) {
     return false;
   }
+
   return Math.abs(Math.floor(Date.now() / 1000) - sent) <= toleranceSecs;
 }
 
-function signed(timestamp: string, body: string | Uint8Array): Uint8Array<ArrayBuffer> {
-  const encoder = new TextEncoder();
-  const stamp = encoder.encode(`${timestamp}.`);
-  const rest = typeof body === "string" ? encoder.encode(body) : new Uint8Array(body);
-  const payload = new Uint8Array(stamp.length + rest.length);
-  payload.set(stamp);
-  payload.set(rest, stamp.length);
-
-  return payload;
+function stamped(timestamp: string, body: string): Uint8Array<ArrayBuffer> {
+  return new TextEncoder().encode(`${timestamp}.${body}`);
 }

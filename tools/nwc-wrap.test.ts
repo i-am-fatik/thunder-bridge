@@ -12,7 +12,7 @@ import {
 	nwcSettlement,
 	nwcVerifyEndpoint,
 	nwcVerifyUrl,
-} from "../sdk/dist/server.js";
+} from "../sdk/dist/nwc.js";
 import {
 	type RegtestWallet,
 	startRegtestWallet,
