@@ -13,7 +13,7 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
-## 2.0.0
+## 1.5.0
 
 One gateway to start from. Seventy-two callable exports became twenty-one on the main
 import, because everything that took the gateway as a config field is now a method on
@@ -71,7 +71,7 @@ it, and `requestPayment` does in one call what every caller was doing in four.
 
 ### Changed
 
-| 1.4.2 | 2.0.0 |
+| 1.4.2 | 1.5.0 |
 |---|---|
 | `createPayment(params, options)` | `mint(charge, options)` |
 | `createQuote(params)` | `quote(charge)` |
