@@ -4,17 +4,18 @@ import type { Charge, MintedPayment, Payment } from "./types.js";
 import { proveSettlement } from "./verify.js";
 
 /**
- * One thing to sell: who is paid, how much, and how the QR should look. Every
- * field beyond `to` and `amount` has a default, so the shortest sale names two
+ * What to ask for: who is paid, how much, and how the QR should look. Every
+ * field beyond `paidTo` and `amount` has a default, so the shortest request
+ * names two
  */
-export interface Sellable extends Charge, SellOptions {}
+export interface PaymentRequestInit extends Charge, PaymentRequestOptions {}
 
-/** What `sell` takes beyond the charge itself */
-export interface SellOptions extends WaitOptions {
+/** What `requestPayment` takes beyond the charge itself */
+export interface PaymentRequestOptions extends WaitOptions {
   /** Makes the mint safe to retry, so a reloaded checkout replays one invoice */
   idempotencyKey?: string;
 
-  /** Groups this sale with every other one carrying the same secret, for `follow` */
+  /** Groups this request with every other one carrying the same secret, for `follow` */
   trigger?: string;
 
   /** How many of that trigger's settlements the gateway keeps replayable past the hour */
@@ -25,11 +26,11 @@ export interface SellOptions extends WaitOptions {
 }
 
 /**
- * One thing sold: the invoice to show, the QR to draw it with, and one way to
- * find out it was paid. Everything on it is already proved against the
+ * One payment asked for: the invoice to show, the QR to draw it with, and one
+ * way to find out it was paid. Everything on it is already proved against the
  * recipient's own server, so nothing here is the gateway's word
  */
-export interface Sale {
+export interface PaymentRequest {
   /** What the gateway calls this payment, which is what `payment` and `settled` take */
   readonly id: string;
 
@@ -53,7 +54,7 @@ export interface Sale {
    * a drop, so this is one await rather than a poll.
    *
    * `gateway.settled(id)` is the wider question and ends on an expiry too. This
-   * one is about a sale, and a sale that expired was not a sale
+   * one is about the payment that was asked for, and one that expired was never paid
    */
   paid(options?: WaitOptions): Promise<MintedPayment>;
 
@@ -71,11 +72,11 @@ export interface Sale {
   prove(): Promise<string | null>;
 }
 
-export function saleOf(
+export function paymentRequestOf(
   gateway: ThunderBridge,
   payment: MintedPayment,
-  options?: SellOptions,
-): Sale {
+  options?: PaymentRequestOptions,
+): PaymentRequest {
   return {
     id: payment.id,
     bolt11: payment.bolt11,
@@ -116,12 +117,12 @@ function paidOnly(ended: Payment): MintedPayment {
     throw new Error(`payment ${ended.id} ended ${ended.status} rather than paid`);
   }
   if (ended.kind !== "minted") {
-    throw new Error(`payment ${ended.id} came back without the invoice it was sold with`);
+    throw new Error(`payment ${ended.id} came back without the invoice it was minted with`);
   }
 
   return ended;
 }
 
-function waitingOf(options?: SellOptions): WaitOptions {
+function waitingOf(options?: PaymentRequestOptions): WaitOptions {
   return { signal: options?.signal, tickets: options?.tickets };
 }

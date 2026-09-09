@@ -17,13 +17,14 @@ releases a version number once it has been published.
 
 One gateway to start from. Seventy-two callable exports became twenty-one on the main
 import, because everything that took the gateway as a config field is now a method on
-it, and `sell` does in one call what every caller was doing in four.
+it, and `requestPayment` does in one call what every caller was doing in four.
 
 ### Added
 
-- `gateway.sell(order)`: mints the invoice, proves it against the recipient's own
-  domain, draws the QR and hands back a `Sale` with `qr`, `bolt11`, `settled()`,
-  `onSettled()` and `prove()`. One call and two names for the whole checkout.
+- `gateway.requestPayment(asked)`: mints the invoice, proves it against the
+  recipient's own domain, draws the QR and hands back a `PaymentRequest` with `qr`,
+  `bolt11`, `paid()`, `onPaid()` and `prove()`. One call and two names for the whole
+  checkout.
 - `sats`, `msat` and `fiat`: an amount is `sats(21)` or `fiat("4.99", "USD")` rather
   than a bare millisatoshi integer. The type is branded, so `21` does not compile
   where a price is wanted and cannot quietly mean twenty-one thousandths of a
@@ -37,7 +38,8 @@ it, and `sell` does in one call what every caller was doing in four.
   holds within one import and that static holds across all of them.
 - `Range` on the trigger config, and `wrapFeeCeiling` returns `Msat` rather than a
   bare number, so the unit is in the type where every other amount carries it.
-- `Sellable` is exported, so the parameter type of `sell` can be named by a caller
+- `PaymentRequestInit` is exported, so the parameter type of `requestPayment` can be
+  named by a caller
   wrapping it. It appeared only inside the signature before.
 - `Msat`, `Provable`, `Proven` and `AmountFault` are exported, so a consumer that
   wraps a price constructor or a proof check can name what it returns.
@@ -94,11 +96,11 @@ it, and `sell` does in one call what every caller was doing in four.
 | `isProblemType(problem, TYPE)` | `ProblemError.is(problem, ProblemError.TYPE)` |
 | `TriggerEvent` | `Payment`, now a union discriminated on `kind` |
 | `isPrivate` | `hasToken`, because it reports what you configured and not what the gateway does. `refusesStrangers()` is the one that asks the gateway, and the one to guard with |
-| `to` on a charge, a trigger and a rail | `paidTo`, because "sell to X" makes X the buyer while the field names who receives the money |
-| `SellOrder` | `Sellable`, leaving `Order` to mean the shop's own order alone |
+| `to` on a charge, a trigger and a rail | `paidTo`, because a bare `to` does not say which way the money goes, and this field names who receives it |
+| `SellOrder` | `PaymentRequestInit`, leaving `Order` to mean the shop's own order alone |
 | `lnurlToSvg`, `lnurlToDataUrl` | `lnurlEndpointToSvg`, `lnurlEndpointToDataUrl`, because they take the URL you mounted and do the bech32 themselves. Under the old names `lnurlToSvg(toLnurl(url))` read as the obvious composition and threw |
 | `PaymentKind` | gone, the union's own literals say it |
-| `sale.settled()`, `sale.onSettled()` | `sale.paid()`, `sale.onPaid()`, returning `MintedPayment`, since a sale that expired was not a sale |
+| `sale.settled()`, `sale.onSettled()` | `paid()` and `onPaid()` on the `PaymentRequest`, returning `MintedPayment`, since a request that expired was never paid |
 | `serve.verifyUrl`, `serve.answerVerifyChallenge` | `relayedVerifyUrl`, `answerVerifyChallenge` at the root, because neither is a handler you mount |
 | `CreatePaymentParams`, `CreateQuoteParams` | `Charge`, and `Priced` where a proof compares |
 | `WatchPaymentParams` | `Handover` |
@@ -109,7 +111,8 @@ it, and `sell` does in one call what every caller was doing in four.
   was handed it, and `lnAddress`, `amountMsat` and `bolt11` are null where it was told
   nothing. `mint` returns `MintedPayment`, where none of the three is null.
 - `settled(id)` resolves on an expiry as well as on a payment, because both end the
-  wait. `sale.settled()` rejects on one, because a sale is asking a narrower question.
+  wait. `paid()` on a `PaymentRequest` rejects on one, because it asks the narrower
+  question.
 - `proveOrigin` and `proveSettlement` take `Priced`, the charge with its price
   settled, so a fiat price asked twice cannot make the proof compare against a number
   nobody used.

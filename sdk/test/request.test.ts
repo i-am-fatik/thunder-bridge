@@ -61,7 +61,7 @@ function minting(): Routes {
   return { [`${GATEWAY}/incoming-payments`]: () => jsonResponse(wire(), 201) };
 }
 
-function selling(): ThunderBridge {
+function requesting(): ThunderBridge {
   return new ThunderBridge(GATEWAY, { verify: false });
 }
 
@@ -75,25 +75,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("sell", () => {
+describe("requestPayment", () => {
   it("hands back the invoice, its QR and everything a checkout page shows", async () => {
     stubFetch(minting());
 
-    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
+    const asked = await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
 
-    expect(sale.id).toBe("pay_0001");
-    expect(sale.bolt11).toBe(INVOICE);
-    expect(sale.paymentHash).toBe(PAYMENT_HASH);
-    expect(sale.lnAddress).toBe(LN_ADDRESS);
-    expect(sale.amountMsat).toBe(AMOUNT_MSAT);
-    expect(sale.expiresAt).toBe(1_900_000_600);
-    expect(sale.qr.startsWith("<svg")).toBe(true);
+    expect(asked.id).toBe("pay_0001");
+    expect(asked.bolt11).toBe(INVOICE);
+    expect(asked.paymentHash).toBe(PAYMENT_HASH);
+    expect(asked.lnAddress).toBe(LN_ADDRESS);
+    expect(asked.amountMsat).toBe(AMOUNT_MSAT);
+    expect(asked.expiresAt).toBe(1_900_000_600);
+    expect(asked.qr.startsWith("<svg")).toBe(true);
   });
 
   it("takes one address as a string, so the common case is not a list of one", async () => {
     const calls = stubFetch(minting());
 
-    await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
+    await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
 
     const body = JSON.parse(String(calls[0]?.init?.body)) as Record<string, unknown>;
     expect(body["ln_addresses"]).toEqual([LN_ADDRESS]);
@@ -102,21 +102,21 @@ describe("sell", () => {
   it("draws the QR at the size and colour the page asked for", async () => {
     stubFetch(minting());
 
-    const sale = await selling().sell({
+    const asked = await requesting().requestPayment({
       paidTo: LN_ADDRESS,
       amount: sats(21),
       qr: { size: 128, color: "#a8530c" },
     });
 
-    expect(sale.qr).toContain('width="128"');
-    expect(sale.qr).toContain("#a8530c");
+    expect(asked.qr).toContain('width="128"');
+    expect(asked.qr).toContain("#a8530c");
   });
 
   it("resolves the wait once the money is proven to have arrived", async () => {
     stubFetch(minting());
-    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
+    const asked = await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
 
-    const waiting = sale.paid();
+    const waiting = asked.paid();
     theSocket().onmessage?.({
       data: JSON.stringify(wire({ status: "paid", preimage: PREIMAGE })),
     });
@@ -126,9 +126,9 @@ describe("sell", () => {
 
   it("rejects the wait when the invoice expires unpaid, rather than resolving a non-payment", async () => {
     stubFetch(minting());
-    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
+    const asked = await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
 
-    const waiting = sale.paid();
+    const waiting = asked.paid();
     theSocket().onmessage?.({ data: JSON.stringify(wire({ status: "expired" })) });
 
     await expect(waiting).rejects.toThrow("ended expired");
@@ -136,10 +136,10 @@ describe("sell", () => {
 
   it("calls back instead of awaiting, for a page with something else to do", async () => {
     stubFetch(minting());
-    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
+    const asked = await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
     const paid = vi.fn();
 
-    sale.onPaid(paid);
+    asked.onPaid(paid);
     theSocket().onmessage?.({
       data: JSON.stringify(wire({ status: "paid", preimage: PREIMAGE })),
     });
@@ -150,11 +150,11 @@ describe("sell", () => {
 
   it("stops waiting when the returned function is called, and reports nothing after", async () => {
     stubFetch(minting());
-    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
+    const asked = await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
     const paid = vi.fn();
     const failed = vi.fn();
 
-    const stop = sale.onPaid(paid, failed);
+    const stop = asked.onPaid(paid, failed);
     stop();
     await vi.waitFor(() => expect(theSocket().closeCalls).toBe(1));
 
@@ -163,7 +163,7 @@ describe("sell", () => {
   });
 });
 
-describe("sale.prove", () => {
+describe("requestPayment().prove", () => {
   it("asks the recipient's own server rather than the gateway, and hands back its preimage", async () => {
     stubFetch({
       ...minting(),
@@ -177,8 +177,8 @@ describe("sale.prove", () => {
         }),
       [VERIFY_URL]: () => jsonResponse({ pr: INVOICE, settled: true, preimage: PREIMAGE }),
     });
-    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
+    const asked = await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
 
-    await expect(sale.prove()).resolves.toBe(PREIMAGE);
+    await expect(asked.prove()).resolves.toBe(PREIMAGE);
   });
 });

@@ -6,7 +6,7 @@ import { DOORS, surfaceOf } from "./api-reference.ts";
 const BACKTICKED = /`([A-Za-z_$][\w$]*)`/g;
 const PROSE = ["sdk/README.md", "docs/api.md"];
 const CARED_ABOUT =
-	/Error$|Fault$|Code$|^Msat$|^Amount$|^prove|^carries|^sats$|^msat$|^fiat$|^sell$|^settled$|^paid$|Payment$|^Sale$/;
+	/Error$|Fault$|Code$|^Msat$|^Amount$|^prove|^carries|^sats$|^msat$|^fiat$|^requestPayment$|^settled$|^paid$|Payment$|^PaymentRequest/;
 
 const doors = surfaceOf(".");
 const exported = new Set<string>();
@@ -71,7 +71,14 @@ test("the error classes a caller catches are exported, and so is every fault uni
 });
 
 test("a type an exported function returns can be named by a consumer", () => {
-	for (const name of ["Msat", "Amount", "Payment", "MintedPayment", "WatchedPayment", "Sale"]) {
+	for (const name of [
+		"Msat",
+		"Amount",
+		"Payment",
+		"MintedPayment",
+		"WatchedPayment",
+		"PaymentRequest",
+	]) {
 		expect(exported, `${name} appears in a published signature`).toContain(name);
 	}
 });

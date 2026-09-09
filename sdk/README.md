@@ -47,7 +47,7 @@ as refused here until the next survey says otherwise.
 npm install thunder-bridge
 ```
 
-Node 22 or newer, for anything that opens a socket: `sell`, `settled`,
+Node 22 or newer, for anything that opens a socket: `requestPayment`, `settled`,
 `firstSettled` and `follow` on the gateway side, and every NWC call on the wallet
 side, since a nostr relay is a socket too. Node only exposes a global `WebSocket`
 from 22 onwards and there is no fallback to install. The rest, which is every call
@@ -82,7 +82,7 @@ import { sats, ThunderBridge } from "thunder-bridge";
 
 const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe");
 
-const sale = await gateway.sell({
+const asked = await gateway.requestPayment({
   paidTo: ["iamfatik@blink.sv", "iamfatik@coinos.io"],
   amount: sats(21),
   signal: AbortSignal.timeout(600_000),
@@ -90,15 +90,15 @@ const sale = await gateway.sell({
 
 const target = document.querySelector("#qr");
 if (target !== null) {
-  target.innerHTML = sale.qr;
+  target.innerHTML = asked.qr;
 }
 
-await sale.paid();
+await asked.paid();
 
-const preimage = await sale.prove();
+const preimage = await asked.prove();
 ```
 
-Two names and one call. `sell` mints the invoice on the first address that can
+Two names and one call. `requestPayment` mints the invoice on the first address that can
 prove one, checks that invoice against the recipient's own domain before returning,
 and draws the QR.
 
@@ -269,7 +269,7 @@ Four sharp edges, worth reading before you build:
 `carriesProof` is the one to be careful with: it asks only whether a report holds
 together, so a gateway that generates a preimage, hashes it and builds an invoice
 around that hash passes it. If a payment matters, ask the recipient with
-`prove` on the sale or with `proveSettlement`. The full argument, including the five
+`prove` on the payment request or with `proveSettlement`. The full argument, including the five
 origin checks and their failure codes, is in
 [docs/proving-a-payment.md](../docs/proving-a-payment.md).
 
@@ -290,8 +290,8 @@ const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe", {
   secret: "a-long-lived-server-side-secret",
 });
 
-const sale = await gateway.sell({ paidTo: "iamfatik@blink.sv", amount: sats(21) });
-const read = await gateway.payment(sale.id);
+const asked = await gateway.requestPayment({ paidTo: "iamfatik@blink.sv", amount: sats(21) });
+const read = await gateway.payment(asked.id);
 const quoted = await gateway.quote({ paidTo: "iamfatik@blink.sv", amount: sats(21) });
 
 const lnurl = gateway.serve.lnurlPay({
@@ -302,7 +302,7 @@ const lnurl = gateway.serve.lnurlPay({
 const rail = gateway.rails.lightning({ paidTo: "iamfatik@blink.sv", amount: () => sats(21) });
 ```
 
-- **the payments themselves** are `sell`, `mint`, `quote`, `watch`, `payment`,
+- **the payments themselves** are `requestPayment`, `mint`, `quote`, `watch`, `payment`,
   `payments`, `settled`, `firstSettled`, `follow`, `ticket`, `nameFor` and
   `webhookKey`, all on the instance
 - **what you mount** is on `gateway.serve`: an LNURL-pay endpoint, the two ticket

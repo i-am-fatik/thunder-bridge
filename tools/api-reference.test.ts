@@ -20,7 +20,11 @@ test("every export carries the TSDoc the reference is made of", () => {
 });
 
 test("the client's own methods are listed, because that is where the surface lives now", () => {
-	for (const member of ["sell(order: Sellable)", "mint(charge: Charge", "settled(id: string"]) {
+	for (const member of [
+		"requestPayment(asked: PaymentRequestInit)",
+		"mint(charge: Charge",
+		"settled(id: string",
+	]) {
 		expect(reference).toContain(member);
 	}
 });

@@ -13,7 +13,7 @@ import {
   REQUEST_IN_FLIGHT,
 } from "./errors.js";
 import { Rails } from "./rail.js";
-import { type Sale, type Sellable, saleOf } from "./sale.js";
+import { type PaymentRequest, type PaymentRequestInit, paymentRequestOf } from "./request.js";
 import { Serve } from "./serving.js";
 import type {
   Charge,
@@ -225,12 +225,12 @@ export class ThunderBridge {
   }
 
   /**
-   * Sell one thing. It mints the invoice, proves it came from the address you
-   * asked for, draws the QR and hands back one object with a way to wait for the
-   * money. This is `mint` plus the two things every caller does next
+   * Ask to be paid for one thing. It mints the invoice, proves it came from the
+   * address you asked for, draws the QR and hands back one object with a way to
+   * wait for the money. This is `mint` plus the two things every caller does next
    */
-  async sell(order: Sellable): Promise<Sale> {
-    return saleOf(this, await this.mint(order, order), order);
+  async requestPayment(asked: PaymentRequestInit): Promise<PaymentRequest> {
+    return paymentRequestOf(this, await this.mint(asked, asked), asked);
   }
 
   /**

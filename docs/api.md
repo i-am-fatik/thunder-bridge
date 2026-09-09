@@ -42,6 +42,9 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`NoWalletAvailableError`](#thunder-bridge-nowalletavailableerror) | class | Thrown when no wallet on your list could issue a provable invoice, `wallets` says why each refused |
 | [`Order`](#thunder-bridge-order) | interface | What a shop knows about a sale before any rail exists |
 | [`Payment`](#thunder-bridge-payment) | type | A payment as the gateway reports it, of either sort |
+| [`PaymentRequest`](#thunder-bridge-paymentrequest) | interface | One payment asked for: the invoice to show, the QR to draw it with, and one way to find out it was paid |
+| [`PaymentRequestInit`](#thunder-bridge-paymentrequestinit) | interface | What to ask for: who is paid, how much, and how the QR should look |
+| [`PaymentRequestOptions`](#thunder-bridge-paymentrequestoptions) | interface | What `requestPayment` takes beyond the charge itself |
 | [`PaymentStatus`](#thunder-bridge-paymentstatus) | type | Where a payment stands, `paid` is the only status that carries a preimage |
 | [`preimageMatchesHash`](#thunder-bridge-preimagematcheshash) | function | True when `preimage` is the secret behind `paymentHash` |
 | [`Priced`](#thunder-bridge-priced) | interface | A charge with its price settled, which is what a proof compares the gateway's answer against |
@@ -59,11 +62,8 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`Relayed`](#thunder-bridge-relayed) | interface | The wallet's own LUD-21 URL and the hash its preimage has to match |
 | [`relayedVerifyUrl`](#thunder-bridge-relayedverifyurl) | function | The URL to hand the gateway instead of the wallet's own, with the wallet's sealed inside it |
 | [`Resolved`](#thunder-bridge-resolved) | type | An invoice a lightning address issued, with everything needed to watch and to prove it |
-| [`Sale`](#thunder-bridge-sale) | interface | One thing sold: the invoice to show, the QR to draw it with, and one way to find out it was paid |
 | [`sats`](#thunder-bridge-sats) | function | A whole number of satoshi, so `sats(21)` is 21000 millisatoshi |
 | [`seal`](#thunder-bridge-seal) | function | Encrypt what the watcher needs and the gateway must not have |
-| [`Sellable`](#thunder-bridge-sellable) | interface | One thing to sell: who is paid, how much, and how the QR should look |
-| [`SellOptions`](#thunder-bridge-selloptions) | interface | What `sell` takes beyond the charge itself |
 | [`Serve`](#thunder-bridge-serve) | class | Everything one gateway lets you mount, in one place so a caller never has to know which handler needs the gateway and which does not |
 | [`Settlement`](#thunder-bridge-settlement) | interface | What a delivery carries |
 | [`SocketTicket`](#thunder-bridge-socketticket) | interface | A one minute pass onto one trigger's stream |
@@ -695,6 +695,86 @@ A payment as the gateway reports it, of either sort. Check `kind` and the
 three fields a watched payment does not carry stop being null, so nothing here
 needs an assertion to read
 
+### PaymentRequest
+
+```ts
+interface PaymentRequest {
+  /** What the gateway calls this payment, which is what `payment` and `settled` take */
+  readonly id: string;
+
+  readonly bolt11: string;
+  readonly paymentHash: string;
+  readonly lnAddress: string;
+  readonly amountMsat: number;
+
+  /** When the invoice stops being payable, in unix seconds */
+  readonly expiresAt: number;
+
+  /** The invoice as an SVG QR, ready to put in an element's `innerHTML` */
+  readonly qr: string;
+
+  /** The payment as the gateway first reported it, for anything the fields above leave out */
+  readonly payment: MintedPayment;
+
+  /**
+   * Resolves once the money has arrived, and rejects when the invoice expires
+   * unpaid or the wait is aborted. It follows a WebSocket and reconnects through
+   * a drop, so this is one await rather than a poll.
+   *
+   * `gateway.settled(id)` is the wider question and ends on an expiry too. This
+   * one is about the payment that was asked for, and one that expired was never paid
+   */
+  paid(options?: WaitOptions): Promise<MintedPayment>;
+
+  /**
+   * The same wait as a callback, for a page that has something else to do.
+   * Returns a function that stops waiting
+   */
+  onPaid(arrived: (payment: MintedPayment) => void, failed?: (reason: unknown) => void): () => void;
+
+  /**
+   * Ask the recipient's own server whether it settled, and get the preimage it
+   * released or null. This is the only answer that comes from somewhere other
+   * than the gateway, so it is the one to ask when a payment matters
+   */
+  prove(): Promise<string | null>;
+}
+```
+
+One payment asked for: the invoice to show, the QR to draw it with, and one
+way to find out it was paid. Everything on it is already proved against the
+recipient's own server, so nothing here is the gateway's word
+
+### PaymentRequestInit
+
+```ts
+interface PaymentRequestInit extends Charge, PaymentRequestOptions {}
+```
+
+What to ask for: who is paid, how much, and how the QR should look. Every
+field beyond `paidTo` and `amount` has a default, so the shortest request
+names two
+
+### PaymentRequestOptions
+
+```ts
+interface PaymentRequestOptions extends WaitOptions {
+  /** Makes the mint safe to retry, so a reloaded checkout replays one invoice */
+  idempotencyKey?: string;
+
+  /** Groups this request with every other one carrying the same secret, for `follow` */
+  trigger?: string;
+
+  /** How many of that trigger's settlements the gateway keeps replayable past the hour */
+  replay?: number;
+
+  /** Size and colour of `qr`, 256 pixels and black by default */
+  qr?: QrOptions;
+}
+```
+
+What `requestPayment` takes beyond the charge itself
+
 ### PaymentStatus
 
 ```ts
@@ -934,56 +1014,6 @@ type Resolved = {
 
 An invoice a lightning address issued, with everything needed to watch and to prove it
 
-### Sale
-
-```ts
-interface Sale {
-  /** What the gateway calls this payment, which is what `payment` and `settled` take */
-  readonly id: string;
-
-  readonly bolt11: string;
-  readonly paymentHash: string;
-  readonly lnAddress: string;
-  readonly amountMsat: number;
-
-  /** When the invoice stops being payable, in unix seconds */
-  readonly expiresAt: number;
-
-  /** The invoice as an SVG QR, ready to put in an element's `innerHTML` */
-  readonly qr: string;
-
-  /** The payment as the gateway first reported it, for anything the fields above leave out */
-  readonly payment: MintedPayment;
-
-  /**
-   * Resolves once the money has arrived, and rejects when the invoice expires
-   * unpaid or the wait is aborted. It follows a WebSocket and reconnects through
-   * a drop, so this is one await rather than a poll.
-   *
-   * `gateway.settled(id)` is the wider question and ends on an expiry too. This
-   * one is about a sale, and a sale that expired was not a sale
-   */
-  paid(options?: WaitOptions): Promise<MintedPayment>;
-
-  /**
-   * The same wait as a callback, for a page that has something else to do.
-   * Returns a function that stops waiting
-   */
-  onPaid(arrived: (payment: MintedPayment) => void, failed?: (reason: unknown) => void): () => void;
-
-  /**
-   * Ask the recipient's own server whether it settled, and get the preimage it
-   * released or null. This is the only answer that comes from somewhere other
-   * than the gateway, so it is the one to ask when a payment matters
-   */
-  prove(): Promise<string | null>;
-}
-```
-
-One thing sold: the invoice to show, the QR to draw it with, and one way to
-find out it was paid. Everything on it is already proved against the
-recipient's own server, so nothing here is the gateway's word
-
 ### sats
 
 ```ts
@@ -1001,35 +1031,6 @@ async function seal(secret: string, plaintext: string): Promise<string>
 Encrypt what the watcher needs and the gateway must not have. The gateway
 stores the result and hands it back untouched, so anything readable you put
 in `sealed` is something you told it, which is what blind mode exists to avoid
-
-### Sellable
-
-```ts
-interface Sellable extends Charge, SellOptions {}
-```
-
-One thing to sell: who is paid, how much, and how the QR should look. Every
-field beyond `to` and `amount` has a default, so the shortest sale names two
-
-### SellOptions
-
-```ts
-interface SellOptions extends WaitOptions {
-  /** Makes the mint safe to retry, so a reloaded checkout replays one invoice */
-  idempotencyKey?: string;
-
-  /** Groups this sale with every other one carrying the same secret, for `follow` */
-  trigger?: string;
-
-  /** How many of that trigger's settlements the gateway keeps replayable past the hour */
-  replay?: number;
-
-  /** Size and colour of `qr`, 256 pixels and black by default */
-  qr?: QrOptions;
-}
-```
-
-What `sell` takes beyond the charge itself
 
 ### Serve
 
@@ -1098,7 +1099,7 @@ Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself
 | `readonly rails: Rails;` | One call per sale, whatever the rail moves |
 | `get hasToken(): boolean` | Whether a token was given to this instance, which is your side of the arrangement and says nothing about the gateway's |
 | `async refusesStrangers(): Promise<boolean>` | Whether the gateway turns away a caller carrying no token, asked by making one unauthenticated read it would have to refuse |
-| `async sell(order: Sellable): Promise<Sale>` | Sell one thing |
+| `async requestPayment(asked: PaymentRequestInit): Promise<PaymentRequest>` | Ask to be paid for one thing |
 | `async mint(charge: Charge, options?: CreateOptions): Promise<MintedPayment>` | Ask the gateway for an invoice payable to the first address on your list that can issue a provable one, throws `NoWalletAvailableError` when none can and `GatewayCheatError` when what comes back is not what you asked for |
 | `async quote(charge: Charge): Promise<Quote>` | Ask which address would serve an amount without minting anything, throws `NoWalletAvailableError` when none would |
 | `async webhookKey(): Promise<string>` | The key this gateway signs webhooks with when you registered none of your own |
