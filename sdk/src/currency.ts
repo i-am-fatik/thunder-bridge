@@ -1,3 +1,5 @@
+import { AmountError } from "./errors.js";
+
 const ISO_4217_MINOR_UNITS: Record<string, number> = {
   BHD: 3,
   BIF: 0,
@@ -39,7 +41,8 @@ const ISO_4217_MINOR_UNITS: Record<string, number> = {
 export function minorUnitsOf(currency: string): number {
   const digits = ISO_4217_MINOR_UNITS[currency.toUpperCase()];
   if (digits === undefined) {
-    throw new Error(
+    throw new AmountError(
+      "unknown-currency",
       `${currency.toUpperCase()} is not a currency this knows the ISO 4217 minor unit of`,
     );
   }

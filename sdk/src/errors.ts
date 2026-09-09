@@ -1,6 +1,43 @@
 import type { WalletFailure } from "./types.js";
 
 /**
+ * Why an amount was refused. A code rather than a message, because a caller can
+ * only recover from a failure it can name and a message is free to be reworded
+ */
+export type AmountFault =
+  | "not-whole-satoshi"
+  | "not-whole-millisatoshi"
+  | "not-a-decimal"
+  | "too-precise"
+  | "unknown-currency";
+
+/**
+ * Thrown when a price cannot be held exactly. Every constructor of an amount
+ * throws this rather than returning something approximate, because a payment
+ * library that rounds silently moves the wrong money
+ */
+export class AmountError extends Error {
+  /**
+   * Whether a failure is one of these, without asking whether it is this exact
+   * class. Every entry point carries its own copy of the class, so a price
+   * refused inside `thunder-bridge/price` is not `instanceof` the `AmountError`
+   * imported from `thunder-bridge`. The name and the code are the same in every
+   * copy, so this holds where `instanceof` does not
+   */
+  static is(failure: unknown): failure is AmountError {
+    return failure instanceof Error && failure.name === "AmountError" && "code" in failure;
+  }
+
+  readonly code: AmountFault;
+
+  constructor(code: AmountFault, detail: string) {
+    super(`${code}: ${detail}`);
+    this.name = "AmountError";
+    this.code = code;
+  }
+}
+
+/**
  * The way a gateway was caught out, every code is a check that held against the
  * recipient's own server and failed against what the gateway returned
  */
@@ -82,6 +119,13 @@ export class ProblemError extends Error {
   static readonly IDEMPOTENCY_KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reused";
   static readonly PAYMENT_ALREADY_WATCHED =
     "urn:problem-type:thunder-bridge:payment-already-watched";
+  static readonly INVALID_REQUEST = "urn:problem-type:thunder-bridge:invalid-request";
+  static readonly CALLER_UNKNOWN = "urn:problem-type:thunder-bridge:caller-unknown";
+  static readonly VERIFY_HOST_REFUSED = "urn:problem-type:thunder-bridge:verify-host-refused";
+  static readonly VERIFY_UNCONFIRMED = "urn:problem-type:thunder-bridge:verify-unconfirmed";
+  static readonly VERIFY_UNCONSENTED = "urn:problem-type:thunder-bridge:verify-unconsented";
+  static readonly WEBHOOK_UNCONFIRMED = "urn:problem-type:thunder-bridge:webhook-unconfirmed";
+  static readonly TOO_MANY_PENDING = "urn:problem-type:thunder-bridge:too-many-pending";
 
   /**
    * Whether a problem carries this type. Branch on the type, never on the prose,

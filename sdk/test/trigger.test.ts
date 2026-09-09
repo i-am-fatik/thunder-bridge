@@ -1,3 +1,4 @@
+import { msat } from "../src/amount";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThunderBridge } from "../src/client";
@@ -74,7 +75,7 @@ function gatewayServing(overrides: Record<string, unknown> = {}): Routes {
 function endpoint(overrides: Partial<TriggerConfig> = {}) {
   return lnurlPayEndpoint(new ThunderBridge(GATEWAY, { verify: false }), {
     to: [FALLBACK, WINNER],
-    amount: () => AMOUNT_MSAT,
+    amount: () => msat(AMOUNT_MSAT),
     secret: SECRET,
     ...overrides,
   });
@@ -124,7 +125,7 @@ describe("the payRequest half", () => {
   it("calls the price function once per payRequest, so a fiat peg can move between them", async () => {
     stubFetch(gatewayServing());
     const prices = [21_000, 42_000];
-    const handler = endpoint({ amount: () => prices.shift() ?? 0 });
+    const handler = endpoint({ amount: () => msat(prices.shift() ?? 1) });
 
     expect((await payRequest(handler))["minSendable"]).toBe(21_000);
     expect((await payRequest(handler))["minSendable"]).toBe(42_000);
@@ -497,7 +498,7 @@ describe("the binding finding 1 is about", () => {
 
     const handler = lnurlPayEndpoint(new ThunderBridge(GATEWAY), {
       to: [FALLBACK, WINNER],
-      amount: () => AMOUNT_MSAT,
+      amount: () => msat(AMOUNT_MSAT),
       secret: SECRET,
     });
     const offer = await payRequest(handler);

@@ -3,9 +3,10 @@ import { resolve } from "../../core/lnurl.js";
 import { seal } from "../../core/sealed.js";
 import { sha256Hex } from "../../core/sha256.js";
 import type { Amount } from "./amount.js";
-import { millisatoshi } from "./amount.js";
+import { millisatoshi, msat } from "./amount.js";
 import type { ThunderBridge } from "./client.js";
 import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
+import { relayedVerifyUrl } from "./relay.js";
 
 const NONCE_BYTES = 16;
 
@@ -221,7 +222,7 @@ async function mintThroughGateway(
   nonce: string,
 ): Promise<{ bolt11: string; verifyUrl: string }> {
   const payment = await gateway.mint(
-    { to: address, amount: amountMsat },
+    { to: address, amount: msat(amountMsat) },
     { idempotencyKey: nonce, trigger: config.watchSecret, replay: config.replay },
   );
 
@@ -243,7 +244,7 @@ async function mintBlind(
     await gateway.watch({
       paymentHash: resolved.paymentHash,
       verifyUrl: relay
-        ? await gateway.serve.verifyUrl(
+        ? await relayedVerifyUrl(
             relay.endpoint,
             { url: resolved.verifyUrl, hash: resolved.paymentHash },
             relay.secret,

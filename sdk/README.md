@@ -93,7 +93,7 @@ if (target !== null) {
   target.innerHTML = sale.qr;
 }
 
-await sale.settled();
+await sale.paid();
 
 const preimage = await sale.prove();
 ```
@@ -102,15 +102,20 @@ Two names and one call. `sell` mints the invoice on the first address that can
 prove one, checks that invoice against the recipient's own domain before returning,
 and draws the QR.
 
-Then there are two different questions and both are worth asking. `settled` tells
-you what the gateway says, and it is the fast one. `prove` asks the recipient's own
+Then there are two different questions and both are worth asking. `paid` tells you
+what the gateway says, and it is the fast one. `prove` asks the recipient's own
 server, and only that is evidence the money arrived.
 [docs/proving-a-payment.md](../docs/proving-a-payment.md) is the whole argument for
 why.
 
-An amount is `sats(21)`, `msat(21_000)` or `fiat("4.99", "USD")`, never a bare
-number whose unit you have to remember. A fiat price is converted when the invoice
-is minted, off the median of four MiCA authorised venues unless you pass your own.
+An amount is `sats(21)`, `msat(21_000)` or `fiat("4.99", "USD")`, and a bare number
+does not compile: the type is branded, so `21` cannot pass for a price and quietly
+mean twenty-one thousandths of a satoshi. A fiat price is converted when the invoice
+is minted, off the median of four MiCA authorised venues unless you pass your own,
+and a decimal string is read digit by digit rather than through a float. Every
+refusal is an `AmountError` carrying a `code`, and `AmountError.is(error)` is how
+you recognise one: each entry point bundles its own copy of the class, so
+`instanceof` holds within one import and that static holds across all of them.
 
 ## How each payment method gets verified
 
@@ -298,8 +303,8 @@ const rail = gateway.rails.lightning({ to: "iamfatik@blink.sv", amount: () => sa
 ```
 
 - **the payments themselves** are `sell`, `mint`, `quote`, `watch`, `payment`,
-  `payments`, `settled`, `firstSettled`, `firstSettled`, `follow`, `ticket`,
-  `nameFor` and `webhookKey`, all on the instance
+  `payments`, `settled`, `firstSettled`, `follow`, `ticket`, `nameFor` and
+  `webhookKey`, all on the instance
 - **what you mount** is on `gateway.serve`: an LNURL-pay endpoint, the two ticket
   endpoints, the verify endpoints for Lightning and for a bank, the webhook route,
   and the readers under it
@@ -308,6 +313,10 @@ const rail = gateway.rails.lightning({ to: "iamfatik@blink.sv", amount: () => sa
 - **the proofs** are free functions, deliberately, because a proof you cannot run
   without the thing being audited is not a proof: `proveOrigin`, `proveSettlement`,
   `proveWrapped`, `carriesProof`, `decodeInvoice`, `preimageMatchesHash`
+- **a payment reads without an assertion.** `Payment` is `MintedPayment |
+  WatchedPayment`, so checking `kind` is what makes the address, the amount and the
+  invoice non-null. The gateway writes those three together or writes none of them,
+  and a record carrying some of the three is refused rather than read
 - **the amounts** are `sats`, `msat` and `fiat`
 
 What your service answers once those handlers are mounted is written out in
@@ -319,10 +328,10 @@ Every failure from the gateway is an RFC 9457 problem document. Branch on `type`
 never on prose. `error.status` is what the transport carried, and a document naming
 a different status in its own body does not override it.
 
-Every `type` below is prefixed `urn:problem-type:thunder-bridge:`. The four with no
-error class of their own are static strings on `ProblemError`, and
-`ProblemError.is(error, ProblemError.PAYMENT_ALREADY_WATCHED)` is how you branch on
-one of those.
+Every `type` below is prefixed `urn:problem-type:thunder-bridge:`, and every one of
+them is a static string on `ProblemError`, so nothing has to be copied out of this
+table by hand. `ProblemError.is(error, ProblemError.PAYMENT_ALREADY_WATCHED)` is how
+you branch on a type that has no error class of its own.
 
 | `type` | Status | What it is |
 |---|---|---|
@@ -356,6 +365,7 @@ unproven invoice, and decide it explicitly.
 ```ts
 import {
   GatewayCheatError,
+  msat,
   NoWalletAvailableError,
   ProblemError,
   ThunderBridge,
@@ -366,7 +376,7 @@ declare const gateway: ThunderBridge;
 declare function report(line: string): void;
 
 try {
-  await gateway.mint({ to: "iamfatik@blink.sv", amount: 21_000 });
+  await gateway.mint({ to: "iamfatik@blink.sv", amount: msat(21_000) });
 } catch (error) {
   if (error instanceof GatewayCheatError) {
     report(`the gateway cheated: ${error.code} on payment ${error.paymentId}`);
@@ -407,7 +417,7 @@ const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe");
 
 export const POST = gateway.serve.webhook({
   onSettled: async (settlement) => {
-    await fulfil(settlement.id, String(settlement.preimage));
+    await fulfil(settlement.id, settlement.preimage);
   },
 });
 ```
@@ -418,6 +428,9 @@ carries a preimage that hashes to the payment hash the same body names. A delive
 that proves nothing gets a `202` and no callback, because acting on an unproven
 claim is the one thing this refuses to do. Pass `onUnproven` when an expiry is news
 you want.
+
+`onSettled` is handed a `Proven<Settlement>`, so the preimage is a `string` rather
+than something to coerce: the check the route already ran is what narrows it.
 
 `gateway.serve.readSettlement` and `gateway.serve.readPayment` are the same checks
 without the route, for a handler you would rather write yourself. Ask the

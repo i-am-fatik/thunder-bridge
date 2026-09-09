@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type SigningKey, signingKeyFromSeed } from "../../core/ed25519.js";
 import { ThunderBridge } from "../src/client";
+import { ProblemError } from "../src/errors";
 import type { Settlement } from "../src/types";
 import { jsonResponse, type Routes, stubFetch } from "./harness";
 
@@ -131,6 +132,25 @@ describe("serve.webhook", () => {
     await route(await delivered(SETTLED));
 
     expect(calls.filter((call) => call.url.endsWith("/webhook-key"))).toHaveLength(1);
+  });
+
+  it("asks the gateway again after a read of its key failed, rather than caching the failure", async () => {
+    const key = await KEY;
+    let asked = 0;
+    stubFetch({
+      [`${GATEWAY}/webhook-key`]: () => {
+        asked += 1;
+
+        return asked === 1
+          ? jsonResponse({ title: "Service Unavailable" }, 503)
+          : jsonResponse({ algorithm: "ed25519", public_key: key.publicKeyHex });
+      },
+    });
+    const gateway = new ThunderBridge(GATEWAY);
+
+    await expect(gateway.webhookKey()).rejects.toThrow(ProblemError);
+    await expect(gateway.webhookKey()).resolves.toBe(key.publicKeyHex);
+    expect(asked).toBe(2);
   });
 
   it("uses the key the caller pinned instead of asking the gateway for one", async () => {

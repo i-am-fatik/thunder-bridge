@@ -2,7 +2,6 @@ import type {
   Handover,
   MintedPayment,
   Payment,
-  PaymentKind,
   PaymentStatus,
   Priced,
   Quote,
@@ -11,6 +10,8 @@ import type {
   WalletFailure,
   WalletReason,
 } from "./types.js";
+
+type Reported = Omit<MintedPayment, "kind" | "lnAddress" | "amountMsat" | "bolt11">;
 
 const ASSET_CODE = "BTC";
 const ASSET_SCALE = 11;
@@ -70,10 +71,9 @@ export function quoteFromWire(body: unknown): Quote | null {
 }
 
 /**
- * One payment out of the wire, whatever made it. The address, the amount and the
- * invoice come back null when the gateway was never told them or does not repeat
- * them, so a minted payment, a handed-over one and a trigger frame all read the
- * same way
+ * One payment out of the wire, whatever made it. The gateway writes the address,
+ * the amount and the invoice together or writes none of them, so a record
+ * carrying some of the three did not come from one and is refused
  */
 export function paymentFromWire(body: unknown): Payment | null {
   const wire = asObject(body);
@@ -103,9 +103,8 @@ export function paymentFromWire(body: unknown): Payment | null {
     return null;
   }
 
-  return {
+  const reported: Reported = {
     id,
-    kind: kindOf(wire),
     status,
     paymentHash,
     verifyUrl,
@@ -113,33 +112,30 @@ export function paymentFromWire(body: unknown): Payment | null {
     expiresAt,
     createdAt,
     sealed,
-    lnAddress: text(wire["ln_address"]),
-    amountMsat: wire["incoming_amount"] === undefined ? null : msatFrom(wire["incoming_amount"], 1),
-    bolt11: text(wire["bolt11"]),
   };
+  const lnAddress = text(wire["ln_address"]);
+  const amountMsat =
+    wire["incoming_amount"] === undefined ? null : msatFrom(wire["incoming_amount"], 1);
+  const bolt11 = text(wire["bolt11"]);
+
+  if (lnAddress !== null && amountMsat !== null && bolt11 !== null) {
+    return { ...reported, kind: "minted", lnAddress, amountMsat, bolt11 };
+  }
+  if (lnAddress === null && amountMsat === null && bolt11 === null) {
+    return { ...reported, kind: "watched", lnAddress: null, amountMsat: null, bolt11: null };
+  }
+
+  return null;
 }
 
 /**
- * The same, refusing anything that does not carry the address, the amount and
- * the invoice. That is what minting answers with, and refusing the rest is what
- * lets `mint` promise them
+ * The same, keeping only what the gateway minted. That is what a mint answers
+ * with, and refusing anything else is what lets `mint` promise an invoice
  */
 export function mintedFromWire(body: unknown): MintedPayment | null {
   const payment = paymentFromWire(body);
-  if (payment === null) {
-    return null;
-  }
-  if (payment.lnAddress === null || payment.amountMsat === null || payment.bolt11 === null) {
-    return null;
-  }
 
-  return {
-    ...payment,
-    kind: "minted",
-    lnAddress: payment.lnAddress,
-    amountMsat: payment.amountMsat,
-    bolt11: payment.bolt11,
-  };
+  return payment !== null && payment.kind === "minted" ? payment : null;
 }
 
 export function watchRequestBody(handover: Handover, trigger: string | null): string {
@@ -202,15 +198,6 @@ export function socketTicketFromWire(body: unknown): SocketTicket | null {
   }
 
   return { ticket, expiresAt };
-}
-
-function kindOf(wire: Record<string, unknown>): PaymentKind {
-  const said = wire["kind"];
-  if (said === "minted" || said === "watched") {
-    return said;
-  }
-
-  return text(wire["ln_address"]) === null ? "watched" : "minted";
 }
 
 function toAmount(msat: number): Record<string, unknown> {

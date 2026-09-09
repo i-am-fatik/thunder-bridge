@@ -1,11 +1,12 @@
 import { type Resolved, resolve } from "../../core/lnurl.js";
 import { NoWalletAvailable } from "../../core/refusal.js";
-import { type Amount, millisatoshi } from "./amount.js";
+import { type Amount, type Msat, millisatoshi, msat } from "./amount.js";
 import { type BankTransfer, type BankTransferParams, bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
 import { medianOf, msatFor, type Ticker } from "./price.js";
 import { encodeForQr } from "./qr.js";
+import { relayedVerifyUrl } from "./relay.js";
 
 const BANK = "bank";
 const LIGHTNING = "lightning";
@@ -203,7 +204,7 @@ export function blindLightningRail(gateway: ThunderBridge, config: BlindLightnin
     const watched = await gateway.watch({
       paymentHash: resolved.paymentHash,
       verifyUrl: relay
-        ? await gateway.serve.verifyUrl(
+        ? await relayedVerifyUrl(
             relay.endpoint,
             { url: resolved.verifyUrl, hash: resolved.paymentHash },
             relay.secret,
@@ -255,12 +256,12 @@ export async function pricedFor(
   order: Order,
   amount: ((order: Order) => Amount) | undefined,
   rate: Ticker | undefined,
-): Promise<number> {
+): Promise<Msat> {
   if (amount !== undefined) {
     return await millisatoshi(amount(order));
   }
 
-  return msatFor(order.amountMinor, await (rate ?? medianOf())(order.currency));
+  return msat(msatFor(order.amountMinor, await (rate ?? medianOf())(order.currency)));
 }
 
 /**

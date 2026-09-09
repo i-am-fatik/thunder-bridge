@@ -116,7 +116,7 @@ describe("sell", () => {
     stubFetch(minting());
     const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
 
-    const waiting = sale.settled();
+    const waiting = sale.paid();
     theSocket().onmessage?.({
       data: JSON.stringify(wire({ status: "paid", preimage: PREIMAGE })),
     });
@@ -128,7 +128,7 @@ describe("sell", () => {
     stubFetch(minting());
     const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
 
-    const waiting = sale.settled();
+    const waiting = sale.paid();
     theSocket().onmessage?.({ data: JSON.stringify(wire({ status: "expired" })) });
 
     await expect(waiting).rejects.toThrow("ended expired");
@@ -139,7 +139,7 @@ describe("sell", () => {
     const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
     const paid = vi.fn();
 
-    sale.onSettled(paid);
+    sale.onPaid(paid);
     theSocket().onmessage?.({
       data: JSON.stringify(wire({ status: "paid", preimage: PREIMAGE })),
     });
@@ -154,7 +154,7 @@ describe("sell", () => {
     const paid = vi.fn();
     const failed = vi.fn();
 
-    const stop = sale.onSettled(paid, failed);
+    const stop = sale.onPaid(paid, failed);
     stop();
     await vi.waitFor(() => expect(theSocket().closeCalls).toBe(1));
 

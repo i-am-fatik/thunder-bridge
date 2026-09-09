@@ -3,43 +3,49 @@ import type { Amount } from "./amount.js";
 /** Where a payment stands, `paid` is the only status that carries a preimage */
 export type PaymentStatus = "pending" | "paid" | "expired";
 
-/** Whether the gateway resolved the address and got the invoice, or was handed one to watch */
-export type PaymentKind = "minted" | "watched";
-
-/**
- * A payment as the gateway reports it. Every field is checkable against the
- * recipient, and the three the gateway is not always told are null: a payment
- * handed over with `watch` carries no address and no amount, and a settlement
- * replayed on a trigger carries no invoice
- */
-export interface Payment {
+interface Reported {
   id: string;
-  kind: PaymentKind;
   status: PaymentStatus;
   paymentHash: string;
   verifyUrl: string;
   preimage: string | null;
   expiresAt: number;
   createdAt: number;
-  lnAddress: string | null;
-  amountMsat: number | null;
-  bolt11: string | null;
 
   /** What the watcher needs and the gateway cannot read, `unseal` opens it */
   sealed: string | null;
 }
 
 /**
- * A payment the gateway minted, so the address, the amount and the invoice are
- * all known and none of them is null. This is what `mint` hands back, and it
- * goes anywhere a `Payment` goes
+ * A payment the gateway minted. It resolved the address itself, so it knows who
+ * is paid, how much, and which invoice says so, and none of the three can be
+ * null here
  */
-export interface MintedPayment extends Payment {
+export interface MintedPayment extends Reported {
   kind: "minted";
   lnAddress: string;
   amountMsat: number;
   bolt11: string;
 }
+
+/**
+ * A payment the gateway was handed rather than asked to mint. It was told a hash,
+ * a URL and an expiry and nothing else, which is the point of `watch`, so the
+ * address, the amount and the invoice are all absent rather than merely unknown
+ */
+export interface WatchedPayment extends Reported {
+  kind: "watched";
+  lnAddress: null;
+  amountMsat: null;
+  bolt11: null;
+}
+
+/**
+ * A payment as the gateway reports it, of either sort. Check `kind` and the
+ * three fields a watched payment does not carry stop being null, so nothing here
+ * needs an assertion to read
+ */
+export type Payment = MintedPayment | WatchedPayment;
 
 /**
  * Who is paid and how much. `to` is a priority list when it is an array: the

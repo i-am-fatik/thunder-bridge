@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { decodeInvoice, ThunderBridge } from "../sdk/dist/index.js";
+import { decodeInvoice, msat, ThunderBridge } from "../sdk/dist/index.js";
 import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "../sdk/dist/nwc.js";
 import { type Service, start } from "../src/index.ts";
 import { CLUSTER_KEY, openStore } from "../src/testing.ts";
@@ -61,7 +61,7 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 	it("mints on the real wallet and hands the gateway a verify url of ours", async () => {
 		const rail = nwcRail(new ThunderBridge(`http://127.0.0.1:${gateway.port}`), {
 			connection: nwcConnection(own.uri),
-			amount: () => OWN_AMOUNT_MSAT,
+			amount: () => msat(OWN_AMOUNT_MSAT),
 			verifyThrough: { endpoint: MOUNT, secret: SEALING_SECRET },
 		});
 

@@ -48,17 +48,20 @@ export interface Sale {
   readonly payment: MintedPayment;
 
   /**
-   * Resolves once the money is proven to have arrived, and rejects when the
-   * invoice expires unpaid or the wait is aborted. It follows a WebSocket and
-   * reconnects through a drop, so this is one await rather than a poll
+   * Resolves once the money has arrived, and rejects when the invoice expires
+   * unpaid or the wait is aborted. It follows a WebSocket and reconnects through
+   * a drop, so this is one await rather than a poll.
+   *
+   * `gateway.settled(id)` is the wider question and ends on an expiry too. This
+   * one is about a sale, and a sale that expired was not a sale
    */
-  settled(options?: WaitOptions): Promise<Payment>;
+  paid(options?: WaitOptions): Promise<MintedPayment>;
 
   /**
    * The same wait as a callback, for a page that has something else to do.
    * Returns a function that stops waiting
    */
-  onSettled(paid: (payment: Payment) => void, failed?: (reason: unknown) => void): () => void;
+  onPaid(arrived: (payment: MintedPayment) => void, failed?: (reason: unknown) => void): () => void;
 
   /**
    * Ask the recipient's own server whether it settled, and get the preimage it
@@ -83,20 +86,20 @@ export function saleOf(
     qr: invoiceToSvg(payment.bolt11, options?.qr),
     payment,
 
-    settled: async (waiting?: WaitOptions) =>
+    paid: async (waiting?: WaitOptions) =>
       paidOnly(await gateway.settled(payment.id, { ...waitingOf(options), ...waiting })),
 
     prove: () =>
       proveSettlement(payment, { to: [payment.lnAddress], amountMsat: payment.amountMsat }),
 
-    onSettled: (paid, failed) => {
+    onPaid: (arrived, failed) => {
       const stop = new AbortController();
       const waiting = waitingOf(options);
       const signal = waiting.signal ? AbortSignal.any([stop.signal, waiting.signal]) : stop.signal;
 
       gateway
         .settled(payment.id, { ...waiting, signal })
-        .then((ended) => paid(paidOnly(ended)))
+        .then((ended) => arrived(paidOnly(ended)))
         .catch((reason: unknown) => {
           if (!stop.signal.aborted) {
             failed?.(reason);
@@ -108,9 +111,12 @@ export function saleOf(
   };
 }
 
-function paidOnly(ended: Payment): Payment {
+function paidOnly(ended: Payment): MintedPayment {
   if (ended.status !== "paid") {
     throw new Error(`payment ${ended.id} ended ${ended.status} rather than paid`);
+  }
+  if (ended.kind !== "minted") {
+    throw new Error(`payment ${ended.id} came back without the invoice it was sold with`);
   }
 
   return ended;

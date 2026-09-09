@@ -1,3 +1,4 @@
+import { msat } from "../src/amount";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ThunderBridge } from "../src/client";
@@ -411,7 +412,7 @@ describe("the rail", () => {
     const watched: Record<string, unknown>[] = [];
     const leg = await nwcRail(gatewayTaking(watched), {
       connection: nwcConnection(uriFor()),
-      amount: () => 1000,
+      amount: () => msat(1000),
       verifyThrough: { endpoint: MOUNT, secret: SEALING_SECRET },
     })(order);
 
@@ -425,7 +426,7 @@ describe("the rail", () => {
     const watched: Record<string, unknown>[] = [];
     await nwcRail(gatewayTaking(watched), {
       connection: nwcConnection(uriFor()),
-      amount: () => 1000,
+      amount: () => msat(1000),
       verifyThrough: { endpoint: MOUNT, secret: SEALING_SECRET },
     })(order);
 

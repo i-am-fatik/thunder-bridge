@@ -1,11 +1,6 @@
 import { type BankVerifyConfig, bankVerifyEndpoint } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
-import {
-  type LightningVerifyConfig,
-  lightningVerifyEndpoint,
-  type Relayed,
-  relayedVerifyUrl,
-} from "./relay.js";
+import { type LightningVerifyConfig, lightningVerifyEndpoint } from "./relay.js";
 import {
   lnurlPayEndpoint,
   publicWatchTicketEndpoint,
@@ -14,9 +9,8 @@ import {
   watchTicketEndpoint,
 } from "./trigger.js";
 import type { Payment, Settlement } from "./types.js";
-import { carriesProof } from "./verify.js";
+import { carriesProof, type Proven } from "./verify.js";
 import {
-  answerVerifyChallenge,
   answerWebhookChallenge,
   readPayment,
   readSettlement,
@@ -33,7 +27,7 @@ export interface WebhookHandlers {
    * A settlement that proves itself: it says paid and its preimage hashes to the
    * payment hash it names. This is the only callback a shop needs
    */
-  onSettled?: (settlement: Settlement) => void | Promise<void>;
+  onSettled?: (settlement: Proven<Settlement>) => void | Promise<void>;
 
   /**
    * A delivery that carries no proof, so an expiry or a paid claim with no
@@ -56,9 +50,12 @@ export interface WebhookHandlers {
 }
 
 /**
- * Everything one gateway lets you mount. Each of these was a free function that
- * took the gateway as a config field, and reaching them through the gateway is
- * what deleted that field
+ * Everything one gateway lets you mount, in one place so a caller never has to
+ * know which handler needs the gateway and which does not. Most of these took it
+ * as a config field before, and reaching them through the gateway deleted it.
+ *
+ * `verify` and `bankVerify` need nothing from the gateway and are here anyway,
+ * because a reader looking for a handler should find every handler in one list
  */
 export class Serve {
   constructor(private readonly gateway: ThunderBridge) {}
@@ -95,14 +92,6 @@ export class Serve {
   /** The verify endpoint a bank rail is polled at, answering off your own statement */
   bankVerify(config: BankVerifyConfig): Handler {
     return bankVerifyEndpoint(config);
-  }
-
-  /**
-   * The URL to hand the gateway instead of the wallet's own, with the wallet's
-   * sealed inside it. Point it at wherever `verify` is mounted
-   */
-  verifyUrl(endpoint: string, wallet: Relayed, secret: string): Promise<string> {
-    return relayedVerifyUrl(endpoint, wallet, secret);
   }
 
   /**
@@ -156,11 +145,6 @@ export class Serve {
     options?: WebhookOptions,
   ): Promise<Response | null> {
     return await answerWebhookChallenge(request, await this.credential({}), options);
-  }
-
-  /** Answer the challenge the gateway sends a verify URL before it will poll it */
-  answerVerifyChallenge(request: Request): Promise<Response | null> {
-    return answerVerifyChallenge(request);
   }
 
   private async credential(handlers: WebhookHandlers): Promise<WebhookCredential> {

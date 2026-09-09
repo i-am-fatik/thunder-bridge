@@ -8,7 +8,10 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 
 | Export | Kind | What it is |
 |---|---|---|
-| [`Amount`](#thunder-bridge-amount) | type | What a payment is worth, in millisatoshi |
+| [`Amount`](#thunder-bridge-amount) | type | What a payment is worth |
+| [`AmountError`](#thunder-bridge-amounterror) | class | Thrown when a price cannot be held exactly |
+| [`AmountFault`](#thunder-bridge-amountfault) | type | Why an amount was refused |
+| [`answerVerifyChallenge`](#thunder-bridge-answerverifychallenge) | function | Answer the challenge the gateway sends a verify URL before it will poll it, which is how a caller shows the endpoint agreed to the traffic rather than merely being named |
 | [`BankRailConfig`](#thunder-bridge-bankrailconfig) | interface | A bank rail: the account the money lands in, and where its arrival is read back from |
 | [`BankVerifyConfig`](#thunder-bridge-bankverifyconfig) | interface | The endpoint the gateway polls for a bank transfer, answering off your own statement |
 | [`BlindLightningRailConfig`](#thunder-bridge-blindlightningrailconfig) | interface | The same rail with the invoice resolved here, so the gateway is told neither address nor amount |
@@ -33,16 +36,18 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`LightningRailConfig`](#thunder-bridge-lightningrailconfig) | interface | A Lightning rail the gateway mints for, bound once and then given one order at a time |
 | [`LightningVerifyConfig`](#thunder-bridge-lightningverifyconfig) | interface | The verify endpoint that asks the wallet for the gateway, and how often it may be asked |
 | [`Minted`](#thunder-bridge-minted) | interface | What a blind mint produced, which is what the sealed payload is built from |
-| [`MintedPayment`](#thunder-bridge-mintedpayment) | interface | A payment the gateway minted, so the address, the amount and the invoice are all known and none of them is null |
-| [`msat`](#thunder-bridge-msat) | function | An exact number of millisatoshi, for a price that is already in the smallest unit |
+| [`MintedPayment`](#thunder-bridge-mintedpayment) | interface | A payment the gateway minted |
+| [`msat`](#thunder-bridge-msat) | function | An exact number of millisatoshi, for a price already in the smallest unit |
+| [`Msat`](#thunder-bridge-msat) | type | A whole number of millisatoshi that came from `sats`, `msat` or `fiat`, and could not have come from anywhere else |
 | [`NoWalletAvailableError`](#thunder-bridge-nowalletavailableerror) | class | Thrown when no wallet on your list could issue a provable invoice, `wallets` says why each refused |
 | [`Order`](#thunder-bridge-order) | interface | What a shop knows about a sale before any rail exists |
-| [`Payment`](#thunder-bridge-payment) | interface | A payment as the gateway reports it |
-| [`PaymentKind`](#thunder-bridge-paymentkind) | type | Whether the gateway resolved the address and got the invoice, or was handed one to watch |
+| [`Payment`](#thunder-bridge-payment) | type | A payment as the gateway reports it, of either sort |
 | [`PaymentStatus`](#thunder-bridge-paymentstatus) | type | Where a payment stands, `paid` is the only status that carries a preimage |
 | [`preimageMatchesHash`](#thunder-bridge-preimagematcheshash) | function | True when `preimage` is the secret behind `paymentHash` |
 | [`Priced`](#thunder-bridge-priced) | interface | A charge with its price settled, which is what a proof compares the gateway's answer against |
 | [`ProblemError`](#thunder-bridge-problemerror) | class | An RFC 9457 problem document the gateway answered with |
+| [`Provable`](#thunder-bridge-provable) | interface | The least a report has to carry for its own proof to be checkable |
+| [`Proven`](#thunder-bridge-proven) | type | A report `carriesProof` has already accepted, so the preimage is there and the status is settled |
 | [`proveOrigin`](#thunder-bridge-proveorigin) | function | Prove the invoice really is the one the recipient issued for what you asked, before the payer ever sees it, both fetches go straight to the recipient's own server and none of them goes back to the gateway |
 | [`proveSettlement`](#thunder-bridge-provesettlement) | function | Prove the money arrived by asking the recipient's own server, not the gateway, returns the preimage when the recipient says it settled and null when it says it has not, and runs the full origin proof first because a verify url the gateway made up would otherwise answer for itself |
 | [`proveWrapped`](#thunder-bridge-provewrapped) | function | Prove a wrapping operator's invoice is the recipient's own payment in disguise, so paying it can only settle by the operator paying the recipient |
@@ -51,12 +56,13 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`RailConfig`](#thunder-bridge-railconfig) | interface | What every rail takes, whatever it moves |
 | [`Rails`](#thunder-bridge-rails) | class | One call per sale, whatever the rail moves |
 | [`Relayed`](#thunder-bridge-relayed) | interface | The wallet's own LUD-21 URL and the hash its preimage has to match |
+| [`relayedVerifyUrl`](#thunder-bridge-relayedverifyurl) | function | The URL to hand the gateway instead of the wallet's own, with the wallet's sealed inside it |
 | [`Resolved`](#thunder-bridge-resolved) | type | An invoice a lightning address issued, with everything needed to watch and to prove it |
 | [`Sale`](#thunder-bridge-sale) | interface | One thing sold: the invoice to show, the QR to draw it with, and one way to find out it was paid |
 | [`sats`](#thunder-bridge-sats) | function | A whole number of satoshi, so `sats(21)` is 21000 millisatoshi |
 | [`seal`](#thunder-bridge-seal) | function | Encrypt what the watcher needs and the gateway must not have |
 | [`SellOptions`](#thunder-bridge-selloptions) | interface | What `sell` takes beyond the charge itself |
-| [`Serve`](#thunder-bridge-serve) | class | Everything one gateway lets you mount |
+| [`Serve`](#thunder-bridge-serve) | class | Everything one gateway lets you mount, in one place so a caller never has to know which handler needs the gateway and which does not |
 | [`Settlement`](#thunder-bridge-settlement) | interface | What a delivery carries |
 | [`SocketTicket`](#thunder-bridge-socketticket) | interface | A one minute pass onto one trigger's stream |
 | [`ThunderBridge`](#thunder-bridge-thunderbridge) | class | Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself |
@@ -68,6 +74,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`WaitOptions`](#thunder-bridge-waitoptions) | interface | How long to wait on a payment, and what the socket URL is allowed to carry |
 | [`WalletFailure`](#thunder-bridge-walletfailure) | interface | One wallet on the list that could not be used, and the reason it could not |
 | [`WalletReason`](#thunder-bridge-walletreason) | type | Why one wallet in the list could not be used |
+| [`WatchedPayment`](#thunder-bridge-watchedpayment) | interface | A payment the gateway was handed rather than asked to mint |
 | [`WatchTicketConfig`](#thunder-bridge-watchticketconfig) | interface | A trigger's live stream is opened with a ticket rather than with the watch secret, so something has to hold the secret and trade it for tickets |
 | [`WebhookCredential`](#thunder-bridge-webhookcredential) | type | What checks a delivery: the hex the gateway publishes at `/webhook-key` |
 | [`WebhookHandlers`](#thunder-bridge-webhookhandlers) | interface | What to do with what the gateway delivers, and what to believe it with |
@@ -80,15 +87,56 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 ### Amount
 
 ```ts
-type Amount = number | (() => number | Promise<number>);
+type Amount = Msat | (() => Msat | Promise<Msat>);
 ```
 
-What a payment is worth, in millisatoshi. A whole number is that many
-millisatoshi, and a function is a price worked out when the invoice is minted,
-which is what a fiat price has to be.
+What a payment is worth. A `Msat` is a price known now, and a function is one
+worked out when the invoice is minted, which is what a fiat price has to be.
 
-Build one with `sats`, `msat` or `fiat` rather than by hand. A bare number is
-accepted so a caller who already holds millisatoshi passes it straight through
+Build one with `sats`, `msat` or `fiat`
+
+### AmountError
+
+```ts
+class AmountError extends Error
+```
+
+Thrown when a price cannot be held exactly. Every constructor of an amount
+throws this rather than returning something approximate, because a payment
+library that rounds silently moves the wrong money
+
+| Member | What it does |
+|---|---|
+| `static is(failure: unknown): failure is AmountError` | Whether a failure is one of these, without asking whether it is this exact class |
+| `readonly code: AmountFault;` |  |
+
+### AmountFault
+
+```ts
+type AmountFault =
+  | "not-whole-satoshi"
+  | "not-whole-millisatoshi"
+  | "not-a-decimal"
+  | "too-precise"
+  | "unknown-currency";
+```
+
+Why an amount was refused. A code rather than a message, because a caller can
+only recover from a failure it can name and a message is free to be reworded
+
+### answerVerifyChallenge
+
+```ts
+async function answerVerifyChallenge(request: Request): Promise<Response | null>
+```
+
+Answer the challenge the gateway sends a verify URL before it will poll it,
+which is how a caller shows the endpoint agreed to the traffic rather than
+merely being named. Returns null for anything that is not a challenge, so a
+verify endpoint hands the request on to its own reading of a payment.
+
+The nonce is echoed to whoever asked, which grants them nothing, so there is
+no signature to check here and no secret to hold
 
 ### BankRailConfig
 
@@ -171,12 +219,7 @@ The same rail with the invoice resolved here, so the gateway is told neither add
 ### carriesProof
 
 ```ts
-function carriesProof(report: {
-  status: PaymentStatus;
-  preimage: string | null;
-  paymentHash: string;
-  bolt11?: string | null;
-}): boolean
+function carriesProof<T extends Provable>(report: T): report is Proven<T>
 ```
 
 Whether a report proves what it claims: it says paid, and it carries a preimage
@@ -256,19 +299,19 @@ function fiat(
   major: number | string,
   currency: string,
   options?: FiatOptions,
-): () => Promise<number>
+): () => Promise<Msat>
 ```
 
 A price named in fiat, converted when the invoice is minted rather than now.
 
-The major amount may be a string, which is read exactly, digit by digit. Given
-a number it is rounded to the currency's ISO 4217 minor unit, because binary
-floating point cannot hold 4.99 and a payment library that pretends otherwise
-moves the wrong amount.
+Name it as a string and it is read digit by digit, exactly. Name it as a
+number and it is rounded to the currency's ISO 4217 minor unit, because
+binary floating point cannot hold 4.99 and a payment library that pretends
+otherwise moves the wrong amount.
 
-Every conversion asks the rate afresh, so two calls a second apart can differ.
-That is the honest behaviour for a fiat price and the reason the amount is a
-function rather than a number
+Every conversion asks the rate afresh, so two calls a second apart can
+differ. That is the honest behaviour for a fiat price, and the reason an
+amount is a function rather than a number
 
 ### FiatOptions
 
@@ -570,25 +613,46 @@ What a blind mint produced, which is what the sealed payload is built from
 ### MintedPayment
 
 ```ts
-interface MintedPayment extends Payment {
-  kind: "minted";
-  lnAddress: string;
-  amountMsat: number;
-  bolt11: string;
+interface MintedPayment {
+	kind: "minted";
+	lnAddress: string;
+	amountMsat: number;
+	bolt11: string;
+	id: string;
+	status: PaymentStatus;
+	paymentHash: string;
+	verifyUrl: string;
+	preimage: string | null;
+	expiresAt: number;
+	createdAt: number;
+	sealed: string | null;
 }
 ```
 
-A payment the gateway minted, so the address, the amount and the invoice are
-all known and none of them is null. This is what `mint` hands back, and it
-goes anywhere a `Payment` goes
+A payment the gateway minted. It resolved the address itself, so it knows who
+is paid, how much, and which invoice says so, and none of the three can be
+null here
 
 ### msat
 
 ```ts
-function msat(exact: number): number
+function msat(exact: number): Msat
 ```
 
-An exact number of millisatoshi, for a price that is already in the smallest unit
+An exact number of millisatoshi, for a price already in the smallest unit
+
+### Msat
+
+```ts
+type Msat = number & { readonly [brand]: "Msat" };
+```
+
+A whole number of millisatoshi that came from `sats`, `msat` or `fiat`, and
+could not have come from anywhere else.
+
+The brand is why: a bare number is not one of these, so `21` cannot be passed
+where a price is wanted and quietly mean twenty-one thousandths of a satoshi.
+It costs nothing at runtime, where the value is an ordinary number
 
 ### NoWalletAvailableError
 
@@ -622,36 +686,12 @@ What a shop knows about a sale before any rail exists
 ### Payment
 
 ```ts
-interface Payment {
-  id: string;
-  kind: PaymentKind;
-  status: PaymentStatus;
-  paymentHash: string;
-  verifyUrl: string;
-  preimage: string | null;
-  expiresAt: number;
-  createdAt: number;
-  lnAddress: string | null;
-  amountMsat: number | null;
-  bolt11: string | null;
-
-  /** What the watcher needs and the gateway cannot read, `unseal` opens it */
-  sealed: string | null;
-}
+type Payment = MintedPayment | WatchedPayment;
 ```
 
-A payment as the gateway reports it. Every field is checkable against the
-recipient, and the three the gateway is not always told are null: a payment
-handed over with `watch` carries no address and no amount, and a settlement
-replayed on a trigger carries no invoice
-
-### PaymentKind
-
-```ts
-type PaymentKind = "minted" | "watched";
-```
-
-Whether the gateway resolved the address and got the invoice, or was handed one to watch
+A payment as the gateway reports it, of either sort. Check `kind` and the
+three fields a watched payment does not carry stop being null, so nothing here
+needs an assertion to read
 
 ### PaymentStatus
 
@@ -696,11 +736,40 @@ An RFC 9457 problem document the gateway answered with
 | `static readonly REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge:request-in-flight";` |  |
 | `static readonly IDEMPOTENCY_KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reused";` |  |
 | `static readonly PAYMENT_ALREADY_WATCHED = "urn:problem-type:thunder-bridge:payment-already-watched";` |  |
+| `static readonly INVALID_REQUEST = "urn:problem-type:thunder-bridge:invalid-request";` |  |
+| `static readonly CALLER_UNKNOWN = "urn:problem-type:thunder-bridge:caller-unknown";` |  |
+| `static readonly VERIFY_HOST_REFUSED = "urn:problem-type:thunder-bridge:verify-host-refused";` |  |
+| `static readonly VERIFY_UNCONFIRMED = "urn:problem-type:thunder-bridge:verify-unconfirmed";` |  |
+| `static readonly VERIFY_UNCONSENTED = "urn:problem-type:thunder-bridge:verify-unconsented";` |  |
+| `static readonly WEBHOOK_UNCONFIRMED = "urn:problem-type:thunder-bridge:webhook-unconfirmed";` |  |
+| `static readonly TOO_MANY_PENDING = "urn:problem-type:thunder-bridge:too-many-pending";` |  |
 | `static is(problem: { type?: string }, type: string): boolean` | Whether a problem carries this type |
 | `readonly type: string;` |  |
 | `readonly title: string;` |  |
 | `readonly status: number;` |  |
 | `readonly detail: string \| null;` |  |
+
+### Provable
+
+```ts
+interface Provable {
+  status: PaymentStatus;
+  preimage: string | null;
+  paymentHash: string;
+  bolt11?: string | null;
+}
+```
+
+The least a report has to carry for its own proof to be checkable
+
+### Proven
+
+```ts
+type Proven<T extends Provable> = T & { status: "paid"; preimage: string };
+```
+
+A report `carriesProof` has already accepted, so the preimage is there and the
+status is settled. Nothing downstream of the check needs a null guard
 
 ### proveOrigin
 
@@ -824,6 +893,19 @@ interface Relayed {
 
 The wallet's own LUD-21 URL and the hash its preimage has to match
 
+### relayedVerifyUrl
+
+```ts
+async function relayedVerifyUrl(
+  endpoint: string,
+  wallet: Relayed,
+  secret: string,
+): Promise<string>
+```
+
+The URL to hand the gateway instead of the wallet's own, with the wallet's
+sealed inside it. Point it at wherever `lightningVerifyEndpoint` is mounted
+
 ### Resolved
 
 ```ts
@@ -860,17 +942,20 @@ interface Sale {
   readonly payment: MintedPayment;
 
   /**
-   * Resolves once the money is proven to have arrived, and rejects when the
-   * invoice expires unpaid or the wait is aborted. It follows a WebSocket and
-   * reconnects through a drop, so this is one await rather than a poll
+   * Resolves once the money has arrived, and rejects when the invoice expires
+   * unpaid or the wait is aborted. It follows a WebSocket and reconnects through
+   * a drop, so this is one await rather than a poll.
+   *
+   * `gateway.settled(id)` is the wider question and ends on an expiry too. This
+   * one is about a sale, and a sale that expired was not a sale
    */
-  settled(options?: WaitOptions): Promise<Payment>;
+  paid(options?: WaitOptions): Promise<MintedPayment>;
 
   /**
    * The same wait as a callback, for a page that has something else to do.
    * Returns a function that stops waiting
    */
-  onSettled(paid: (payment: Payment) => void, failed?: (reason: unknown) => void): () => void;
+  onPaid(arrived: (payment: MintedPayment) => void, failed?: (reason: unknown) => void): () => void;
 
   /**
    * Ask the recipient's own server whether it settled, and get the preimage it
@@ -888,7 +973,7 @@ recipient's own server, so nothing here is the gateway's word
 ### sats
 
 ```ts
-function sats(whole: number): number
+function sats(whole: number): Msat
 ```
 
 A whole number of satoshi, so `sats(21)` is 21000 millisatoshi
@@ -929,9 +1014,12 @@ What `sell` takes beyond the charge itself
 class Serve
 ```
 
-Everything one gateway lets you mount. Each of these was a free function that
-took the gateway as a config field, and reaching them through the gateway is
-what deleted that field
+Everything one gateway lets you mount, in one place so a caller never has to
+know which handler needs the gateway and which does not. Most of these took it
+as a config field before, and reaching them through the gateway deleted it.
+
+`verify` and `bankVerify` need nothing from the gateway and are here anyway,
+because a reader looking for a handler should find every handler in one list
 
 | Member | What it does |
 |---|---|
@@ -940,12 +1028,10 @@ what deleted that field
 | `publicWatchTicket(config: WatchTicketConfig): Handler` | Mints a socket ticket for anybody who asks, which makes the trigger's whole stream public, preimages included |
 | `verify(config: LightningVerifyConfig): Handler` | A verify endpoint of your own that asks the recipient's wallet for you, so the gateway polls you and never the wallet |
 | `bankVerify(config: BankVerifyConfig): Handler` | The verify endpoint a bank rail is polled at, answering off your own statement |
-| `verifyUrl(endpoint: string, wallet: Relayed, secret: string): Promise<string>` | The URL to hand the gateway instead of the wallet's own, with the wallet's sealed inside it |
 | `webhook(handlers: WebhookHandlers): Handler` | The whole webhook route: it answers the gateway's challenge, checks the signature against the key the gateway publishes, refuses a settlement that proves nothing, and calls you for the one that does |
 | `async readSettlement(request: Request, options?: WebhookOptions): Promise<Settlement \| null>` | Verify a delivery and read the settlement out of it, null when it is not believable |
 | `async readPayment(request: Request, options?: WebhookOptions): Promise<Payment \| null>` | Verify a delivery and read the payment out of it, null when it is not believable |
 | `async answerWebhookChallenge( request: Request, options?: WebhookOptions, ): Promise<Response \| null>` | Answer the challenge the gateway sends before it will post to a webhook of yours |
-| `answerVerifyChallenge(request: Request): Promise<Response \| null>` | Answer the challenge the gateway sends a verify URL before it will poll it |
 
 ### Settlement
 
@@ -1178,6 +1264,29 @@ type WalletReason =
 
 Why one wallet in the list could not be used
 
+### WatchedPayment
+
+```ts
+interface WatchedPayment {
+	kind: "watched";
+	lnAddress: null;
+	amountMsat: null;
+	bolt11: null;
+	id: string;
+	status: PaymentStatus;
+	paymentHash: string;
+	verifyUrl: string;
+	preimage: string | null;
+	expiresAt: number;
+	createdAt: number;
+	sealed: string | null;
+}
+```
+
+A payment the gateway was handed rather than asked to mint. It was told a hash,
+a URL and an expiry and nothing else, which is the point of `watch`, so the
+address, the amount and the invoice are all absent rather than merely unknown
+
 ### WatchTicketConfig
 
 ```ts
@@ -1217,7 +1326,7 @@ interface WebhookHandlers {
    * A settlement that proves itself: it says paid and its preimage hashes to the
    * payment hash it names. This is the only callback a shop needs
    */
-  onSettled?: (settlement: Settlement) => void | Promise<void>;
+  onSettled?: (settlement: Proven<Settlement>) => void | Promise<void>;
 
   /**
    * A delivery that carries no proof, so an expiry or a paid claim with no
@@ -1418,6 +1527,8 @@ rather than https, which LUD-17 spells out, so both are taken here
 
 | Export | Kind | What it is |
 |---|---|---|
+| [`AmountError`](#thunder-bridge-price-amounterror) | class | Thrown when a price cannot be held exactly |
+| [`AmountFault`](#thunder-bridge-price-amountfault) | type | Why an amount was refused |
 | [`bitstamp`](#thunder-bridge-price-bitstamp) | function | Bitstamp, CASP authorised by the CSSF in Luxembourg |
 | [`coinbase`](#thunder-bridge-price-coinbase) | function | Coinbase, CASP authorised in Luxembourg |
 | [`coinmate`](#thunder-bridge-price-coinmate) | function | Coinmate, on the ESMA CASP register, Czech and the one with a real BTC/CZK book |
@@ -1428,6 +1539,35 @@ rather than https, which LUD-17 spells out, so both are taken here
 | [`minorUnitsOf`](#thunder-bridge-price-minorunitsof) | function | How many digits ISO 4217 gives the currency's minor unit, so 2 for a crown and a euro, 0 for a yen and 3 for a dinar |
 | [`msatFor`](#thunder-bridge-price-msatfor) | function | What to ask for over Lightning for a price named in fiat, in millisatoshi |
 | [`Ticker`](#thunder-bridge-price-ticker) | type | How many minor units of `currency` one bitcoin costs at one venue, so 134883815 is 1,348,838.15 CZK |
+
+### AmountError
+
+```ts
+class AmountError extends Error
+```
+
+Thrown when a price cannot be held exactly. Every constructor of an amount
+throws this rather than returning something approximate, because a payment
+library that rounds silently moves the wrong money
+
+| Member | What it does |
+|---|---|
+| `static is(failure: unknown): failure is AmountError` | Whether a failure is one of these, without asking whether it is this exact class |
+| `readonly code: AmountFault;` |  |
+
+### AmountFault
+
+```ts
+type AmountFault =
+  | "not-whole-satoshi"
+  | "not-whole-millisatoshi"
+  | "not-a-decimal"
+  | "too-precise"
+  | "unknown-currency";
+```
+
+Why an amount was refused. A code rather than a message, because a caller can
+only recover from a failure it can name and a message is free to be reworded
 
 ### bitstamp
 
@@ -1798,7 +1938,7 @@ async function askWallet(
 
 One NIP-47 call, for a method this SDK does not wrap. The wallet's own info
 event lists what it will answer, and anything it refuses comes back as a
-`WalletRefused` carrying the code it named
+`WalletRefused` whose `reason` says which kind of refusal it was
 
 ### nwcConnection
 
@@ -1904,27 +2044,17 @@ nostr crypto in this module, and a browser showing a QR should not download it
 ### NwcRailConfig
 
 ```ts
-interface NwcRailConfig extends RailConfig {
-  /** The wallet that mints, which never leaves this process */
-  connection: NwcConnection;
-
-  /**
-   * What to charge for one order, the order's own price converted at `rate` by
-   * default. Give it a function and the price is whatever you say
-   */
-  amount?: (order: Order) => Amount;
-
-  /** Where the default conversion gets its rate, the median of four venues by default */
-  rate?: Ticker;
-
-  /** Where `nwcVerifyEndpoint` is mounted, and the secret the hash is sealed with */
-  verifyThrough: { endpoint: string; secret: string };
-
-  /** What the payer's wallet shows, the order's reference by default */
-  description?: (order: Order) => string;
-
-  /** Sealed before the gateway sees it, the way the blind Lightning rail does */
-  sealed?: (order: Order) => string | Promise<string>;
+interface NwcRailConfig {
+	connection: NwcConnection;
+	amount?: ((order: Order) => Amount) | undefined;
+	rate?: Ticker | undefined;
+	verifyThrough: { endpoint: string; secret: string; };
+	description?: ((order: Order) => string) | undefined;
+	sealed?: ((order: Order) => string | Promise<string>) | undefined;
+	trigger?: string | undefined;
+	replay?: number | undefined;
+	webhookUrl?: string | undefined;
+	name?: string | undefined;
 }
 ```
 

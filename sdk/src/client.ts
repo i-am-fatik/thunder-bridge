@@ -303,7 +303,10 @@ export class ThunderBridge {
    * for every instance in the cluster
    */
   async webhookKey(): Promise<string> {
-    this.published ??= this.publishedKey();
+    this.published ??= this.publishedKey().catch((refused: unknown) => {
+      this.published = null;
+      throw refused;
+    });
 
     return await this.published;
   }

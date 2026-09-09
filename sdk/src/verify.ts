@@ -107,6 +107,20 @@ export async function proveSettlement(
   return verified.preimage;
 }
 
+/** The least a report has to carry for its own proof to be checkable */
+export interface Provable {
+  status: PaymentStatus;
+  preimage: string | null;
+  paymentHash: string;
+  bolt11?: string | null;
+}
+
+/**
+ * A report `carriesProof` has already accepted, so the preimage is there and the
+ * status is settled. Nothing downstream of the check needs a null guard
+ */
+export type Proven<T extends Provable> = T & { status: "paid"; preimage: string };
+
 /**
  * Whether a report proves what it claims: it says paid, and it carries a preimage
  * that hashes to the payment hash it itself names. Where an invoice comes with it,
@@ -119,12 +133,7 @@ export async function proveSettlement(
  * It asks nobody anything, so it costs no round trip and is not a proof of
  * arrival. Only `proveSettlement` asks the recipient
  */
-export function carriesProof(report: {
-  status: PaymentStatus;
-  preimage: string | null;
-  paymentHash: string;
-  bolt11?: string | null;
-}): boolean {
+export function carriesProof<T extends Provable>(report: T): report is Proven<T> {
   if (report.status !== "paid" || report.preimage === null) {
     return false;
   }

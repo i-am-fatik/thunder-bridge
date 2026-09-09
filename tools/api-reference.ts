@@ -28,7 +28,7 @@ const KINDS: [ts.SymbolFlags, string][] = [
 	[ts.SymbolFlags.Variable, "const"],
 ];
 
-interface Item {
+export interface Item {
 	name: string;
 	kind: string;
 	summary: string;
@@ -74,6 +74,28 @@ function summaryOf(documentation: string): string {
 	return first.replace(/\s+/g, " ").trim();
 }
 
+function inheritsUnexported(declaration: ts.Declaration, exported: Set<string>): boolean {
+	if (!ts.isInterfaceDeclaration(declaration)) {
+		return false;
+	}
+
+	return (declaration.heritageClauses ?? []).some((clause) =>
+		clause.types.some((base) => !exported.has(base.expression.getText())),
+	);
+}
+
+function flattened(declaration: ts.InterfaceDeclaration, checker: ts.TypeChecker): string {
+	const type = checker.getTypeAtLocation(declaration);
+	const fields = checker.getPropertiesOfType(type).map((property) => {
+		const optional = property.flags & ts.SymbolFlags.Optional ? "?" : "";
+		const held = checker.getTypeOfSymbolAtLocation(property, declaration);
+
+		return `\t${property.getName()}${optional}: ${checker.typeToString(held)};`;
+	});
+
+	return [`interface ${declaration.name.getText()} {`, ...fields, "}"].join("\n");
+}
+
 function endOfSignature(declaration: ts.Declaration): number {
 	if (ts.isClassDeclaration(declaration)) {
 		return declaration.members.pos;
@@ -83,7 +105,14 @@ function endOfSignature(declaration: ts.Declaration): number {
 	return body === undefined ? declaration.getEnd() : body.getStart();
 }
 
-function signatureOf(declaration: ts.Declaration): string {
+function signatureOf(
+	declaration: ts.Declaration,
+	checker: ts.TypeChecker,
+	exported: Set<string>,
+): string {
+	if (ts.isInterfaceDeclaration(declaration) && inheritsUnexported(declaration, exported)) {
+		return flattened(declaration, checker);
+	}
 	const source = declaration.getSourceFile().text;
 	const declared = source.slice(declaration.getStart(), endOfSignature(declaration)).trim();
 
@@ -94,7 +123,7 @@ function signatureOf(declaration: ts.Declaration): string {
 		.trim();
 }
 
-function membersOf(symbol: ts.Symbol, checker: ts.TypeChecker): Item[] {
+function membersOf(symbol: ts.Symbol, checker: ts.TypeChecker, exported: Set<string>): Item[] {
 	const declaration = symbol.declarations?.[0];
 	if (declaration === undefined || !ts.isClassDeclaration(declaration)) {
 		return [];
@@ -128,7 +157,7 @@ function membersOf(symbol: ts.Symbol, checker: ts.TypeChecker): Item[] {
 					: "method",
 			summary: summaryOf(documentation),
 			documentation,
-			signature: signatureOf(member),
+			signature: signatureOf(member, checker, exported),
 			members: [],
 		});
 	}
@@ -147,8 +176,11 @@ export function itemsOf(root: string, door: Door, program: ts.Program): Item[] {
 		throw new Error(`${door.entry} exports nothing`);
 	}
 
+	const surface = checker.getExportsOfModule(moduleSymbol);
+	const named = new Set(surface.map((one) => one.getName()));
+
 	const items: Item[] = [];
-	for (const exported of checker.getExportsOfModule(moduleSymbol)) {
+	for (const exported of surface) {
 		const symbol =
 			exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
 		const declaration = symbol.declarations?.[0];
@@ -161,8 +193,8 @@ export function itemsOf(root: string, door: Door, program: ts.Program): Item[] {
 			kind: kindOf(symbol),
 			summary: summaryOf(documentation),
 			documentation,
-			signature: signatureOf(declaration),
-			members: membersOf(symbol, checker),
+			signature: signatureOf(declaration, checker, named),
+			members: membersOf(symbol, checker, named),
 		});
 	}
 
@@ -236,12 +268,19 @@ export function referenceFrom(doors: Map<string, Item[]>): string {
 		.trim()}\n`;
 }
 
-export function referenceOf(root: string): { reference: string; missing: Undocumented[] } {
+/** What every door exports, as the compiler sees it, keyed by import specifier */
+export function surfaceOf(root: string): Map<string, Item[]> {
 	const program = programOf(root);
 	const doors = new Map<string, Item[]>();
 	for (const door of DOORS) {
 		doors.set(door.specifier, itemsOf(root, door, program));
 	}
+
+	return doors;
+}
+
+export function referenceOf(root: string): { reference: string; missing: Undocumented[] } {
+	const doors = surfaceOf(root);
 
 	return { reference: referenceFrom(doors), missing: undocumentedIn(doors) };
 }

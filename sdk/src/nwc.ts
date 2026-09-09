@@ -291,7 +291,7 @@ export async function nwcVerifyUrl(
 /**
  * One NIP-47 call, for a method this SDK does not wrap. The wallet's own info
  * event lists what it will answer, and anything it refuses comes back as a
- * `WalletRefused` carrying the code it named
+ * `WalletRefused` whose `reason` says which kind of refusal it was
  */
 export async function askWallet(
   connection: NwcConnection,

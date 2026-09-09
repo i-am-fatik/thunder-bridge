@@ -25,9 +25,27 @@ it, and `sell` does in one call what every caller was doing in four.
   domain, draws the QR and hands back a `Sale` with `qr`, `bolt11`, `settled()`,
   `onSettled()` and `prove()`. One call and two names for the whole checkout.
 - `sats`, `msat` and `fiat`: an amount is `sats(21)` or `fiat("4.99", "USD")` rather
-  than a bare millisatoshi integer. A fiat price is converted when the invoice is
-  minted, off the median of four venues unless you pass a `rate` of your own, and a
-  decimal string is read digit by digit rather than through a float.
+  than a bare millisatoshi integer. The type is branded, so `21` does not compile
+  where a price is wanted and cannot quietly mean twenty-one thousandths of a
+  satoshi. A fiat price is converted when the invoice is minted, off the median of
+  four venues unless you pass a `rate` of your own, and a decimal string is read
+  digit by digit rather than through a float.
+- `AmountError` with a `code`, so a refused price is something a caller can branch
+  on rather than a message to match: `not-whole-satoshi`, `not-whole-millisatoshi`,
+  `not-a-decimal`, `too-precise`, `unknown-currency`. `AmountError.is(error)` is the
+  check to use: every entry point bundles its own copy of the class, so `instanceof`
+  holds within one import and that static holds across all of them.
+- `Msat`, `Provable`, `Proven` and `AmountFault` are exported, so a consumer that
+  wraps a price constructor or a proof check can name what it returns.
+- Every one of the gateway's eleven problem types is a static on `ProblemError`, so
+  no caller copies a urn out of the readme.
+- `Proven<Settlement>` is what `serve.webhook` hands `onSettled`, so the preimage is
+  a `string` there rather than something to coerce. `carriesProof` is the type guard
+  that narrows it.
+- `WatchedPayment`, and `Payment` is now `MintedPayment | WatchedPayment`. Checking
+  `kind` is what makes the address, the amount and the invoice non-null, so nothing
+  needs an assertion to read one. The gateway writes those three together or writes
+  none of them, and the decoder refuses a record carrying some of the three.
 - `to` takes one address as a string, so the common case is no longer a list of one.
 - `gateway.serve.webhook(handlers)`: the whole webhook route. It answers the
   challenge, reads the gateway's published key itself, checks the signature, and
@@ -67,7 +85,10 @@ it, and `sell` does in one call what every caller was doing in four.
 | `answerWebhookChallengeRequest` | `gateway.serve.answerWebhookChallenge` |
 | `isProvablyPaid`, `isProvablySettled` | `carriesProof` |
 | `isProblemType(problem, TYPE)` | `ProblemError.is(problem, ProblemError.TYPE)` |
-| `TriggerEvent` | `Payment` |
+| `TriggerEvent` | `Payment`, now a union discriminated on `kind` |
+| `PaymentKind` | gone, the union's own literals say it |
+| `sale.settled()`, `sale.onSettled()` | `sale.paid()`, `sale.onPaid()`, returning `MintedPayment`, since a sale that expired was not a sale |
+| `serve.verifyUrl`, `serve.answerVerifyChallenge` | `relayedVerifyUrl`, `answerVerifyChallenge` at the root, because neither is a handler you mount |
 | `CreatePaymentParams`, `CreateQuoteParams` | `Charge`, and `Priced` where a proof compares |
 | `WatchPaymentParams` | `Handover` |
 | `amountMsat: number` on every rail and trigger | `amount: Amount` |

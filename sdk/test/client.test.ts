@@ -1,3 +1,4 @@
+import { msat } from "../src/amount";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { callerKey, callerOf, paymentNamedBy } from "../../core/caller.js";
@@ -200,7 +201,7 @@ describe("createPayment", () => {
 
     await new ThunderBridge(GATEWAY).mint({
       to: [LN_ADDRESS, "bob@example.org"],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(calls[0].url).toBe(`${GATEWAY}/incoming-payments`);
@@ -217,7 +218,7 @@ describe("createPayment", () => {
 
     await new ThunderBridge(GATEWAY).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     const amount = postedBody(calls)["incoming_amount"] as Record<string, unknown>;
@@ -230,7 +231,7 @@ describe("createPayment", () => {
 
     await new ThunderBridge(GATEWAY).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
       webhookUrl: "https://shop.example.org/hooks/lightning",
     });
 
@@ -246,7 +247,7 @@ describe("createPayment", () => {
 
     await new ThunderBridge(GATEWAY).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(Object.keys(postedBody(calls))).toEqual(["ln_addresses", "incoming_amount"]);
@@ -256,11 +257,11 @@ describe("createPayment", () => {
     const calls = stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
 
     await new ThunderBridge(GATEWAY).mint(
-      { to: [LN_ADDRESS], amount: AMOUNT_MSAT },
+      { to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)},
       { trigger: "the-overlay-holds-this", replay: 10 },
     );
     await new ThunderBridge(GATEWAY).mint(
-      { to: [LN_ADDRESS], amount: AMOUNT_MSAT },
+      { to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)},
       { trigger: "the-overlay-holds-this" },
     );
 
@@ -274,7 +275,7 @@ describe("createPayment", () => {
 
     await new ThunderBridge(`${GATEWAY}/`).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(calls[0].url).toBe(`${GATEWAY}/incoming-payments`);
@@ -286,7 +287,7 @@ describe("createPayment", () => {
 
     const payment = await new ThunderBridge(GATEWAY).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(payment).toEqual(minted);
@@ -304,7 +305,7 @@ describe("createPayment", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(GatewayCheatError);
@@ -319,7 +320,7 @@ describe("createPayment", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(GatewayCheatError);
@@ -330,7 +331,7 @@ describe("createPayment", () => {
     stubFetch({ ...gatewayMints(pendingPayment({ lnAddress: "mallory@evil.example" })) });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(GatewayCheatError);
@@ -343,7 +344,7 @@ describe("createPayment", () => {
 
     const payment = await new ThunderBridge(GATEWAY, { verify: false }).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(payment).toEqual(unprovable);
@@ -369,7 +370,7 @@ describe("createPayment", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS, "bob@example.org"], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS, "bob@example.org"], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(NoWalletAvailableError);
@@ -396,7 +397,7 @@ describe("createPayment", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(ProblemError);
@@ -420,7 +421,7 @@ describe("createPayment", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(ProblemError);
@@ -433,7 +434,7 @@ describe("createPayment", () => {
     const calls = stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
 
     await new ThunderBridge(GATEWAY).mint(
-      { to: [LN_ADDRESS], amount: AMOUNT_MSAT },
+      { to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)},
       { idempotencyKey: "retry-me-0001" },
     );
 
@@ -448,7 +449,7 @@ describe("createPayment", () => {
 
     await new ThunderBridge(GATEWAY).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(headersOf(calls[0])).not.toHaveProperty("idempotency-key");
@@ -469,7 +470,7 @@ describe("createPayment", () => {
 
     const rejection = await new ThunderBridge(GATEWAY)
       .mint(
-        { to: [LN_ADDRESS], amount: AMOUNT_MSAT },
+        { to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)},
         { idempotencyKey: "retry-me-0001" },
       )
       .catch((error: unknown) => error);
@@ -495,7 +496,7 @@ describe("createPayment", () => {
 
     const rejection = await new ThunderBridge(GATEWAY)
       .mint(
-        { to: [LN_ADDRESS], amount: AMOUNT_MSAT },
+        { to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)},
         { idempotencyKey: "retry-me-0001" },
       )
       .catch((error: unknown) => error);
@@ -515,7 +516,7 @@ describe("createPayment", () => {
 
     const rejection = await new ThunderBridge(GATEWAY)
       .mint(
-        { to: [LN_ADDRESS], amount: AMOUNT_MSAT },
+        { to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)},
         { idempotencyKey: "retry-me-0001" },
       )
       .catch((error: unknown) => error);
@@ -534,7 +535,7 @@ describe("createPayment", () => {
 
     const rejection = await new ThunderBridge(GATEWAY)
       .mint(
-        { to: [LN_ADDRESS], amount: AMOUNT_MSAT },
+        { to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)},
         { idempotencyKey: "retry-me-0001" },
       )
       .catch((error: unknown) => error);
@@ -549,7 +550,7 @@ describe("createQuote", () => {
 
     await new ThunderBridge(GATEWAY).quote({
       to: [LN_ADDRESS, "bob@example.org"],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(calls[0].url).toBe(`${GATEWAY}/quotes`);
@@ -571,7 +572,7 @@ describe("createQuote", () => {
 
     const quote = await new ThunderBridge(GATEWAY).quote({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(quote).toEqual({
@@ -593,7 +594,7 @@ describe("createQuote", () => {
 
     await new ThunderBridge(GATEWAY).quote({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(calls.map((call) => call.url)).toEqual([`${GATEWAY}/quotes`]);
@@ -615,7 +616,7 @@ describe("createQuote", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .quote({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .quote({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(NoWalletAvailableError);
@@ -637,7 +638,7 @@ describe("createQuote", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .quote({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .quote({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(ProblemError);
@@ -650,7 +651,7 @@ describe("createQuote", () => {
     stubFetch(gatewayQuotes({ refusals: [{ address: "bob@example.org", reason: "vibes" }] }));
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .quote({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .quote({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(ProblemError);
@@ -661,7 +662,7 @@ describe("createQuote", () => {
 
     const quote = await new ThunderBridge(GATEWAY).quote({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(quote.feeMsat).toBe(0);
@@ -1109,7 +1110,7 @@ describe("what the client will not take on faith", () => {
     stubFetch({ ...gatewayMints(overcharged), ...recipientServing(overcharged.bolt11) });
 
     const refusal = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(GatewayCheatError);
@@ -1163,7 +1164,7 @@ describe("what the client will not take on faith", () => {
     });
 
     const refusal = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(NoWalletAvailableError);
@@ -1176,7 +1177,7 @@ describe("what the client will not take on faith", () => {
       stubFetch({ [`${GATEWAY}/incoming-payments`]: () => new Response(body, { status: 201 }) });
 
       const refusal = await new ThunderBridge(GATEWAY)
-        .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+        .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
         .catch((error: unknown) => error);
 
       expect(refusal).toBeInstanceOf(ProblemError);
@@ -1195,7 +1196,7 @@ describe("what the client will not take on faith", () => {
     });
 
     const refusal = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(ProblemError);
@@ -1207,7 +1208,7 @@ describe("what the client will not take on faith", () => {
     });
 
     const refusal = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(ProblemError);
@@ -1320,8 +1321,8 @@ describe("a private gateway", () => {
     });
     const gateway = new ThunderBridge(GATEWAY, { token: TOKEN, verify: false });
 
-    await gateway.mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT });
-    await gateway.quote({ to: [LN_ADDRESS], amount: AMOUNT_MSAT });
+    await gateway.mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)});
+    await gateway.quote({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)});
     await gateway.payment("pay_0001");
 
     const toGateway = calls.filter((call) => call.url.startsWith(GATEWAY));
@@ -1336,7 +1337,7 @@ describe("a private gateway", () => {
 
     await new ThunderBridge(GATEWAY, { verify: false }).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     expect(headersOf(calls[0])).not.toHaveProperty("authorization");
@@ -1786,7 +1787,7 @@ describe("the problem namespace after the rename", () => {
     });
 
     const refused = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(refused).toBeInstanceOf(ProblemError);
@@ -1804,7 +1805,7 @@ describe("the problem namespace after the rename", () => {
     });
 
     const refused = await new ThunderBridge(GATEWAY)
-      .mint({ to: [LN_ADDRESS], amount: AMOUNT_MSAT })
+      .mint({ to: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)})
       .catch((error: unknown) => error);
 
     expect(refused).toBeInstanceOf(NoWalletAvailableError);
@@ -1955,7 +1956,7 @@ describe("a client that names itself", () => {
 
     await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).mint({
       to: [LN_ADDRESS],
-      amount: AMOUNT_MSAT,
+      amount: msat(AMOUNT_MSAT),
     });
 
     const call = calls[0];

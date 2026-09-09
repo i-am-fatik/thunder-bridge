@@ -53,3 +53,15 @@ test("every table row holds the columns its table has, whatever the signature co
 		expect(row.replace(/\\\|/g, "").split("|").length).toBeLessThanOrEqual(5);
 	}
 });
+
+test("an interface whose base is not published shows the base's fields rather than its name", () => {
+	expect(reference).toContain("interface MintedPayment {");
+	expect(reference).not.toContain("extends Reported");
+	for (const inherited of ["\tid: string;", "\tsealed: string | null;"]) {
+		expect(reference).toContain(inherited);
+	}
+});
+
+test("an interface whose base is published keeps the extends, because the reader can follow it", () => {
+	expect(reference).toContain("interface GatewaysOptions extends ThunderBridgeOptions");
+});

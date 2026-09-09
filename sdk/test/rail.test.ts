@@ -1,3 +1,4 @@
+import { msat } from "../src/amount";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preimageMatchesHash } from "../../core/bolt11.js";
@@ -102,7 +103,7 @@ function bank(overrides: Partial<BankRailConfig> = {}): Rail {
 function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
   return lightningRail(new ThunderBridge(GATEWAY, { verify: false }), {
     to: [LN_ADDRESS],
-    amount: () => AMOUNT_MSAT,
+    amount: () => msat(AMOUNT_MSAT),
     ...overrides,
   });
 }
@@ -110,7 +111,7 @@ function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
 function blind(overrides: Partial<BlindLightningRailConfig> = {}): Rail {
   return blindLightningRail(new ThunderBridge(GATEWAY, { verify: false, token: "hunter2" }), {
     to: [LN_ADDRESS],
-    amount: () => AMOUNT_MSAT,
+    amount: () => msat(AMOUNT_MSAT),
     ...overrides,
   });
 }
@@ -249,7 +250,7 @@ describe("lightningRail", () => {
 
   it("prices the order through the shop's own function, not through the gateway", async () => {
     stubFetch(railsServing());
-    const priced = vi.fn(() => AMOUNT_MSAT);
+    const priced = vi.fn(() => msat(AMOUNT_MSAT));
 
     await lightning({ amount: priced })(ORDER);
 

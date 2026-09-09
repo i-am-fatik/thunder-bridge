@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import { preimageMatchesHash } from "../core/bolt11.ts";
-import type { Order } from "../sdk/dist/index.js";
-import { ThunderBridge } from "../sdk/dist/index.js";
+import { msat, type Order, ThunderBridge } from "../sdk/dist/index.js";
 import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "../sdk/dist/nwc.js";
 
 const SEALING_SECRET = "rail_smoke_secret_b73e4f19ac0d258614fa";
@@ -36,7 +35,7 @@ console.log(`endpoint ${publicEndpoint}\n`);
 
 const rail = nwcRail(new ThunderBridge(gatewayUrl), {
 	connection,
-	amount: () => AMOUNT_MSAT,
+	amount: () => msat(AMOUNT_MSAT),
 	verifyThrough: { endpoint: publicEndpoint, secret: SEALING_SECRET },
 	description: (order: Order) => `thunder-bridge rail smoke ${order.reference}`,
 });
