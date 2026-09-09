@@ -35,6 +35,10 @@ it, and `sell` does in one call what every caller was doing in four.
   `not-a-decimal`, `too-precise`, `unknown-currency`. `AmountError.is(error)` is the
   check to use: every entry point bundles its own copy of the class, so `instanceof`
   holds within one import and that static holds across all of them.
+- `Range` on the trigger config, and `wrapFeeCeiling` returns `Msat` rather than a
+  bare number, so the unit is in the type where every other amount carries it.
+- `Sellable` is exported, so the parameter type of `sell` can be named by a caller
+  wrapping it. It appeared only inside the signature before.
 - `Msat`, `Provable`, `Proven` and `AmountFault` are exported, so a consumer that
   wraps a price constructor or a proof check can name what it returns.
 - Every one of the gateway's eleven problem types is a static on `ProblemError`, so
@@ -55,6 +59,9 @@ it, and `sell` does in one call what every caller was doing in four.
   with the `gateway` field gone from five config types.
 - `relayThrough` on `TriggerConfig`, so a blind LNURL endpoint can be watched by a
   gateway that enforces its verify challenge. Blind minting could not be, before.
+- A `{ least, most }` range on `TriggerConfig.amount`, so the payer chooses inside
+  it and a printed QR is a tip jar rather than a fixed price. The callback signs
+  both ends and refuses anything outside them, and one amount still pins the price.
 - `thunder-bridge/qr`, `/price`, `/bank` and `/nwc`, so a checkout page downloads
   neither the exchange venues nor the nostr crypto.
 - [docs/api.md](../docs/api.md), generated from the TSDoc on every export and
@@ -86,6 +93,10 @@ it, and `sell` does in one call what every caller was doing in four.
 | `isProvablyPaid`, `isProvablySettled` | `carriesProof` |
 | `isProblemType(problem, TYPE)` | `ProblemError.is(problem, ProblemError.TYPE)` |
 | `TriggerEvent` | `Payment`, now a union discriminated on `kind` |
+| `isPrivate` | `hasToken`, because it reports what you configured and not what the gateway does. `refusesStrangers()` is the one that asks the gateway, and the one to guard with |
+| `to` on a charge, a trigger and a rail | `paidTo`, because "sell to X" makes X the buyer while the field names who receives the money |
+| `SellOrder` | `Sellable`, leaving `Order` to mean the shop's own order alone |
+| `lnurlToSvg`, `lnurlToDataUrl` | `lnurlEndpointToSvg`, `lnurlEndpointToDataUrl`, because they take the URL you mounted and do the bech32 themselves. Under the old names `lnurlToSvg(toLnurl(url))` read as the obvious composition and threw |
 | `PaymentKind` | gone, the union's own literals say it |
 | `sale.settled()`, `sale.onSettled()` | `sale.paid()`, `sale.onPaid()`, returning `MintedPayment`, since a sale that expired was not a sale |
 | `serve.verifyUrl`, `serve.answerVerifyChallenge` | `relayedVerifyUrl`, `answerVerifyChallenge` at the root, because neither is a handler you mount |

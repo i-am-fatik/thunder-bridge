@@ -13,7 +13,7 @@ import {
   REQUEST_IN_FLIGHT,
 } from "./errors.js";
 import { Rails } from "./rail.js";
-import { type Sale, type SellOrder, saleOf } from "./sale.js";
+import { type Sale, type Sellable, saleOf } from "./sale.js";
 import { Serve } from "./serving.js";
 import type {
   Charge,
@@ -198,22 +198,21 @@ export class ThunderBridge {
   }
 
   /**
-   * Whether a token was given, which is what makes an instance yours: a gateway
-   * started with `GATEWAY_TOKEN` answers nobody else, so anything you hand it
-   * stays between you and it
+   * Whether a token was given to this instance, which is your side of the
+   * arrangement and says nothing about the gateway's. `refusesStrangers` is the
+   * one that asks the gateway, and it is the one to guard anything with
    */
-  get isPrivate(): boolean {
+  get hasToken(): boolean {
     return this.token !== null;
   }
 
   /**
    * Whether the gateway turns away a caller carrying no token, asked by making
-   * one unauthenticated read it would have to refuse. `isPrivate` answers only
-   * whether you configured a token, which is your side of the arrangement and
-   * says nothing about the gateway's, so a made-up token against a public
-   * instance reads as private and is not. Asked once and remembered, because an
-   * instance does not change its mind. Anything other than a refusal counts as
-   * open, so an unreachable gateway fails closed
+   * one unauthenticated read it would have to refuse. `hasToken` answers only
+   * whether you configured one, so a made-up token against a public instance
+   * reads as yours and is not. Asked once and remembered, because an instance
+   * does not change its mind. Anything other than a refusal counts as open, so
+   * an unreachable gateway fails closed
    */
   async refusesStrangers(): Promise<boolean> {
     this.strangers ??= fetch(`${this.baseUrl}/incoming-payments/${STRANGER_PROBE}`, {
@@ -230,7 +229,7 @@ export class ThunderBridge {
    * asked for, draws the QR and hands back one object with a way to wait for the
    * money. This is `mint` plus the two things every caller does next
    */
-  async sell(order: SellOrder): Promise<Sale> {
+  async sell(order: Sellable): Promise<Sale> {
     return saleOf(this, await this.mint(order, order), order);
   }
 

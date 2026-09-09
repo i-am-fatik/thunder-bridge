@@ -31,7 +31,7 @@ export function createRequestBody(
   replay: number | undefined,
 ): string {
   return JSON.stringify({
-    ln_addresses: priced.to,
+    ln_addresses: priced.paidTo,
     incoming_amount: toAmount(priced.amountMsat),
     webhook: webhookUrl ? { url: webhookUrl } : undefined,
     trigger: trigger ?? undefined,
@@ -41,7 +41,7 @@ export function createRequestBody(
 
 export function quoteRequestBody(priced: Priced): string {
   return JSON.stringify({
-    ln_addresses: priced.to,
+    ln_addresses: priced.paidTo,
     amount: toAmount(priced.amountMsat),
   });
 }

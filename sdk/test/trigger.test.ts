@@ -74,7 +74,7 @@ function gatewayServing(overrides: Record<string, unknown> = {}): Routes {
 
 function endpoint(overrides: Partial<TriggerConfig> = {}) {
   return lnurlPayEndpoint(new ThunderBridge(GATEWAY, { verify: false }), {
-    to: [FALLBACK, WINNER],
+    paidTo: [FALLBACK, WINNER],
     amount: () => msat(AMOUNT_MSAT),
     secret: SECRET,
     ...overrides,
@@ -118,7 +118,8 @@ describe("the payRequest half", () => {
     const callback = new URL((await payRequest(endpoint())).callback);
 
     expect(callback.searchParams.get("to")).toBe(WINNER);
-    expect(callback.searchParams.get("msat")).toBe(String(AMOUNT_MSAT));
+    expect(callback.searchParams.get("least")).toBe(String(AMOUNT_MSAT));
+    expect(callback.searchParams.get("most")).toBe(String(AMOUNT_MSAT));
     expect(callback.searchParams.get("sig")).toMatch(/^[0-9a-f]{64}$/);
   });
 
@@ -249,7 +250,7 @@ describe("the callback half", () => {
     stubFetch(gatewayServing());
     const handler = endpoint();
     const callback = await callbackFor(handler);
-    callback.searchParams.set("msat", "100000000");
+    callback.searchParams.set("most", "100000000");
 
     const refused = (await (await handler(new Request(callback))).json()) as Record<string, string>;
 
@@ -497,7 +498,7 @@ describe("the binding finding 1 is about", () => {
     });
 
     const handler = lnurlPayEndpoint(new ThunderBridge(GATEWAY), {
-      to: [FALLBACK, WINNER],
+      paidTo: [FALLBACK, WINNER],
       amount: () => msat(AMOUNT_MSAT),
       secret: SECRET,
     });
@@ -621,5 +622,79 @@ describe("the watch ticket endpoints, which trade the secret for a pass that exp
     await publicWatchTicketEndpoint(owner(), board())(asking());
 
     expect(JSON.parse(String(bare[0]?.init?.body))).toEqual({ trigger_secret: WATCH_SECRET });
+  });
+});
+
+describe("a trigger a payer chooses the amount on", () => {
+  async function callbackFor(handler: (request: Request) => Promise<Response>): Promise<URL> {
+    return new URL((await payRequest(handler)).callback);
+  }
+
+  function jar(least: number, most: number) {
+    return lnurlPayEndpoint(new ThunderBridge(GATEWAY, { verify: false }), {
+      paidTo: [FALLBACK, WINNER],
+      amount: { least: msat(least), most: msat(most) },
+      secret: SECRET,
+    });
+  }
+
+  it("offers the range rather than one price, so a wallet shows a field to type in", async () => {
+    stubFetch(gatewayServing());
+
+    const offer = await payRequest(jar(1_000, 1_000_000));
+
+    expect(offer["minSendable"]).toBe(1_000);
+    expect(offer["maxSendable"]).toBe(1_000_000);
+  });
+
+  it("mints exactly what the payer asked for inside the range", async () => {
+    const calls = stubFetch(gatewayServing());
+    const handler = jar(1_000, 1_000_000);
+    const callback = await callbackFor(handler);
+    callback.searchParams.set("amount", "50000");
+
+    const answer = (await (await handler(new Request(callback))).json()) as Record<string, string>;
+
+    expect(answer["status"]).toBe("OK");
+    const minted = calls.find((call) => call.url === `${GATEWAY}/incoming-payments`);
+    const body = JSON.parse(String(minted?.init?.body)) as Record<string, { value?: string }>;
+    expect(body["incoming_amount"]?.value).toBe("50000");
+  });
+
+  it("refuses an amount under the floor and over the ceiling, naming the range", async () => {
+    stubFetch(gatewayServing());
+    const handler = jar(1_000, 1_000_000);
+
+    for (const asked of ["999", "1000001"]) {
+      const callback = await callbackFor(handler);
+      callback.searchParams.set("amount", asked);
+      const refused = (await (await handler(new Request(callback))).json()) as Record<
+        string,
+        string
+      >;
+
+      expect(refused["status"]).toBe("ERROR");
+      expect(refused["reason"]).toContain("between 1000 and 1000000");
+    }
+  });
+
+  it("takes the floor when a wallet names no amount at all", async () => {
+    const calls = stubFetch(gatewayServing());
+    const handler = jar(1_000, 1_000_000);
+
+    await handler(new Request(await callbackFor(handler)));
+
+    const minted = calls.find((call) => call.url === `${GATEWAY}/incoming-payments`);
+    const body = JSON.parse(String(minted?.init?.body)) as Record<string, { value?: string }>;
+    expect(body["incoming_amount"]?.value).toBe("1000");
+  });
+
+  it("refuses a range that ends below where it starts, rather than serving nonsense", async () => {
+    stubFetch(gatewayServing());
+
+    const offer = await payRequest(jar(1_000_000, 1_000));
+
+    expect(offer["status"]).toBe("ERROR");
+    expect(offer["reason"]).toContain("cannot end at 1000 msat when it starts at 1000000");
   });
 });

@@ -1,11 +1,11 @@
 import { type Resolved, resolve } from "../../core/lnurl.js";
 import { NoWalletAvailable } from "../../core/refusal.js";
-import { type Amount, type Msat, millisatoshi, msat } from "./amount.js";
+import { type Amount, amountNow, type Msat, msat } from "./amount.js";
 import { type BankTransfer, type BankTransferParams, bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
 import { medianOf, msatFor, type Ticker } from "./price.js";
-import { encodeForQr } from "./qr.js";
+import { toLightningUri } from "./qr.js";
 import { relayedVerifyUrl } from "./relay.js";
 
 const BANK = "bank";
@@ -64,7 +64,7 @@ export interface RailConfig {
 /** A Lightning rail the gateway mints for, bound once and then given one order at a time */
 export interface LightningRailConfig extends RailConfig {
   /** Priority list, the first address that can prove an invoice wins */
-  to: string | string[];
+  paidTo: string | string[];
 
   /**
    * What to charge for one order, the order's own price converted at `rate` by
@@ -167,8 +167,8 @@ export function lightningRail(gateway: ThunderBridge, config: LightningRailConfi
   return async (order) => {
     const payment = await gateway.mint(
       {
-        to: config.to,
-        amount: await pricedFor(order, config.amount, config.rate),
+        paidTo: config.paidTo,
+        amount: await msatForOrder(order, config.amount, config.rate),
         webhookUrl: config.webhookUrl,
       },
       {
@@ -182,7 +182,7 @@ export function lightningRail(gateway: ThunderBridge, config: LightningRailConfi
       id: payment.id,
       rail: config.name ?? LIGHTNING,
       scan: payment.bolt11,
-      qr: encodeForQr(payment.bolt11),
+      qr: toLightningUri(payment.bolt11),
       expiresAt: payment.expiresAt,
     };
   };
@@ -197,8 +197,8 @@ export function lightningRail(gateway: ThunderBridge, config: LightningRailConfi
 export function blindLightningRail(gateway: ThunderBridge, config: BlindLightningRailConfig): Rail {
   return async (order) => {
     const resolved = await invoiceFrom(
-      config.to,
-      await pricedFor(order, config.amount, config.rate),
+      config.paidTo,
+      await msatForOrder(order, config.amount, config.rate),
     );
     const relay = config.relayThrough;
     const watched = await gateway.watch({
@@ -221,7 +221,7 @@ export function blindLightningRail(gateway: ThunderBridge, config: BlindLightnin
       id: watched.id,
       rail: config.name ?? LIGHTNING,
       scan: resolved.bolt11,
-      qr: encodeForQr(resolved.bolt11),
+      qr: toLightningUri(resolved.bolt11),
       expiresAt: resolved.expiresAt,
     };
   };
@@ -236,10 +236,10 @@ export function blindLightningRail(gateway: ThunderBridge, config: BlindLightnin
  * Server side: it resolves hostnames and refuses a private one, which no browser can
  * do. Throws `NoWalletAvailableError` when no address on the list would serve
  */
-export async function invoiceFrom(to: string | string[], amount: Amount): Promise<Resolved> {
-  const addresses = typeof to === "string" ? [to] : to;
+export async function invoiceFrom(paidTo: string | string[], amount: Amount): Promise<Resolved> {
+  const addresses = typeof paidTo === "string" ? [paidTo] : paidTo;
   try {
-    return await resolve(addresses, await millisatoshi(amount));
+    return await resolve(addresses, await amountNow(amount));
   } catch (refused: unknown) {
     if (refused instanceof NoWalletAvailable) {
       throw new NoWalletAvailableError({ title: refused.message }, refused.wallets);
@@ -252,13 +252,13 @@ export async function invoiceFrom(to: string | string[], amount: Amount): Promis
  * What one order costs on a Lightning rail: whatever the rail says, or the
  * order's own fiat price converted at the rate when nothing says otherwise
  */
-export async function pricedFor(
+export async function msatForOrder(
   order: Order,
   amount: ((order: Order) => Amount) | undefined,
   rate: Ticker | undefined,
 ): Promise<Msat> {
   if (amount !== undefined) {
-    return await millisatoshi(amount(order));
+    return await amountNow(amount(order));
   }
 
   return msat(msatFor(order.amountMinor, await (rate ?? medianOf())(order.currency)));

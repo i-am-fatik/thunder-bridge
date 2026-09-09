@@ -31,8 +31,8 @@ const HONEST_INVOICE = bolt11({
   descriptionHash: sha256OfText(METADATA),
 });
 
-function asked(to: string[], amountMsat = AMOUNT_MSAT): Priced {
-  return { to, amountMsat };
+function asked(paidTo: string[], amountMsat = AMOUNT_MSAT): Priced {
+  return { paidTo, amountMsat };
 }
 
 function payment(overrides: Partial<MintedPayment> = {}): MintedPayment {

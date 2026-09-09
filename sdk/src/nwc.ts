@@ -13,8 +13,8 @@ import {
   verifyEvent,
 } from "./nostr.js";
 import type { Ticker } from "./price.js";
-import { encodeForQr } from "./qr.js";
-import { type Leg, type Order, pricedFor, type Rail, type RailConfig } from "./rail.js";
+import { toLightningUri } from "./qr.js";
+import { type Leg, msatForOrder, type Order, type Rail, type RailConfig } from "./rail.js";
 import { answerVerifyChallenge } from "./webhook.js";
 
 const REQUEST_KIND = 23194;
@@ -511,7 +511,7 @@ export function nwcRail(gateway: ThunderBridge, config: NwcRailConfig): Rail {
   return async (order) => {
     const invoice = await nwcInvoice(
       config.connection,
-      await pricedFor(order, config.amount, config.rate),
+      await msatForOrder(order, config.amount, config.rate),
       config.description?.(order) ?? order.reference,
     );
     const watched = await gateway.watch({
@@ -532,7 +532,7 @@ export function nwcRail(gateway: ThunderBridge, config: NwcRailConfig): Rail {
       id: watched.id,
       rail: config.name ?? "lightning",
       scan: invoice.bolt11,
-      qr: encodeForQr(invoice.bolt11),
+      qr: toLightningUri(invoice.bolt11),
       expiresAt: invoice.expiresAt,
     };
   };

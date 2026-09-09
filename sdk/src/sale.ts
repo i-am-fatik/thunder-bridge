@@ -7,7 +7,7 @@ import { proveSettlement } from "./verify.js";
  * One thing to sell: who is paid, how much, and how the QR should look. Every
  * field beyond `to` and `amount` has a default, so the shortest sale names two
  */
-export interface SellOrder extends Charge, SellOptions {}
+export interface Sellable extends Charge, SellOptions {}
 
 /** What `sell` takes beyond the charge itself */
 export interface SellOptions extends WaitOptions {
@@ -90,7 +90,7 @@ export function saleOf(
       paidOnly(await gateway.settled(payment.id, { ...waitingOf(options), ...waiting })),
 
     prove: () =>
-      proveSettlement(payment, { to: [payment.lnAddress], amountMsat: payment.amountMsat }),
+      proveSettlement(payment, { paidTo: [payment.lnAddress], amountMsat: payment.amountMsat }),
 
     onPaid: (arrived, failed) => {
       const stop = new AbortController();

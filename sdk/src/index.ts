@@ -43,9 +43,9 @@ export type {
 export { invoiceFrom } from "./rail.js";
 export type { LightningVerifyConfig, Relayed } from "./relay.js";
 export { relayedVerifyUrl } from "./relay.js";
-export type { Sale, SellOptions } from "./sale.js";
+export type { Sale, Sellable, SellOptions } from "./sale.js";
 export type { Handler, Serve, WebhookHandlers } from "./serving.js";
-export type { Minted, TriggerConfig, WatchTicketConfig } from "./trigger.js";
+export type { Minted, Range, TriggerConfig, WatchTicketConfig } from "./trigger.js";
 export type {
   Charge,
   Handover,

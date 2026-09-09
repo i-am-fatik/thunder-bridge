@@ -79,7 +79,7 @@ describe("sell", () => {
   it("hands back the invoice, its QR and everything a checkout page shows", async () => {
     stubFetch(minting());
 
-    const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
+    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
 
     expect(sale.id).toBe("pay_0001");
     expect(sale.bolt11).toBe(INVOICE);
@@ -93,7 +93,7 @@ describe("sell", () => {
   it("takes one address as a string, so the common case is not a list of one", async () => {
     const calls = stubFetch(minting());
 
-    await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
+    await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
 
     const body = JSON.parse(String(calls[0]?.init?.body)) as Record<string, unknown>;
     expect(body["ln_addresses"]).toEqual([LN_ADDRESS]);
@@ -103,7 +103,7 @@ describe("sell", () => {
     stubFetch(minting());
 
     const sale = await selling().sell({
-      to: LN_ADDRESS,
+      paidTo: LN_ADDRESS,
       amount: sats(21),
       qr: { size: 128, color: "#a8530c" },
     });
@@ -114,7 +114,7 @@ describe("sell", () => {
 
   it("resolves the wait once the money is proven to have arrived", async () => {
     stubFetch(minting());
-    const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
+    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
 
     const waiting = sale.paid();
     theSocket().onmessage?.({
@@ -126,7 +126,7 @@ describe("sell", () => {
 
   it("rejects the wait when the invoice expires unpaid, rather than resolving a non-payment", async () => {
     stubFetch(minting());
-    const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
+    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
 
     const waiting = sale.paid();
     theSocket().onmessage?.({ data: JSON.stringify(wire({ status: "expired" })) });
@@ -136,7 +136,7 @@ describe("sell", () => {
 
   it("calls back instead of awaiting, for a page with something else to do", async () => {
     stubFetch(minting());
-    const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
+    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
     const paid = vi.fn();
 
     sale.onPaid(paid);
@@ -150,7 +150,7 @@ describe("sell", () => {
 
   it("stops waiting when the returned function is called, and reports nothing after", async () => {
     stubFetch(minting());
-    const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
+    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
     const paid = vi.fn();
     const failed = vi.fn();
 
@@ -177,7 +177,7 @@ describe("sale.prove", () => {
         }),
       [VERIFY_URL]: () => jsonResponse({ pr: INVOICE, settled: true, preimage: PREIMAGE }),
     });
-    const sale = await selling().sell({ to: LN_ADDRESS, amount: sats(21) });
+    const sale = await selling().sell({ paidTo: LN_ADDRESS, amount: sats(21) });
 
     await expect(sale.prove()).resolves.toBe(PREIMAGE);
   });

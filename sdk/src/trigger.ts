@@ -3,7 +3,7 @@ import { resolve } from "../../core/lnurl.js";
 import { seal } from "../../core/sealed.js";
 import { sha256Hex } from "../../core/sha256.js";
 import type { Amount } from "./amount.js";
-import { millisatoshi, msat } from "./amount.js";
+import { amountNow, msat } from "./amount.js";
 import type { ThunderBridge } from "./client.js";
 import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
 import { relayedVerifyUrl } from "./relay.js";
@@ -13,13 +13,17 @@ const NONCE_BYTES = 16;
 /** An LNURL-pay endpoint of your own: whose wallets it stands for, and what it charges */
 export interface TriggerConfig {
   /** Priority list, quoted at payRequest and then pinned for the callback */
-  to: string | string[];
+  paidTo: string | string[];
 
   /**
    * What this trigger costs right now, asked once per payRequest. `fiat` makes it
-   * a live rate, and any function of your own makes it a time of day rule
+   * a live rate, and any function of your own makes it a time of day rule.
+   *
+   * Give it a `{ least, most }` range instead and the payer chooses inside it,
+   * which is what a tip jar is. One amount pins the price and the wallet offers
+   * no field to type in
    */
-  amount: Amount;
+  amount: Amount | Range;
 
   /**
    * Signs the callback URL. Without it anyone could call the callback and make
@@ -66,6 +70,16 @@ export interface TriggerConfig {
    * watcher of this trigger holds the same one
    */
   sealed?: { secret: string; data: (minted: Minted) => unknown };
+}
+
+/** What a blind mint produced, which is what the sealed payload is built from */
+/**
+ * What a payer may choose to send, when the endpoint lets them choose at all.
+ * Both ends are asked once per payRequest, so a fiat range moves with the rate
+ */
+export interface Range {
+  least: Amount;
+  most: Amount;
 }
 
 /** What a blind mint produced, which is what the sealed payload is built from */
@@ -164,23 +178,40 @@ export function publicWatchTicketEndpoint(
 }
 
 async function offer(gateway: ThunderBridge, config: TriggerConfig, url: URL): Promise<Response> {
-  const amountMsat = await millisatoshi(config.amount);
-  const quote = await gateway.quote({ to: config.to, amount: amountMsat });
+  const { least, most } = await spread(config.amount);
+  const quote = await gateway.quote({ paidTo: config.paidTo, amount: msat(least) });
 
   const nonce = randomNonce();
   const callback = new URL(config.baseUrl ?? `${url.origin}${url.pathname}`);
   callback.searchParams.set("to", quote.lnAddress);
-  callback.searchParams.set("msat", String(amountMsat));
+  callback.searchParams.set("least", String(least));
+  callback.searchParams.set("most", String(most));
   callback.searchParams.set("n", nonce);
-  callback.searchParams.set("sig", await sign(config.secret, quote.lnAddress, amountMsat, nonce));
+  callback.searchParams.set("sig", await sign(config.secret, quote.lnAddress, least, most, nonce));
 
   return Response.json({
     tag: "payRequest",
     callback: callback.toString(),
     metadata: quote.metadata,
-    minSendable: amountMsat,
-    maxSendable: amountMsat,
+    minSendable: least,
+    maxSendable: most,
   });
+}
+
+async function spread(amount: Amount | Range): Promise<{ least: number; most: number }> {
+  if (typeof amount === "number" || typeof amount === "function") {
+    const pinned = await amountNow(amount);
+
+    return { least: pinned, most: pinned };
+  }
+
+  const least = await amountNow(amount.least);
+  const most = await amountNow(amount.most);
+  if (most < least) {
+    throw new Error(`a range cannot end at ${most} msat when it starts at ${least}`);
+  }
+
+  return { least, most };
 }
 
 async function mint(
@@ -189,17 +220,23 @@ async function mint(
   url: URL,
   address: string,
 ): Promise<Response> {
-  const amountMsat = Number(url.searchParams.get("msat"));
+  const least = Number(url.searchParams.get("least"));
+  const most = Number(url.searchParams.get("most"));
   const nonce = url.searchParams.get("n") ?? "";
   const signature = url.searchParams.get("sig") ?? "";
-  const expected = await sign(config.secret, address, amountMsat, nonce);
+  const expected = await sign(config.secret, address, least, most, nonce);
   if (!equalInConstantTime(signature, expected)) {
     return refuse("this callback was not signed here");
   }
 
-  const wanted = url.searchParams.get("amount");
-  if (wanted !== null && Number(wanted) !== amountMsat) {
-    return refuse(`this trigger costs exactly ${amountMsat} msat`);
+  const asked = url.searchParams.get("amount");
+  const amountMsat = asked === null ? least : Number(asked);
+  if (!Number.isSafeInteger(amountMsat) || amountMsat < least || amountMsat > most) {
+    return refuse(
+      least === most
+        ? `this trigger costs exactly ${least} msat`
+        : `this trigger takes between ${least} and ${most} msat`,
+    );
   }
 
   const minted = config.blind
@@ -222,7 +259,7 @@ async function mintThroughGateway(
   nonce: string,
 ): Promise<{ bolt11: string; verifyUrl: string }> {
   const payment = await gateway.mint(
-    { to: address, amount: msat(amountMsat) },
+    { paidTo: address, amount: msat(amountMsat) },
     { idempotencyKey: nonce, trigger: config.watchSecret, replay: config.replay },
   );
 
@@ -268,8 +305,14 @@ function alreadyWatched(refused: unknown): boolean {
   return refused instanceof ProblemError && isProblemType(refused, PAYMENT_ALREADY_WATCHED);
 }
 
-function sign(secret: string, address: string, amountMsat: number, nonce: string): Promise<string> {
-  return hmacHex(secret, `${address}|${amountMsat}|${nonce}`);
+function sign(
+  secret: string,
+  address: string,
+  least: number,
+  most: number,
+  nonce: string,
+): Promise<string> {
+  return hmacHex(secret, `${address}|${least}|${most}|${nonce}`);
 }
 
 function randomNonce(): string {

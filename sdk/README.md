@@ -83,7 +83,7 @@ import { sats, ThunderBridge } from "thunder-bridge";
 const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe");
 
 const sale = await gateway.sell({
-  to: ["iamfatik@blink.sv", "iamfatik@coinos.io"],
+  paidTo: ["iamfatik@blink.sv", "iamfatik@coinos.io"],
   amount: sats(21),
   signal: AbortSignal.timeout(600_000),
 });
@@ -290,16 +290,16 @@ const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe", {
   secret: "a-long-lived-server-side-secret",
 });
 
-const sale = await gateway.sell({ to: "iamfatik@blink.sv", amount: sats(21) });
+const sale = await gateway.sell({ paidTo: "iamfatik@blink.sv", amount: sats(21) });
 const read = await gateway.payment(sale.id);
-const quoted = await gateway.quote({ to: "iamfatik@blink.sv", amount: sats(21) });
+const quoted = await gateway.quote({ paidTo: "iamfatik@blink.sv", amount: sats(21) });
 
 const lnurl = gateway.serve.lnurlPay({
-  to: "iamfatik@blink.sv",
+  paidTo: "iamfatik@blink.sv",
   amount: sats(21),
   secret: "a-long-lived-server-side-secret",
 });
-const rail = gateway.rails.lightning({ to: "iamfatik@blink.sv", amount: () => sats(21) });
+const rail = gateway.rails.lightning({ paidTo: "iamfatik@blink.sv", amount: () => sats(21) });
 ```
 
 - **the payments themselves** are `sell`, `mint`, `quote`, `watch`, `payment`,
@@ -376,7 +376,7 @@ declare const gateway: ThunderBridge;
 declare function report(line: string): void;
 
 try {
-  await gateway.mint({ to: "iamfatik@blink.sv", amount: msat(21_000) });
+  await gateway.mint({ paidTo: "iamfatik@blink.sv", amount: msat(21_000) });
 } catch (error) {
   if (error instanceof GatewayCheatError) {
     report(`the gateway cheated: ${error.code} on payment ${error.paymentId}`);

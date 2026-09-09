@@ -1,4 +1,4 @@
-import { millisatoshi } from "./amount.js";
+import { amountNow } from "./amount.js";
 import type { Charge, Priced } from "./types.js";
 
 /**
@@ -8,10 +8,10 @@ import type { Charge, Priced } from "./types.js";
  * against the one that was actually used
  */
 export async function priced(charge: Charge): Promise<Priced> {
-  const to = typeof charge.to === "string" ? [charge.to] : [...charge.to];
-  if (to.length === 0) {
+  const paidTo = typeof charge.paidTo === "string" ? [charge.paidTo] : [...charge.paidTo];
+  if (paidTo.length === 0) {
     throw new Error("name at least one lightning address to pay");
   }
 
-  return { to, amountMsat: await millisatoshi(charge.amount) };
+  return { paidTo, amountMsat: await amountNow(charge.amount) };
 }

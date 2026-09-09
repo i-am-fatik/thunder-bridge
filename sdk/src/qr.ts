@@ -18,7 +18,7 @@ const SAFE_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$|^rgba?\([\d.,%/
  * keeps its case, because its local part is case sensitive and the at-sign
  * forces byte mode whatever we do
  */
-export function encodeForQr(destination: string): string {
+export function toLightningUri(destination: string): string {
   const scanned = isLnAddress(destination) ? destination : destination.toUpperCase();
 
   return `LIGHTNING:${scanned}`;
@@ -26,7 +26,7 @@ export function encodeForQr(destination: string): string {
 
 /** Render a BOLT11 invoice or a lightning address as an SVG QR code */
 export function invoiceToSvg(destination: string, options?: QrOptions): string {
-  return svgOf(encodeForQr(destination), options);
+  return svgOf(toLightningUri(destination), options);
 }
 
 /** SVG data URL for an `<img>` `src` */
@@ -35,17 +35,20 @@ export function invoiceToDataUrl(destination: string, options?: QrOptions): stri
 }
 
 /**
- * Render your own LNURL-pay endpoint, the URL `lnurlPayEndpoint` is mounted on,
- * as the QR a payer scans. Nothing is minted and nothing expires, so this is the
- * code a tip jar prints once and an overlay shows all stream
+ * Render your own LNURL-pay endpoint, the URL `serve.lnurlPay` is mounted on, as
+ * the QR a payer scans. It takes the endpoint URL and does the bech32 itself, so
+ * do not hand it the output of `toLnurl` - that is what this calls for you.
+ *
+ * Nothing is minted and nothing expires, so this is the code a tip jar prints
+ * once and an overlay shows all stream
  */
-export function lnurlToSvg(endpoint: string, options?: QrOptions): string {
+export function lnurlEndpointToSvg(endpoint: string, options?: QrOptions): string {
   return svgOf(toLnurl(endpoint), options);
 }
 
 /** SVG data URL of the endpoint's QR, for an `<img>` `src` */
-export function lnurlToDataUrl(endpoint: string, options?: QrOptions): string {
-  return asDataUrl(lnurlToSvg(endpoint, options));
+export function lnurlEndpointToDataUrl(endpoint: string, options?: QrOptions): string {
+  return asDataUrl(lnurlEndpointToSvg(endpoint, options));
 }
 
 /**

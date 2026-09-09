@@ -55,12 +55,14 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`Rail`](#thunder-bridge-rail) | type | A payment method |
 | [`RailConfig`](#thunder-bridge-railconfig) | interface | What every rail takes, whatever it moves |
 | [`Rails`](#thunder-bridge-rails) | class | One call per sale, whatever the rail moves |
+| [`Range`](#thunder-bridge-range) | interface | What a payer may choose to send, when the endpoint lets them choose at all |
 | [`Relayed`](#thunder-bridge-relayed) | interface | The wallet's own LUD-21 URL and the hash its preimage has to match |
 | [`relayedVerifyUrl`](#thunder-bridge-relayedverifyurl) | function | The URL to hand the gateway instead of the wallet's own, with the wallet's sealed inside it |
 | [`Resolved`](#thunder-bridge-resolved) | type | An invoice a lightning address issued, with everything needed to watch and to prove it |
 | [`Sale`](#thunder-bridge-sale) | interface | One thing sold: the invoice to show, the QR to draw it with, and one way to find out it was paid |
 | [`sats`](#thunder-bridge-sats) | function | A whole number of satoshi, so `sats(21)` is 21000 millisatoshi |
 | [`seal`](#thunder-bridge-seal) | function | Encrypt what the watcher needs and the gateway must not have |
+| [`Sellable`](#thunder-bridge-sellable) | interface | One thing to sell: who is paid, how much, and how the QR should look |
 | [`SellOptions`](#thunder-bridge-selloptions) | interface | What `sell` takes beyond the charge itself |
 | [`Serve`](#thunder-bridge-serve) | class | Everything one gateway lets you mount, in one place so a caller never has to know which handler needs the gateway and which does not |
 | [`Settlement`](#thunder-bridge-settlement) | interface | What a delivery carries |
@@ -237,7 +239,7 @@ arrival. Only `proveSettlement` asks the recipient
 
 ```ts
 interface Charge {
-  to: string | string[];
+  paidTo: string | string[];
   amount: Amount;
 
   /** Where the gateway posts the settlement, signed with the key it publishes */
@@ -521,7 +523,7 @@ What a BOLT11 invoice says about itself, every field null when it does not carry
 ### invoiceFrom
 
 ```ts
-async function invoiceFrom(to: string | string[], amount: Amount): Promise<Resolved>
+async function invoiceFrom(paidTo: string | string[], amount: Amount): Promise<Resolved>
 ```
 
 A provable invoice from the first address on the list that will issue one, which
@@ -559,7 +561,7 @@ One way to pay one order, already registered with the gateway
 ```ts
 interface LightningRailConfig extends RailConfig {
   /** Priority list, the first address that can prove an invoice wins */
-  to: string | string[];
+  paidTo: string | string[];
 
   /**
    * What to charge for one order, the order's own price converted at `rate` by
@@ -713,7 +715,7 @@ True when `preimage` is the secret behind `paymentHash`
 
 ```ts
 interface Priced {
-  to: string[];
+  paidTo: string[];
   amountMsat: number;
 }
 ```
@@ -882,6 +884,18 @@ what deleted that field
 | `bank(config: BankRailConfig): Rail` | A bank transfer, proved the way a Lightning payment is |
 | `transfer(params: BankTransferParams): Promise<BankTransfer>` | One bank transfer without building a rail first, for a shop that asks for them one at a time rather than beside another payment method |
 
+### Range
+
+```ts
+interface Range {
+  least: Amount;
+  most: Amount;
+}
+```
+
+What a payer may choose to send, when the endpoint lets them choose at all.
+Both ends are asked once per payRequest, so a fiat range moves with the rate
+
 ### Relayed
 
 ```ts
@@ -988,6 +1002,15 @@ Encrypt what the watcher needs and the gateway must not have. The gateway
 stores the result and hands it back untouched, so anything readable you put
 in `sealed` is something you told it, which is what blind mode exists to avoid
 
+### Sellable
+
+```ts
+interface Sellable extends Charge, SellOptions {}
+```
+
+One thing to sell: who is paid, how much, and how the QR should look. Every
+field beyond `to` and `amount` has a default, so the shortest sale names two
+
 ### SellOptions
 
 ```ts
@@ -1073,9 +1096,9 @@ Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself
 |---|---|
 | `readonly serve: Serve;` | Everything this gateway lets you mount, from an LNURL endpoint to a webhook route |
 | `readonly rails: Rails;` | One call per sale, whatever the rail moves |
-| `get isPrivate(): boolean` | Whether a token was given, which is what makes an instance yours: a gateway started with `GATEWAY_TOKEN` answers nobody else, so anything you hand it stays between you and it |
+| `get hasToken(): boolean` | Whether a token was given to this instance, which is your side of the arrangement and says nothing about the gateway's |
 | `async refusesStrangers(): Promise<boolean>` | Whether the gateway turns away a caller carrying no token, asked by making one unauthenticated read it would have to refuse |
-| `async sell(order: SellOrder): Promise<Sale>` | Sell one thing |
+| `async sell(order: Sellable): Promise<Sale>` | Sell one thing |
 | `async mint(charge: Charge, options?: CreateOptions): Promise<MintedPayment>` | Ask the gateway for an invoice payable to the first address on your list that can issue a provable one, throws `NoWalletAvailableError` when none can and `GatewayCheatError` when what comes back is not what you asked for |
 | `async quote(charge: Charge): Promise<Quote>` | Ask which address would serve an amount without minting anything, throws `NoWalletAvailableError` when none would |
 | `async webhookKey(): Promise<string>` | The key this gateway signs webhooks with when you registered none of your own |
@@ -1138,13 +1161,17 @@ What a socket ticket opens beyond the trigger it names
 ```ts
 interface TriggerConfig {
   /** Priority list, quoted at payRequest and then pinned for the callback */
-  to: string | string[];
+  paidTo: string | string[];
 
   /**
    * What this trigger costs right now, asked once per payRequest. `fiat` makes it
-   * a live rate, and any function of your own makes it a time of day rule
+   * a live rate, and any function of your own makes it a time of day rule.
+   *
+   * Give it a `{ least, most }` range instead and the payer chooses inside it,
+   * which is what a tip jar is. One amount pins the price and the wallet offers
+   * no field to type in
    */
-  amount: Amount;
+  amount: Amount | Range;
 
   /**
    * Signs the callback URL. Without it anyone could call the callback and make
@@ -1378,7 +1405,7 @@ above what any operator lists and refuses only the ones reaching past it
 ### wrapFeeCeiling
 
 ```ts
-function wrapFeeCeiling(amountMsat: number, allowance?: WrapAllowance): number
+function wrapFeeCeiling(amountMsat: number, allowance?: WrapAllowance): Msat
 ```
 
 The most an operator may add over the recipient's own amount, in millisatoshi.
@@ -1421,8 +1448,8 @@ hash, which is the whole of what makes wrapping safe
 |---|---|---|
 | [`invoiceToDataUrl`](#thunder-bridge-qr-invoicetodataurl) | function | SVG data URL for an `<img>` `src` |
 | [`invoiceToSvg`](#thunder-bridge-qr-invoicetosvg) | function | Render a BOLT11 invoice or a lightning address as an SVG QR code |
-| [`lnurlToDataUrl`](#thunder-bridge-qr-lnurltodataurl) | function | SVG data URL of the endpoint's QR, for an `<img>` `src` |
-| [`lnurlToSvg`](#thunder-bridge-qr-lnurltosvg) | function | Render your own LNURL-pay endpoint, the URL `lnurlPayEndpoint` is mounted on, as the QR a payer scans |
+| [`lnurlEndpointToDataUrl`](#thunder-bridge-qr-lnurlendpointtodataurl) | function | SVG data URL of the endpoint's QR, for an `<img>` `src` |
+| [`lnurlEndpointToSvg`](#thunder-bridge-qr-lnurlendpointtosvg) | function | Render your own LNURL-pay endpoint, the URL `serve.lnurlPay` is mounted on, as the QR a payer scans |
 | [`QrOptions`](#thunder-bridge-qr-qroptions) | interface | How the QR is drawn, which is the only thing about it worth configuring |
 | [`qrToDataUrl`](#thunder-bridge-qr-qrtodataurl) | function | SVG data URL of a leg's QR, for an `<img>` `src` |
 | [`qrToSvg`](#thunder-bridge-qr-qrtosvg) | function | Render any rail's `Leg.qr` as an SVG QR code |
@@ -1446,23 +1473,26 @@ function invoiceToSvg(destination: string, options?: QrOptions): string
 
 Render a BOLT11 invoice or a lightning address as an SVG QR code
 
-### lnurlToDataUrl
+### lnurlEndpointToDataUrl
 
 ```ts
-function lnurlToDataUrl(endpoint: string, options?: QrOptions): string
+function lnurlEndpointToDataUrl(endpoint: string, options?: QrOptions): string
 ```
 
 SVG data URL of the endpoint's QR, for an `<img>` `src`
 
-### lnurlToSvg
+### lnurlEndpointToSvg
 
 ```ts
-function lnurlToSvg(endpoint: string, options?: QrOptions): string
+function lnurlEndpointToSvg(endpoint: string, options?: QrOptions): string
 ```
 
-Render your own LNURL-pay endpoint, the URL `lnurlPayEndpoint` is mounted on,
-as the QR a payer scans. Nothing is minted and nothing expires, so this is the
-code a tip jar prints once and an overlay shows all stream
+Render your own LNURL-pay endpoint, the URL `serve.lnurlPay` is mounted on, as
+the QR a payer scans. It takes the endpoint URL and does the bech32 itself, so
+do not hand it the output of `toLnurl` - that is what this calls for you.
+
+Nothing is minted and nothing expires, so this is the code a tip jar prints
+once and an overlay shows all stream
 
 ### QrOptions
 

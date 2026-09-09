@@ -3,8 +3,8 @@ export type { QrOptions } from "../qr.js";
 export {
   invoiceToDataUrl,
   invoiceToSvg,
-  lnurlToDataUrl,
-  lnurlToSvg,
+  lnurlEndpointToDataUrl,
+  lnurlEndpointToSvg,
   qrToDataUrl,
   qrToSvg,
   spdToDataUrl,

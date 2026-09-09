@@ -102,7 +102,7 @@ function bank(overrides: Partial<BankRailConfig> = {}): Rail {
 
 function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
   return lightningRail(new ThunderBridge(GATEWAY, { verify: false }), {
-    to: [LN_ADDRESS],
+    paidTo: [LN_ADDRESS],
     amount: () => msat(AMOUNT_MSAT),
     ...overrides,
   });
@@ -110,7 +110,7 @@ function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
 
 function blind(overrides: Partial<BlindLightningRailConfig> = {}): Rail {
   return blindLightningRail(new ThunderBridge(GATEWAY, { verify: false, token: "hunter2" }), {
-    to: [LN_ADDRESS],
+    paidTo: [LN_ADDRESS],
     amount: () => msat(AMOUNT_MSAT),
     ...overrides,
   });

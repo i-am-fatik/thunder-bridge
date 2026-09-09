@@ -53,7 +53,7 @@ export type Payment = MintedPayment | WatchedPayment;
  * amount and the rest are the fallback
  */
 export interface Charge {
-  to: string | string[];
+  paidTo: string | string[];
   amount: Amount;
 
   /** Where the gateway posts the settlement, signed with the key it publishes */
@@ -66,7 +66,7 @@ export interface Charge {
  * handed the one that was actually asked for
  */
 export interface Priced {
-  to: string[];
+  paidTo: string[];
   amountMsat: number;
 }
 

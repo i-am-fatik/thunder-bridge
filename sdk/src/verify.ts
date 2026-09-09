@@ -1,6 +1,7 @@
 import { decodeInvoice, preimageMatchesHash } from "../../core/bolt11.js";
 import { sha256Hex } from "../../core/sha256.js";
 import { publicHttps, sameOrigin } from "../../core/url.js";
+import { type Msat, msat } from "./amount.js";
 import {
   type GatewayCheatCode,
   GatewayCheatError,
@@ -49,7 +50,7 @@ interface Verification {
 export async function proveOrigin(payment: MintedPayment, asked: Priced): Promise<void> {
   const cheat = (code: GatewayCheatCode) => new GatewayCheatError(code, payment.id);
 
-  const listed = asked.to.find((address) => equalIgnoringCase(address, payment.lnAddress));
+  const listed = asked.paidTo.find((address) => equalIgnoringCase(address, payment.lnAddress));
   if (listed === undefined) {
     throw cheat("address_not_requested");
   }
@@ -153,9 +154,10 @@ export function carriesProof<T extends Provable>(report: T): report is Proven<T>
  * is the floor it never drops below, because a fraction of a small payment
  * rounds to nothing the operator can work for
  */
-export function wrapFeeCeiling(amountMsat: number, allowance?: WrapAllowance): number {
+export function wrapFeeCeiling(amountMsat: number, allowance?: WrapAllowance): Msat {
   const proportional = amountMsat * (allowance?.proportion ?? DEFAULT_WRAP_PROPORTION);
-  return Math.max(allowance?.baseMsat ?? DEFAULT_WRAP_BASE_MSAT, Math.floor(proportional));
+
+  return msat(Math.max(allowance?.baseMsat ?? DEFAULT_WRAP_BASE_MSAT, Math.floor(proportional)));
 }
 
 /**

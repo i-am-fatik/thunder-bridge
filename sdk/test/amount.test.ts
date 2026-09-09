@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { type Amount, fiat, millisatoshi, msat, sats } from "../src/amount";
+import { type Amount, fiat, amountNow, msat, sats } from "../src/amount";
 import { AmountError } from "../src/errors";
 
 const RATE_CZK = 134_883_815;
@@ -46,7 +46,7 @@ describe("fiat", () => {
 
     expect(rate).not.toHaveBeenCalled();
 
-    await millisatoshi(amount);
+    await amountNow(amount);
 
     expect(rate).toHaveBeenCalledWith("CZK");
   });
@@ -54,14 +54,14 @@ describe("fiat", () => {
   it("reads a decimal string exactly, digit by digit, never through a float", async () => {
     const rate = async () => AT_100K_USD;
 
-    await expect(millisatoshi(fiat("1.00", "USD", { rate }))).resolves.toBe(1_000_000);
-    await expect(millisatoshi(fiat("0.01", "USD", { rate }))).resolves.toBe(10_000);
+    await expect(amountNow(fiat("1.00", "USD", { rate }))).resolves.toBe(1_000_000);
+    await expect(amountNow(fiat("0.01", "USD", { rate }))).resolves.toBe(10_000);
   });
 
   it("rounds a number to the currency's own minor unit", async () => {
     const rate = async () => AT_100K_USD;
 
-    await expect(millisatoshi(fiat(4.99, "USD", { rate }))).resolves.toBe(4_990_000);
+    await expect(amountNow(fiat(4.99, "USD", { rate }))).resolves.toBe(4_990_000);
   });
 
   it("refuses more decimals than the currency has", () => {
@@ -82,8 +82,8 @@ describe("fiat", () => {
     const quotes = [RATE_CZK, RATE_CZK * 2];
     const amount = fiat("100.00", "CZK", { rate: async () => quotes.shift() ?? 0 });
 
-    const first = await millisatoshi(amount);
-    const second = await millisatoshi(amount);
+    const first = await amountNow(amount);
+    const second = await amountNow(amount);
 
     expect(second).toBeLessThan(first);
   });
@@ -91,22 +91,22 @@ describe("fiat", () => {
   it("adds the spread the shop asked for, in basis points", async () => {
     const rate = async () => AT_100K_USD;
 
-    const plain = await millisatoshi(fiat("1.00", "USD", { rate }));
-    const wider = await millisatoshi(fiat("1.00", "USD", { rate, spreadBps: 100 }));
+    const plain = await amountNow(fiat("1.00", "USD", { rate }));
+    const wider = await amountNow(fiat("1.00", "USD", { rate, spreadBps: 100 }));
 
     expect(wider).toBe(plain + plain / 100);
   });
 });
 
-describe("millisatoshi", () => {
+describe("amountNow", () => {
   it("settles a price that is already known", async () => {
-    await expect(millisatoshi(msat(21_000))).resolves.toBe(21_000);
+    await expect(amountNow(msat(21_000))).resolves.toBe(21_000);
   });
 
   it("refuses whatever a function hands back if it stopped being payable", async () => {
     const drifted = () => 0 as unknown as ReturnType<typeof msat>;
 
-    await expect(millisatoshi(drifted)).rejects.toThrow(AmountError);
+    await expect(amountNow(drifted)).rejects.toThrow(AmountError);
   });
 });
 

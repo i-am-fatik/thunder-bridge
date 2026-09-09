@@ -87,8 +87,11 @@ export function fiat(
     msat(msatFor(amountMinor, await rate(currency), { spreadBps: options?.spreadBps }));
 }
 
-/** What an `Amount` comes to right now, which is the only place a price is asked for */
-export async function millisatoshi(amount: Amount): Promise<Msat> {
+/**
+ * What an `Amount` comes to right now. A fiat price asks its rate here, so two
+ * calls a second apart give two numbers, and this is the only place that happens
+ */
+export async function amountNow(amount: Amount): Promise<Msat> {
   return typeof amount === "function" ? msat(await amount()) : msat(amount);
 }
 

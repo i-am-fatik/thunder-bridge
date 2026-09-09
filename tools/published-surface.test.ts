@@ -131,3 +131,47 @@ test("every problem type the readme tabulates is a static on ProblemError, so no
 		);
 	}
 });
+
+test("every type in a public member's signature can be named by a consumer", () => {
+	const client = [...doors.values()].flat().find((item) => item.name === "ThunderBridge");
+	expect(client).toBeDefined();
+
+	const BUILT_IN = new Set([
+		"Promise",
+		"Request",
+		"Response",
+		"AbortSignal",
+		"Record",
+		"Array",
+		"string",
+		"number",
+		"boolean",
+		"void",
+		"null",
+		"undefined",
+		"unknown",
+		"never",
+		"Partial",
+		"Omit",
+		"Pick",
+		"HTMLElement",
+		"Uint8Array",
+		"Error",
+		"Date",
+		"Map",
+		"Set",
+	]);
+
+	const owed = new Set<string>();
+	for (const member of client?.members ?? []) {
+		for (const found of member.signature.matchAll(/\b([A-Z][A-Za-z0-9]*)\b/g)) {
+			const name = found[1] as string;
+			if (BUILT_IN.has(name) || exported.has(name)) {
+				continue;
+			}
+			owed.add(`${member.name}: ${name}`);
+		}
+	}
+
+	expect([...owed]).toEqual([]);
+});

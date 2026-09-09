@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { encodeForQr, invoiceToDataUrl, invoiceToSvg, lnurlToDataUrl, lnurlToSvg } from "../src/qr";
+import { toLnurl } from "../../core/lnurl.js";
+import { toLightningUri, invoiceToDataUrl, invoiceToSvg, lnurlEndpointToDataUrl, lnurlEndpointToSvg } from "../src/qr";
 import { bolt11 } from "./encode";
 
 const INVOICE = bolt11({
@@ -10,18 +11,18 @@ const INVOICE = bolt11({
 
 const DATA_URL_PREFIX = "data:image/svg+xml,";
 
-describe("encodeForQr", () => {
+describe("toLightningUri", () => {
   it("prefixes the LIGHTNING URI scheme and uppercases the invoice for alphanumeric mode", () => {
-    expect(encodeForQr(INVOICE)).toBe(`LIGHTNING:${INVOICE.toUpperCase()}`);
+    expect(toLightningUri(INVOICE)).toBe(`LIGHTNING:${INVOICE.toUpperCase()}`);
   });
 
   it("leaves a lightning address in the case it was given, where case carries meaning", () => {
-    expect(encodeForQr("iamfatik@blink.sv")).toBe("LIGHTNING:iamfatik@blink.sv");
-    expect(encodeForQr("Tip.Jar@Example.com")).toBe("LIGHTNING:Tip.Jar@Example.com");
+    expect(toLightningUri("iamfatik@blink.sv")).toBe("LIGHTNING:iamfatik@blink.sv");
+    expect(toLightningUri("Tip.Jar@Example.com")).toBe("LIGHTNING:Tip.Jar@Example.com");
   });
 
   it("still uppercases something that only looks like an address, at-sign and no dot", () => {
-    expect(encodeForQr("lnbc1@")).toBe("LIGHTNING:LNBC1@");
+    expect(toLightningUri("lnbc1@")).toBe("LIGHTNING:LNBC1@");
   });
 });
 
@@ -66,25 +67,25 @@ describe("a trigger endpoint", () => {
   const TRIGGER = "https://agora.gripe/tip";
 
   it("renders the endpoint as an LNURL QR, so one printed code serves every payer", () => {
-    const svg = lnurlToSvg(TRIGGER, { size: 192 });
+    const svg = lnurlEndpointToSvg(TRIGGER, { size: 192 });
     expect(svg.startsWith("<svg")).toBe(true);
     expect(svg).toContain('width="192" height="192"');
   });
 
   it("refuses a URL a wallet could not reach rather than drawing a dead code", () => {
-    expect(() => lnurlToSvg("agora.gripe/tip")).toThrow(/not an http or https URL/);
+    expect(() => lnurlEndpointToSvg("agora.gripe/tip")).toThrow(/not an http or https URL/);
   });
 
   it("hands back the same svg through the data url, for an img src", () => {
-    const dataUrl = lnurlToDataUrl(TRIGGER, { size: 192 });
+    const dataUrl = lnurlEndpointToDataUrl(TRIGGER, { size: 192 });
     expect(dataUrl.startsWith(DATA_URL_PREFIX)).toBe(true);
     expect(decodeURIComponent(dataUrl.slice(DATA_URL_PREFIX.length))).toBe(
-      lnurlToSvg(TRIGGER, { size: 192 }),
+      lnurlEndpointToSvg(TRIGGER, { size: 192 }),
     );
   });
 
   it("is a different code from the invoice one, because it carries a different string", () => {
-    expect(lnurlToSvg(TRIGGER)).not.toBe(invoiceToSvg(TRIGGER.toUpperCase()));
+    expect(lnurlEndpointToSvg(TRIGGER)).not.toBe(invoiceToSvg(TRIGGER.toUpperCase()));
   });
 });
 
@@ -111,4 +112,19 @@ describe("the color guard", () => {
       expect(invoiceToSvg(INVOICE, { color })).toContain(`fill="${color}"`);
     },
   );
+});
+
+describe("the endpoint pair takes an endpoint, which is what its name now says", () => {
+  const ENDPOINT = "https://your.site/api/tips";
+
+  it("renders the mounted URL, doing the bech32 itself", () => {
+    const svg = lnurlEndpointToSvg(ENDPOINT);
+
+    expect(svg.startsWith("<svg")).toBe(true);
+    expect(lnurlEndpointToDataUrl(ENDPOINT).startsWith("data:image/svg+xml,")).toBe(true);
+  });
+
+  it("refuses an already-encoded lnurl, which is why the name says endpoint", () => {
+    expect(() => lnurlEndpointToSvg(toLnurl(ENDPOINT))).toThrow("not an http or https URL");
+  });
 });
