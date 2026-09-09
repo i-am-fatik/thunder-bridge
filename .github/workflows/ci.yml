@@ -40,6 +40,8 @@ jobs:
         run: npm run lint
       - name: a readme claim the code stopped backing
         run: node tools/readme-check.ts .
+      - name: a reference nobody regenerated, or an export with no tsdoc to generate it from
+        run: node tools/api-reference.ts --check .
       - name: a readme example that no longer compiles against the client it documents
         run: |
           fences=$(mktemp -d)

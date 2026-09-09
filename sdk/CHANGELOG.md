@@ -13,6 +13,86 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 2.0.0
+
+One gateway to start from. Seventy-two callable exports became twenty-one on the main
+import, because everything that took the gateway as a config field is now a method on
+it, and `sell` does in one call what every caller was doing in four.
+
+### Added
+
+- `gateway.sell(order)`: mints the invoice, proves it against the recipient's own
+  domain, draws the QR and hands back a `Sale` with `qr`, `bolt11`, `settled()`,
+  `onSettled()` and `prove()`. One call and two names for the whole checkout.
+- `sats`, `msat` and `fiat`: an amount is `sats(21)` or `fiat("4.99", "USD")` rather
+  than a bare millisatoshi integer. A fiat price is converted when the invoice is
+  minted, off the median of four venues unless you pass a `rate` of your own, and a
+  decimal string is read digit by digit rather than through a float.
+- `to` takes one address as a string, so the common case is no longer a list of one.
+- `gateway.serve.webhook(handlers)`: the whole webhook route. It answers the
+  challenge, reads the gateway's published key itself, checks the signature, and
+  calls `onSettled` only for a delivery whose preimage hashes to the payment hash it
+  names. An unproven one gets a `202` unless `onUnproven` asks for it.
+- `gateway.serve.*` and `gateway.rails.*`: every endpoint factory and every rail,
+  with the `gateway` field gone from five config types.
+- `relayThrough` on `TriggerConfig`, so a blind LNURL endpoint can be watched by a
+  gateway that enforces its verify challenge. Blind minting could not be, before.
+- `thunder-bridge/qr`, `/price`, `/bank` and `/nwc`, so a checkout page downloads
+  neither the exchange venues nor the nostr crypto.
+- [docs/api.md](../docs/api.md), generated from the TSDoc on every export and
+  checked in CI, which is why this changelog no longer lists signatures.
+
+### Changed
+
+| 1.4.2 | 2.0.0 |
+|---|---|
+| `createPayment(params, options)` | `mint(charge, options)` |
+| `createQuote(params)` | `quote(charge)` |
+| `watchPayment(params)` | `watch(handover)` |
+| `getPayment(id)`, `getWatched(id)` | `payment(id)` |
+| `listPayments(limit)` | `payments(limit)` |
+| `waitForPayment(id)`, `waitForWatched(id)` | `settled(id)` |
+| `firstToSettle(ids)` | `firstSettled(ids)` |
+| `followTrigger(secret, options)` | `follow(secret, options)` |
+| `createSocketTicket({ trigger, replay })` | `ticket(trigger, { replay })` |
+| `lnurlPayEndpoint({ gateway, ... })` | `gateway.serve.lnurlPay({ ... })` |
+| `watchTicketEndpoint`, `publicWatchTicketEndpoint` | `gateway.serve.watchTicket`, `gateway.serve.publicWatchTicket` |
+| `lightningVerifyEndpoint`, `bankVerifyEndpoint` | `gateway.serve.verify`, `gateway.serve.bankVerify` |
+| `relayedVerifyUrl` | `gateway.serve.verifyUrl` |
+| `lightningRail`, `blindLightningRail`, `bankRail` | `gateway.rails.lightning`, `gateway.rails.blindLightning`, `gateway.rails.bank` |
+| `bankTransfer({ gateway, ... })` | `gateway.rails.transfer({ ... })` |
+| `nwcRail({ gateway, ... })` | `nwcRail(gateway, { ... })`, from `thunder-bridge/nwc` |
+| `parseWebhookRequest`, `parseWatchedWebhookRequest` | `gateway.serve.readPayment` |
+| `parseSettlementRequest` | `gateway.serve.readSettlement` |
+| `answerWebhookChallengeRequest` | `gateway.serve.answerWebhookChallenge` |
+| `isProvablyPaid`, `isProvablySettled` | `carriesProof` |
+| `isProblemType(problem, TYPE)` | `ProblemError.is(problem, ProblemError.TYPE)` |
+| `TriggerEvent` | `Payment` |
+| `CreatePaymentParams`, `CreateQuoteParams` | `Charge`, and `Priced` where a proof compares |
+| `WatchPaymentParams` | `Handover` |
+| `amountMsat: number` on every rail and trigger | `amount: Amount` |
+| `relayVerifyThrough` | `relayThrough` |
+
+- `Payment` is one shape for both sorts. `kind` says whether the gateway minted it or
+  was handed it, and `lnAddress`, `amountMsat` and `bolt11` are null where it was told
+  nothing. `mint` returns `MintedPayment`, where none of the three is null.
+- `settled(id)` resolves on an expiry as well as on a payment, because both end the
+  wait. `sale.settled()` rejects on one, because a sale is asking a narrower question.
+- `proveOrigin` and `proveSettlement` take `Priced`, the charge with its price
+  settled, so a fiat price asked twice cannot make the proof compare against a number
+  nobody used.
+- A rail with no `amount` prices the order itself, converting `amountMinor` and
+  `currency` at the rate.
+
+### Removed
+
+- `thunder-bridge/server`. Its exports are on the gateway, or on `/nwc`.
+- The raw-body halves of every webhook reader, and `verifyWebhookSignature` with
+  them. Every runtime this targets has `Request`, so the readers take one.
+- `isProblemType` and the four `urn:` constants as top-level exports. They are
+  statics on `ProblemError`, and every type with a class of its own is an
+  `instanceof` away.
+
 ## 1.3.0
 
 A page that opens the trigger's socket a day later still sees the last payments, because

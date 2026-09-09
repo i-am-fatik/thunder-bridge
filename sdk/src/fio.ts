@@ -21,6 +21,7 @@ const WHERE_A_PAYER_WRITES = [
 ];
 const UTC_OFFSET = /^[+-]\d{4}$/;
 
+/** A Fio account to read credits from, as its own API describes one */
 export interface FioConfig {
   /**
    * A token with "Sledování účtu" rights, which is read only and cannot move

@@ -17,6 +17,7 @@ const MILLIS = 1000;
  */
 export type Ticker = (currency: string) => Promise<number>;
 
+/** How many venues have to agree, how far apart they may be, and how long an answer is held */
 export interface MedianOptions {
   /**
    * How many venues have to answer before a price is usable. Two is the floor

@@ -34,7 +34,7 @@ so the same wallet on another domain can answer differently.
 A refusal happens at creation rather than leaving a payment pending until a
 watcher gives up, so a recipient finds out before a payer sees a QR code.
 
-If your recipient is on a refused name, `nwcRail` is the way round it: your own
+If your recipient is on a refused name, `nwcRail` from `thunder-bridge/nwc` is the way round it: your own
 wallet answers over NIP-47 instead of over an address, and the gateway watches the
 hash exactly the same. [docs/lud21-coverage.md](../docs/lud21-coverage.md) is the
 measured list rather than a reading of changelogs, last surveyed 2026-08-12. Read
@@ -47,23 +47,27 @@ as refused here until the next survey says otherwise.
 npm install thunder-bridge
 ```
 
-Node 22 or newer, for anything that opens a socket: `waitForPayment`,
-`waitForWatched`, `firstToSettle` and `followTrigger` on the gateway side, and every
-NWC call on the wallet side, since a nostr relay is a socket too. Node only exposes
-a global `WebSocket` from 22 onwards and there is no fallback to install. The rest,
-which is every call that is one or more `fetch` requests, runs on any runtime with
-`fetch` and `crypto.subtle`.
+Node 22 or newer, for anything that opens a socket: `sell`, `settled`,
+`firstSettled` and `follow` on the gateway side, and every NWC call on the wallet
+side, since a nostr relay is a socket too. Node only exposes a global `WebSocket`
+from 22 onwards and there is no fallback to install. The rest, which is every call
+that is one or more `fetch` requests, runs on any runtime with `fetch` and
+`crypto.subtle`.
 
-The package has two entry points.
+One import is the whole thing. The other four are for what a checkout page has no
+reason to download.
 
-| Import | Needs | Has |
-|---|---|---|
-| `thunder-bridge` | `fetch`, `crypto.subtle`, `URL`, `WebSocket` | everything except the server-only exports |
-| `thunder-bridge/server` | `node:dns` as well | `invoiceFrom`, `askWallet`, `lnurlPayEndpoint`, the ticket handlers, `lightningVerifyEndpoint`, `nwcVerifyEndpoint`, and the blind and NWC rails |
+| Import | What it is for |
+|---|---|
+| `thunder-bridge` | the gateway, the proofs, the errors and the amounts. Everything is reached through one instance |
+| `thunder-bridge/qr` | a payload as an SVG or a data URL, for a page that draws a QR of its own |
+| `thunder-bridge/price` | the exchange venues behind `fiat`, for pricing off your own book instead |
+| `thunder-bridge/bank` | a bank statement reader, currently Fio |
+| `thunder-bridge/nwc` | your own wallet over NIP-47, which carries the nostr crypto no browser wants |
 
-The second one resolves lightning addresses and refuses a private host, so it needs
-DNS and will not run on Cloudflare Workers. `bankVerifyEndpoint` is on the main
-entry rather than there, because a bank statement needs no DNS.
+`invoiceFrom` resolves lightning addresses and refuses a private host, so it needs
+`node:dns` and will not run on Cloudflare Workers. Nothing else on the main import
+does.
 
 ## Quick start
 
@@ -74,41 +78,39 @@ gives a `404` and [`/health`](https://public.thunder-bridge.agora.gripe/health) 
 what tells you it is up.
 
 ```ts
-import {
-  ThunderBridge,
-  invoiceToSvg,
-  proveSettlement,
-  type CreatePaymentParams,
-} from "thunder-bridge";
+import { sats, ThunderBridge } from "thunder-bridge";
 
 const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe");
 
-const request: CreatePaymentParams = {
-  lnAddresses: ["iamfatik@blink.sv", "iamfatik@coinos.io"],
-  amountMsat: 21_000,
-};
-
-const payment = await gateway.createPayment(request);
-
-const target = document.querySelector("#qr");
-if (target !== null) {
-  target.innerHTML = invoiceToSvg(payment.bolt11);
-}
-
-const settled = await gateway.waitForPayment(payment.id, {
+const sale = await gateway.sell({
+  to: ["iamfatik@blink.sv", "iamfatik@coinos.io"],
+  amount: sats(21),
   signal: AbortSignal.timeout(600_000),
 });
 
-const preimage = settled.status === "paid" ? await proveSettlement(settled, request) : null;
+const target = document.querySelector("#qr");
+if (target !== null) {
+  target.innerHTML = sale.qr;
+}
+
+await sale.settled();
+
+const preimage = await sale.prove();
 ```
 
-Keep the `request` object. Every proof that asks the recipient takes it, because
-what you asked for is the side of each comparison the gateway did not supply.
-`proveWrapped` is the exception, since it compares two invoices and asks nobody. `waitForPayment` tells you what
-the gateway says. `proveSettlement` goes to the recipient's own server. Only the
-second is evidence the money arrived, and
+Two names and one call. `sell` mints the invoice on the first address that can
+prove one, checks that invoice against the recipient's own domain before returning,
+and draws the QR.
+
+Then there are two different questions and both are worth asking. `settled` tells
+you what the gateway says, and it is the fast one. `prove` asks the recipient's own
+server, and only that is evidence the money arrived.
 [docs/proving-a-payment.md](../docs/proving-a-payment.md) is the whole argument for
 why.
+
+An amount is `sats(21)`, `msat(21_000)` or `fiat("4.99", "USD")`, never a bare
+number whose unit you have to remember. A fiat price is converted when the invoice
+is minted, off the median of four MiCA authorised venues unless you pass your own.
 
 ## How each payment method gets verified
 
@@ -116,7 +118,7 @@ Every rail ends the same way, with a preimage that has to hash to the payment ha
 the gateway was given. What differs is who obtains the invoice, who is asked for the
 preimage, and which side does the checking.
 
-| `lightningRail` | the gateway asks, at the recipient's LNURL callback |
+| `rails.lightning` | the gateway asks, at the recipient's LNURL callback |
 |---|---|
 | the gateway is told | the address list and the amount, and nothing else. It derives the hash and the `verify` URL by resolving the address, and hands both back |
 | the invoice is checked by | you, `proveOrigin` runs five checks against the recipient's own domain |
@@ -125,12 +127,12 @@ preimage, and which side does the checking.
 | `settled` comes from | the wallet releasing its preimage |
 | the pace is set by | the wallet, when it sends `Cache-Control: max-age`. When it sends none the gateway's own schedule decides |
 
-| `blindLightningRail` | you ask, with `invoiceFrom` on your server |
+| `rails.blindLightning` | you ask, with `invoiceFrom` on your server |
 |---|---|
 | the gateway is told | a hash, an expiry and your URL, with the wallet's sealed inside |
 | the invoice is checked by | nobody needs to, you resolved the address yourself |
 | the gateway probes first | `speaksVerify`: a GET on the URL, then a signed POST nonce it must echo |
-| the gateway polls | your `lightningVerifyEndpoint`, once `relayVerifyThrough` is set. Leave it off and the gateway polls the wallet directly, as on the minted rail |
+| the gateway polls | your `serve.verify` endpoint, once `relayThrough` is set. Leave it off and the gateway polls the wallet directly, as on the minted rail |
 | `settled` comes from | your endpoint, which unseals, asks the wallet and relays the answer |
 | the pace is set by | you, `pollEverySecs` |
 
@@ -143,12 +145,12 @@ preimage, and which side does the checking.
 | `settled` comes from | `lookup_invoice`, refused unless the wallet's own key signed it |
 | the pace is set by | you, `pollEverySecs` |
 
-| `bankRail` | nobody, there is no invoice |
+| `rails.bank` | nobody, there is no invoice |
 |---|---|
 | the gateway is told | a hash and your URL, which names the amount and the reference |
 | the invoice is checked by | nobody, there is no invoice to check |
 | the gateway probes first | the same GET and signed nonce |
-| the gateway polls | your `bankVerifyEndpoint` |
+| the gateway polls | your `serve.bankVerify` endpoint |
 | `settled` comes from | a `Statement` credit matching amount and currency exactly, with the reference anywhere in the payer's text |
 | the pace is set by | you, `pollEverySecs` |
 
@@ -160,7 +162,7 @@ the whole defence. A `webhookUrl` is challenged on both paths. On every watched 
 and challenges it with a nonce before accepting the watch, refusing with `424` if
 nothing answers. Deploy the endpoint before you register it. The challenge is on
 unless the operator set `VERIFY_CHALLENGE=0`, which is also why a bare wallet
-`verify` URL cannot be handed to `watchPayment`: a wallet will not echo a nonce.
+`verify` URL cannot be handed to `watch`: a wallet will not echo a nonce.
 
 **What a preimage proves is the same on all four, and narrower than it looks:** that
 the server holding the secret says the money arrived, made unforgeable by anyone
@@ -175,7 +177,7 @@ without saying whether either invoice was paid.
 
 ### What each one costs you
 
-**`lightningRail`**
+**`rails.lightning`**
 
 - the gateway holds the address and the amount, so your order book is readable
   from its own logs
@@ -184,7 +186,7 @@ without saying whether either invoice was paid.
 - the wallet's `Cache-Control` sets the poll pace, so how fast a settlement is
   noticed is not yours to decide
 
-**`blindLightningRail`**
+**`rails.blindLightning`**
 
 - a service of your own that has to stay up, so a browser-only integration cannot
   use this rail at all
@@ -204,7 +206,7 @@ without saying whether either invoice was paid.
   the wallet
 - relays unreachable means no verification
 
-**`bankRail`**
+**`rails.bank`**
 
 - the gateway has to be one of your own: the verify URL names the amount and the
   reference, so whoever runs the gateway reads your order book from the watches
@@ -249,7 +251,7 @@ Four sharp edges, worth reading before you build:
   host answering `302` to a private address is followed there. `invoiceFrom` is not
   like this: it resolves through the outbound guard, which sets `redirect: "manual"`
   and re-vets every hop. Keep egress control outside this package if that matters.
-- **A payment read cold is only as pinned as its creation.** `getPayment` checks
+- **A payment read cold is only as pinned as its creation.** `payment` checks
   the preimage against the `paymentHash` in the same record, and it was
   `proveOrigin` at creation, against the request you wrote, that tied that hash to
   an invoice the recipient issued. Store the request alongside the payment id, or a
@@ -259,49 +261,54 @@ Four sharp edges, worth reading before you build:
   proving an invoice belongs to an address never proves the address belongs to
   whoever you think it does.
 
-`isProvablyPaid` is the one to be careful with: it asks only whether the gateway's
-own report holds together, so a gateway that generates a preimage, hashes it and
-builds an invoice around that hash passes it. If a payment matters, ask the
-recipient with `proveSettlement`. The full argument, including the five origin
-checks and their failure codes, is in
+`carriesProof` is the one to be careful with: it asks only whether a report holds
+together, so a gateway that generates a preimage, hashes it and builds an invoice
+around that hash passes it. If a payment matters, ask the recipient with
+`prove` on the sale or with `proveSettlement`. The full argument, including the five
+origin checks and their failure codes, is in
 [docs/proving-a-payment.md](../docs/proving-a-payment.md).
 
 ## What you call
 
-Signatures and the caveats on each export are in the TSDoc on the export itself, so
-your editor has them and this table does not repeat them.
+[docs/api.md](../docs/api.md) is the whole surface, generated from the TSDoc on
+every export by [`tools/api-reference.ts`](../tools/api-reference.ts) and checked in
+CI, so nothing there can be out of date and nothing here repeats it. Your editor
+has the same text on the export itself.
 
-| Export | What it does |
-|---|---|
-| `new ThunderBridge(baseUrl, options?)` | a gateway handle. `{ secret }` signs the calls that create something, so a payment you create comes back to you and nobody else, while the reads and `webhookKey` stay unsigned, `{ token }` makes the instance yours, `{ verify: false }` turns off the automatic proof |
-| `gateway.createPayment(params, options?)` | mint an invoice on the first address that can prove one, and prove it before returning |
-| `gateway.watchPayment(params)` | hand over an invoice you obtained yourself, so the gateway never learns the address or the amount |
-| `gateway.waitForPayment(id, options?)` | follow one payment over WebSocket until it is paid or expired. `waitForWatched` is the same for a watched one |
-| `gateway.followTrigger(secret, options)` | stream every payment carrying one trigger, reconnecting on its own. The secret is the only thing guarding that stream and nothing rate limits a guess, so it is refused under 16 characters |
-| `proveSettlement(payment, request)` | ask the recipient whether it settled, returns the preimage or `null` |
-| `invoiceFrom(lnAddresses, amountMsat)` | get a provable invoice yourself, from `thunder-bridge/server` |
-| `lnurlPayEndpoint(config)` | a whole LNURL-pay endpoint as one Fetch handler, so a static QR points at your own domain. From `thunder-bridge/server` |
-| `invoiceToSvg(bolt11, options?)` | a QR as a string, no canvas involved. `lnurlToSvg` and `spdToSvg` are the siblings, each with a `…ToDataUrl` twin |
+The shape of it is worth stating once, because it is the thing that makes the rest
+findable. One instance is the entry to everything:
 
-The rest of the surface, by job:
+```ts
+import { sats, ThunderBridge } from "thunder-bridge";
 
-- **more gateway calls:** `Gateways`, `createQuote`, `getPayment`, `getWatched`,
-  `listPayments`, `firstToSettle`, `nameFor`, `createSocketTicket`, `webhookKey`,
-  `isPrivate`
-- **proving:** `proveOrigin`, `isProvablyPaid`, `preimageMatchesHash`,
-  `decodeInvoice`, `proveWrapped`, `wrapFeeCeiling`
-- **serving your own endpoints:** `lightningVerifyEndpoint`, `bankVerifyEndpoint`,
-  `nwcVerifyEndpoint`, `watchTicketEndpoint`, `publicWatchTicketEndpoint`,
-  `relayedVerifyUrl`, `seal`, `unseal`, `toLnurl`
-- **one shape per payment method:** `lightningRail`, `blindLightningRail`,
-  `bankRail`, `nwcRail`, `bankTransfer`, `fioStatement`
-- **pricing a fiat order:** `medianOf`, `msatFor`, `coinbase`, `kraken`, `bitstamp`,
-  `coinmate`, `minorUnitsOf`, `minorScaleOf`
-- **webhooks:** `parseSettlementRequest`, `answerWebhookChallengeRequest`,
-  `isProvablySettled`, `verifyWebhookSignature`, and the `parse*` variants for each
-  shape
-- **errors:** `ProblemError`, `GatewayCheatError`, `NoWalletAvailableError`,
-  `UnverifiedRecipientError`, `IdempotencyConflictError`, `isProblemType`
+const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe", {
+  secret: "a-long-lived-server-side-secret",
+});
+
+const sale = await gateway.sell({ to: "iamfatik@blink.sv", amount: sats(21) });
+const read = await gateway.payment(sale.id);
+const quoted = await gateway.quote({ to: "iamfatik@blink.sv", amount: sats(21) });
+
+const lnurl = gateway.serve.lnurlPay({
+  to: "iamfatik@blink.sv",
+  amount: sats(21),
+  secret: "a-long-lived-server-side-secret",
+});
+const rail = gateway.rails.lightning({ to: "iamfatik@blink.sv", amount: () => sats(21) });
+```
+
+- **the payments themselves** are `sell`, `mint`, `quote`, `watch`, `payment`,
+  `payments`, `settled`, `firstSettled`, `firstSettled`, `follow`, `ticket`,
+  `nameFor` and `webhookKey`, all on the instance
+- **what you mount** is on `gateway.serve`: an LNURL-pay endpoint, the two ticket
+  endpoints, the verify endpoints for Lightning and for a bank, the webhook route,
+  and the readers under it
+- **one call per sale** is on `gateway.rails`: `lightning`, `blindLightning`,
+  `bank`, and `transfer` for a bank transfer on its own
+- **the proofs** are free functions, deliberately, because a proof you cannot run
+  without the thing being audited is not a proof: `proveOrigin`, `proveSettlement`,
+  `proveWrapped`, `carriesProof`, `decodeInvoice`, `preimageMatchesHash`
+- **the amounts** are `sats`, `msat` and `fiat`
 
 What your service answers once those handlers are mounted is written out in
 [`openapi.yaml`](openapi.yaml), shipped with this package.
@@ -312,18 +319,20 @@ Every failure from the gateway is an RFC 9457 problem document. Branch on `type`
 never on prose. `error.status` is what the transport carried, and a document naming
 a different status in its own body does not override it.
 
-Every `type` below is prefixed `urn:problem-type:thunder-bridge:`, and the four the
-SDK exports as constants are named in the last column.
+Every `type` below is prefixed `urn:problem-type:thunder-bridge:`. The four with no
+error class of their own are static strings on `ProblemError`, and
+`ProblemError.is(error, ProblemError.PAYMENT_ALREADY_WATCHED)` is how you branch on
+one of those.
 
 | `type` | Status | What it is |
 |---|---|---|
 | `invalid-request` | 400, or 413 for a body over the size ceiling | `detail` names the field |
-| `no-wallet-available` | 502, else 422, else 400, following the worst wallet | `NoWalletAvailableError`, `wallets` says why each failed. `NO_WALLET_AVAILABLE` |
-| `request-in-flight` | 409 | a request with this `Idempotency-Key` is still running. `REQUEST_IN_FLIGHT` |
-| `idempotency-key-reused` | 409 | that key was used for a different request. `IdempotencyConflictError`, `IDEMPOTENCY_KEY_REUSED` |
-| `payment-already-watched` | 409 | that payment hash is already watched here. `PAYMENT_ALREADY_WATCHED` |
+| `no-wallet-available` | 502, else 422, else 400, following the worst wallet | `NoWalletAvailableError`, `wallets` says why each failed |
+| `request-in-flight` | 409 | a request with this `Idempotency-Key` is still running, as `IdempotencyConflictError` |
+| `idempotency-key-reused` | 409 | that key was used for a different request, as `IdempotencyConflictError` |
+| `payment-already-watched` | 409 | that payment hash is already watched here |
 | `caller-unknown` | 403 | the instance keeps a list of callers and your key is not on it |
-| `verify-host-refused` | 403 | this instance will not mint, because minting is off or `VERIFY_HOSTS` pins it to a list. Resolve the address yourself and use `watchPayment`. A verify URL that is not public https is `invalid-request` instead |
+| `verify-host-refused` | 403 | this instance will not mint, because minting is off or `VERIFY_HOSTS` pins it to a list. Resolve the address yourself and use `watch`. A verify URL that is not public https is `invalid-request` instead |
 | `verify-unconfirmed` | 424 | the URL did not answer the LUD-21 shape |
 | `verify-unconsented` | 424 | the URL did not echo the challenge nonce |
 | `webhook-unconfirmed` | 424 | the webhook URL did not answer its challenge |
@@ -334,7 +343,7 @@ problem body: `401` when the bearer token does not match, `404` both for an id t
 gateway never heard of and for one it knows that belongs to a different caller key,
 so a `403` can never confirm an id exists, `410` when you replay an
 `Idempotency-Key` whose payment has since been pruned, `500`, and `503` while the
-instance is draining or its own health check reads stalled. On a `404` `getPayment`
+instance is draining or its own health check reads stalled. On a `404` `payment`
 returns `null` rather than throwing.
 
 `GatewayCheatError` is different in kind. It reports a gateway that demonstrably
@@ -357,7 +366,7 @@ declare const gateway: ThunderBridge;
 declare function report(line: string): void;
 
 try {
-  await gateway.createPayment({ lnAddresses: ["iamfatik@blink.sv"], amountMsat: 21_000 });
+  await gateway.mint({ to: "iamfatik@blink.sv", amount: 21_000 });
 } catch (error) {
   if (error instanceof GatewayCheatError) {
     report(`the gateway cheated: ${error.code} on payment ${error.paymentId}`);
@@ -390,44 +399,30 @@ open, and refuses the payment with a `424` unless the nonce comes back, so deplo
 the endpoint before you register it.
 
 ```ts
-import {
-  ThunderBridge,
-  answerWebhookChallengeRequest,
-  isProvablySettled,
-  parseSettlementRequest,
-} from "thunder-bridge";
+import { ThunderBridge } from "thunder-bridge";
 
 declare function fulfil(paymentId: string, preimage: string): Promise<void>;
 
 const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe");
-const signer = { publicKey: await gateway.webhookKey() };
 
-export async function POST(request: Request): Promise<Response> {
-  const challenge = await answerWebhookChallengeRequest(request, signer);
-  if (challenge) {
-    return challenge;
-  }
-
-  const settled = await parseSettlementRequest(request, signer);
-  if (settled === null) {
-    return new Response("bad signature", { status: 401 });
-  }
-
-  const preimage = isProvablySettled(settled) ? settled.preimage : null;
-  if (preimage === null) {
-    return new Response("no preimage that hashes to it", { status: 402 });
-  }
-
-  await fulfil(settled.id, preimage);
-
-  return new Response("ok");
-}
+export const POST = gateway.serve.webhook({
+  onSettled: async (settlement) => {
+    await fulfil(settlement.id, String(settlement.preimage));
+  },
+});
 ```
 
-`isProvablySettled` answers the only question that matters about a delivery: it says
-paid and it carries a preimage that hashes to the payment hash the same body names.
-Ask the recipient's own server with `proveSettlement` when you want the proof to come
-from somewhere other than the delivery.
+That route answers the challenge, reads the gateway's own published key, checks the
+signature, and calls you only for a delivery that proves itself: it says paid and it
+carries a preimage that hashes to the payment hash the same body names. A delivery
+that proves nothing gets a `202` and no callback, because acting on an unproven
+claim is the one thing this refuses to do. Pass `onUnproven` when an expiry is news
+you want.
+
+`gateway.serve.readSettlement` and `gateway.serve.readPayment` are the same checks
+without the route, for a handler you would rather write yourself. Ask the
+recipient's own server with `proveSettlement` when you want the proof to come from
+somewhere other than the delivery.
 
 ## More
 
@@ -436,6 +431,7 @@ from somewhere other than the delivery.
 - [docs/proving-a-payment.md](../docs/proving-a-payment.md) - the five origin checks
   and their failure codes, what settlement means, making the gateway poll nobody but
   you, the NWC rail, wrapped invoices, and webhooks in full
+- [docs/api.md](../docs/api.md) - every export, generated from the code
 - [the gateway](../README.md) - one level up in this repository
 
 ## Development

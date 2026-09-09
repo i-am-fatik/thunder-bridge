@@ -11,6 +11,7 @@ export interface Relayed {
   hash: string;
 }
 
+/** The verify endpoint that asks the wallet for the gateway, and how often it may be asked */
 export interface LightningVerifyConfig {
   /** The secret the sealed wallet URL was made with, and nothing else uses it */
   secret: string;

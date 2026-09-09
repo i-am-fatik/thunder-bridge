@@ -54,6 +54,7 @@ export interface NwcInvoice {
   expiresAt: number;
 }
 
+/** The endpoint the gateway polls for an NWC payment, answering off your own wallet */
 export interface NwcVerifyConfig {
   /** The wallet this endpoint speaks for. It never leaves this process */
   connection: NwcConnection;
@@ -473,6 +474,7 @@ function isSecureRelay(relay: string): boolean {
   }
 }
 
+/** A Lightning rail minting on a wallet of your own over NIP-47, bound once per shop */
 export interface NwcRailConfig extends RailConfig {
   /** The wallet that mints, which never leaves this process */
   connection: NwcConnection;

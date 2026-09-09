@@ -59,6 +59,7 @@ function backoffMs(firstDelay: number, attempt: number): number {
   return Math.round(grown * (0.5 + Math.random() / 2));
 }
 
+/** How this instance talks to one gateway, and how much of what it says to check */
 export interface ThunderBridgeOptions {
   /**
    * Prove every payment against the recipient's own server before handing it
@@ -84,6 +85,7 @@ export interface ThunderBridgeOptions {
   secret?: string;
 }
 
+/** How long to wait on a payment, and what the socket URL is allowed to carry */
 export interface WaitOptions {
   /** Give up when this aborts, `AbortSignal.timeout(ms)` covers the usual case */
   signal?: AbortSignal;
@@ -97,6 +99,7 @@ export interface WaitOptions {
   tickets?: boolean;
 }
 
+/** What a socket ticket opens beyond the trigger it names */
 export interface TicketOptions {
   /**
    * How many of this trigger's settlements the socket replays on connect, up to
@@ -105,6 +108,7 @@ export interface TicketOptions {
   replay?: number;
 }
 
+/** What a mint carries beyond the charge: a retry key, and which trigger it joins */
 export interface CreateOptions {
   /**
    * Makes the POST safe to retry. A repeat of a finished request replays its
@@ -133,6 +137,7 @@ export interface CreateOptions {
   replay?: number;
 }
 
+/** What to do with a trigger's settlements, and how hard to try to keep hearing them */
 export interface FollowOptions {
   /** Called for the recent settlements replayed on connect, then for each new one */
   onPayment: (settled: Payment) => void;

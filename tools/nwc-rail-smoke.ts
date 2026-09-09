@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { preimageMatchesHash } from "../core/bolt11.ts";
-import { ThunderBridge } from "../sdk/dist/index.js";
 import type { Order } from "../sdk/dist/index.js";
+import { ThunderBridge } from "../sdk/dist/index.js";
 import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "../sdk/dist/nwc.js";
 
 const SEALING_SECRET = "rail_smoke_secret_b73e4f19ac0d258614fa";

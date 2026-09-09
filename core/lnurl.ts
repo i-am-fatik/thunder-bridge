@@ -12,6 +12,7 @@ const LNURL_HRP = "lnurl";
 
 export const RESOLVE_TIMEOUT_MS = 30_000;
 
+/** An invoice a lightning address issued, with everything needed to watch and to prove it */
 export type Resolved = {
 	address: string;
 	bolt11: string;

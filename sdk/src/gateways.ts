@@ -1,6 +1,7 @@
 import { ThunderBridge, type ThunderBridgeOptions, type WaitOptions } from "./client.js";
 import type { Handover, Payment } from "./types.js";
 
+/** The client's own options, plus what to do about a gateway that will not take the watch */
 export interface GatewaysOptions extends ThunderBridgeOptions {
   /**
    * Called for each gateway that would not take the watch, with the url and what

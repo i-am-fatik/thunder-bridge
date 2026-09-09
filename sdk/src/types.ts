@@ -123,6 +123,7 @@ export type WalletReason =
   | "cannot-prove-delivery"
   | "invoice-refused";
 
+/** One wallet on the list that could not be used, and the reason it could not */
 export interface WalletFailure {
   address: string;
   reason: WalletReason;

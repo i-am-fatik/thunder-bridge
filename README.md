@@ -93,14 +93,14 @@ signature scheme are under `webhooks` in the spec.
 The URL is challenged before the payment is taken on, and the create is refused
 if it does not answer, so this gateway never sends an unsolicited request to an
 address a caller merely named. Your endpoint has to be serving first, and the
-client's `answerWebhookChallengeRequest` is the whole of that side.
+client's `serve.webhook` route is the whole of that side.
 
 A `verify_url` handed to `POST /watched-payments` is checked the same way, twice,
 before anything is watched: it has to answer the LUD-21 shape, and then it has to
 answer a challenge of its own. Speaking the protocol is what every real wallet
 does and says nothing about wanting this gateway's traffic, so the last hop
 belongs on your side. Serve
-[`lightningVerifyEndpoint`](sdk) or `bankVerifyEndpoint`, which answer the
+[`serve.verify`](sdk) or `serve.bankVerify`, which answer the
 challenge for you and ask the wallet themselves, and a wallet then throttles the
 abuser's own host rather than this instance's address, which its every other
 client shares. A `verify_url` the gateway found itself while minting is never

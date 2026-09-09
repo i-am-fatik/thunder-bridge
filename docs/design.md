@@ -315,7 +315,7 @@ ternary choosing one of the two, so the SDK carries no mode of its own.
 
 A shop can offer the same thing for Lightning and for a Czech QR platba at once
 and take whichever lands first. The design is a shared trigger, not a new
-resource. Both legs carry one trigger secret, `followTrigger` streams every
+resource. Both legs carry one trigger secret, `follow` streams every
 payment carrying it, and the first to reach `paid` wins. No linkage table, no
 polling loop of your own, no socket per customer.
 

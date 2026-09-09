@@ -2,6 +2,7 @@ import { encode } from "uqr";
 
 import { toLnurl } from "../../core/lnurl.js";
 
+/** How the QR is drawn, which is the only thing about it worth configuring */
 export interface QrOptions {
   /** SVG width and height in pixels, defaults to 256 */
   size?: number;

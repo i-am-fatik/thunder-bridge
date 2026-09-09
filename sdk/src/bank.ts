@@ -33,6 +33,7 @@ export interface Credit {
  */
 export type Statement = (sinceUnix: number) => Promise<Credit[]>;
 
+/** One transfer to ask for: what is owed, where it lands, and where its arrival is read back from */
 export interface BankTransferParams {
   /** Long lived and server side. The preimage is derived from it, so losing it loses every proof */
   secret: string;
@@ -89,6 +90,7 @@ export interface BankTransferParams {
   allowPublicGateway?: boolean;
 }
 
+/** A transfer the gateway is now watching, and the descriptor the payer scans */
 export interface BankTransfer {
   /** The watched payment's id at the gateway, which is how you read this order back */
   id: string;
@@ -103,6 +105,7 @@ export interface BankTransfer {
   spd: string;
 }
 
+/** The endpoint the gateway polls for a bank transfer, answering off your own statement */
 export interface BankVerifyConfig {
   /** The same secret `bankTransfer` was given */
   secret: string;

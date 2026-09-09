@@ -9,6 +9,7 @@ import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.j
 
 const NONCE_BYTES = 16;
 
+/** An LNURL-pay endpoint of your own: whose wallets it stands for, and what it charges */
 export interface TriggerConfig {
   /** Priority list, quoted at payRequest and then pinned for the callback */
   to: string | string[];
@@ -66,6 +67,7 @@ export interface TriggerConfig {
   sealed?: { secret: string; data: (minted: Minted) => unknown };
 }
 
+/** What a blind mint produced, which is what the sealed payload is built from */
 export interface Minted {
   lnAddress: string;
   amountMsat: number;

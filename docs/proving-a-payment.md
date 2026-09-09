@@ -32,7 +32,7 @@ front of a payer is the recipient's own invoice for the right amount. They say
 nothing about whether anybody paid it, and the two answers to that are not the
 same answer.
 
-`isProvablyPaid` asks whether the gateway's report contradicts itself: a `paid`
+`carriesProof` asks whether a report contradicts itself: a `paid`
 status, a preimage, and a `bolt11` whose payment hash that preimage opens. All
 three values arrive from the gateway in one message, so this is internal
 consistency and nothing more. A gateway that generates a preimage, hashes it and
@@ -44,7 +44,7 @@ ties `verifyUrl` to the recipient's own callback origin, then reads that url.
 `null` means the recipient's own server is not claiming the money arrived,
 whatever the gateway says.
 
-Use `isProvablyPaid` to throw out a record that is obviously wrong. Use
+Use `carriesProof` to throw out a record that is obviously wrong. Use
 `proveSettlement` before you part with anything.
 
 ### The host guard
@@ -59,7 +59,7 @@ It vets the first hop only. See below.
 
 ### Which transfer counts as paying
 
-`bankVerifyEndpoint` calls a credit a settlement when the amount and the currency
+`serve.bankVerify` calls a credit a settlement when the amount and the currency
 match exactly and the reference appears anywhere in what the payer wrote,
 case-insensitively. With `fioStatement` "what the payer wrote" is four Fio columns
 joined: the variable symbol, the user identification, the message for the recipient
@@ -80,22 +80,20 @@ never learned which provider your recipient uses, put your own endpoint in betwe
 
 ```ts
 import { ThunderBridge } from "thunder-bridge";
-import { blindLightningRail, lightningVerifyEndpoint } from "thunder-bridge/server";
 
 declare const gateway: ThunderBridge;
 
 const RELAY_SECRET = process.env.RELAY_SECRET as string;
 
-export const serveVerify = lightningVerifyEndpoint({
+export const serveVerify = gateway.serve.verify({
   secret: RELAY_SECRET,
   pollEverySecs: 5,
 });
 
-export const rail = blindLightningRail({
-  gateway,
-  lnAddresses: ["you@blink.sv"],
-  amountMsat: (order) => order.amountMinor * 40,
-  relayVerifyThrough: { endpoint: "https://shop.example/verify/lightning", secret: RELAY_SECRET },
+export const rail = gateway.rails.blindLightning({
+  to: ["you@blink.sv"],
+  amount: (order) => order.amountMinor * 40,
+  relayThrough: { endpoint: "https://shop.example/verify/lightning", secret: RELAY_SECRET },
 });
 ```
 
@@ -123,7 +121,7 @@ one with no preimage, which is worse - is watchable anyway.
 
 ```ts
 import { ThunderBridge } from "thunder-bridge";
-import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "thunder-bridge/server";
+import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "thunder-bridge/nwc";
 
 declare const gateway: ThunderBridge;
 
@@ -132,10 +130,9 @@ const connection = nwcConnection(process.env.NWC_URI as string);
 
 export const serveVerify = nwcVerifyEndpoint({ connection, secret: NWC_SECRET });
 
-export const rail = nwcRail({
-  gateway,
+export const rail = nwcRail(gateway, {
   connection,
-  amountMsat: (order) => order.amountMinor * 40,
+  amount: (order) => order.amountMinor * 40,
   verifyThrough: { endpoint: "https://shop.example/verify/nwc", secret: NWC_SECRET },
 });
 ```
@@ -152,7 +149,7 @@ with its own permissions and budget, and this needs `make_invoice` and
 
 ### How often the gateway asks
 
-Your endpoint decides, not the gateway. `bankVerifyEndpoint` answers with
+Your endpoint decides, not the gateway. `serve.bankVerify` answers with
 `Cache-Control: max-age=30`, and the gateway uses that as the interval for every
 payment on your host. Set `pollEverySecs` to whatever your bank's own refresh makes
 sensible: reading a statement that moves once an hour every five seconds only burns
@@ -179,11 +176,11 @@ the money and walks away.
 
 This SDK does not wrap. `proveWrapped` checks a wrap somebody else offers, and the
 NIP-47 primitives an operator would build one from, `nwcHoldInvoice` and `nwcPay`,
-are on `thunder-bridge/server` with nothing here driving them.
+are on `thunder-bridge/nwc` with nothing here driving them.
 
 ```ts
 import { proveWrapped } from "thunder-bridge";
-import { invoiceFrom } from "thunder-bridge/server";
+import { invoiceFrom } from "thunder-bridge";
 
 declare function wrapThrough(bolt11: string): Promise<string>;
 
@@ -220,7 +217,7 @@ The trust boundary is stated once, in
 [the README](../sdk/README.md#who-you-still-have-to-trust): which of the three
 parties is constrained by what, plus the colluding custodian, the first-hop-only
 host guard, the cold read that is only as pinned as its creation, and why
-`isProvablyPaid` is not evidence. It lives there rather than here because it is the
+`carriesProof` is not evidence. It lives there rather than here because it is the
 first thing a caller needs and the README is what npm hands them.
 
 ## Webhooks in full
@@ -229,9 +226,9 @@ first thing a caller needs and the README is what npm hands them.
 
 `bankRail` and `blindLightningRail` used to need a parser of their own, because their
 webhook carried no address, no amount and no invoice while a minted one did. A
-delivery is a `Settlement` on every rail now, so `parseSettlementRequest` is the only
+delivery is a `Settlement` on every rail now, so `serve.readSettlement` is the only
 one to reach for. `parseWatchedWebhookRequest` is still there for reading the shape a
-socket frame and `getWatched` hand back, which is a payment rather than a delivery.
+socket frame and `payment` hand back, which is a payment rather than a delivery.
 
 Give each rail its own path, as above, and neither endpoint has to guess which body
 it was handed. Both events also carry `kind`, `"minted"` or `"watched"`, so a single
@@ -254,10 +251,10 @@ stops verifying is therefore a reason to read `/webhook-key` again before it is 
 reason to distrust the gateway. A `sha256=` signature is refused outright: that scheme
 is gone.
 
-`parseSettlementRequest` refuses anything more than five minutes out of date,
+`serve.readSettlement` refuses anything more than five minutes out of date,
 adjustable with `toleranceSecs`. The signature proves the delivery came from the
 gateway. It does not prove the payment happened, because the gateway holds the key
-that signs it either way. The proof is the preimage, checked by `isProvablySettled`
+that signs it either way. The proof is the preimage, checked by `carriesProof`
 against the hash in the same body, or `proveSettlement` against the recipient's own
 server when you want the answer from somewhere else entirely.
 

@@ -60,6 +60,7 @@ export interface RailConfig {
   name?: string;
 }
 
+/** A Lightning rail the gateway mints for, bound once and then given one order at a time */
 export interface LightningRailConfig extends RailConfig {
   /** Priority list, the first address that can prove an invoice wins */
   to: string | string[];
@@ -77,6 +78,7 @@ export interface LightningRailConfig extends RailConfig {
   idempotencyKey?: (order: Order) => string | undefined;
 }
 
+/** The same rail with the invoice resolved here, so the gateway is told neither address nor amount */
 export interface BlindLightningRailConfig extends LightningRailConfig {
   /**
    * What the watcher needs and the gateway must not read, sealed with `seal`
@@ -92,6 +94,7 @@ export interface BlindLightningRailConfig extends LightningRailConfig {
   relayThrough?: { endpoint: string; secret: string };
 }
 
+/** A bank rail: the account the money lands in, and where its arrival is read back from */
 export interface BankRailConfig extends RailConfig {
   /** Long lived and server side. Every preimage is derived from it, so losing it loses every proof */
   secret: string;
