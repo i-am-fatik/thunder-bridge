@@ -1,6 +1,7 @@
 export type { Invoice } from "../../core/bolt11.js";
 export { decodeInvoice, preimageMatchesHash } from "../../core/bolt11.js";
 export type { Resolved } from "../../core/lnurl.js";
+export type { Send } from "../../core/outbound.js";
 export { seal, unseal } from "../../core/sealed.js";
 export type { Amount, FiatOptions, Msat } from "./amount.js";
 export { fiat, msat, sats } from "./amount.js";

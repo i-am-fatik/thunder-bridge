@@ -11,8 +11,7 @@ import {
 } from "../src/bank";
 import { ThunderBridge } from "../src/client";
 import { fioStatement } from "../src/fio";
-import { throughFetch } from "../src/outbound";
-import { type FetchCall, jsonResponse } from "./harness";
+import { jsonResponse, throughFetch, type FetchCall } from "./harness";
 
 vi.mock("node:dns/promises", () => ({
   lookup: async () => [{ address: "203.0.113.1", family: 4 }],

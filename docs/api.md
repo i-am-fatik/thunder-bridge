@@ -64,6 +64,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`Resolved`](#thunder-bridge-type-resolved) | type | An invoice a lightning address issued, with everything needed to watch and to prove it |
 | [`sats`](#thunder-bridge-function-sats) | function | A whole number of satoshi, so `sats(21)` is 21000 millisatoshi |
 | [`seal`](#thunder-bridge-function-seal) | function | Encrypt what the watcher needs and the gateway must not have |
+| [`Send`](#thunder-bridge-type-send) | type | Carries one request to an address ask() already verified, so nothing resolves the name again |
 | [`Serve`](#thunder-bridge-class-serve) | class | Everything one gateway lets you mount, in one place so a caller never has to know which handler needs the gateway and which does not |
 | [`Settlement`](#thunder-bridge-interface-settlement) | interface | What a delivery carries |
 | [`SocketTicket`](#thunder-bridge-interface-socketticket) | interface | A one minute pass onto one trigger's stream |
@@ -213,6 +214,9 @@ interface BlindLightningRailConfig extends LightningRailConfig {
    * verify challenge will refuse to poll
    */
   relayThrough?: { endpoint: string; secret: string };
+
+  /** How the rail reaches wallets, pinned to the address it verified unless you say otherwise */
+  send?: Send;
 }
 ```
 
@@ -528,7 +532,11 @@ What a BOLT11 invoice says about itself, every field null when it does not carry
 ### <a id="thunder-bridge-function-invoicefrom"></a>invoiceFrom
 
 ```ts
-async function invoiceFrom(paidTo: string | string[], amount: Amount): Promise<Resolved>
+async function invoiceFrom(
+  paidTo: string | string[],
+  amount: Amount,
+  send: Send = pinnedToTheAddressWeVerified,
+): Promise<Resolved>
 ```
 
 A provable invoice from the first address on the list that will issue one, which
@@ -597,6 +605,9 @@ interface LightningVerifyConfig {
    * Five by default, which is what a Lightning checkout wants
    */
   pollEverySecs?: number;
+
+  /** How the relay reaches the wallet, pinned to the address it verified unless you say otherwise */
+  send?: Send;
 }
 ```
 
@@ -1037,6 +1048,19 @@ Encrypt what the watcher needs and the gateway must not have. The gateway
 stores the result and hands it back untouched, so anything readable you put
 in `sealed` is something you told it, which is what blind mode exists to avoid
 
+### <a id="thunder-bridge-type-send"></a>Send
+
+```ts
+type Send = (
+	url: string,
+	sent: Sent,
+	signal: AbortSignal,
+	at: readonly Verified[],
+) => Promise<Response>;
+```
+
+Carries one request to an address ask() already verified, so nothing resolves the name again
+
 ### <a id="thunder-bridge-class-serve"></a>Serve
 
 ```ts
@@ -1194,6 +1218,9 @@ interface TriggerConfig {
    * page that opens later still gets to see. Needs `watchSecret`
    */
   replay?: number;
+
+  /** How the endpoint reaches wallets, pinned to the address it verified unless you say otherwise */
+  send?: Send;
 
   /** Override when a proxy hides the public URL from the request, no trailing slash */
   baseUrl?: string;

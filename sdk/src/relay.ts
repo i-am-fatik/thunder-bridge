@@ -1,6 +1,7 @@
 import { checkSettled } from "../../core/lnurl.js";
+import type { Send } from "../../core/outbound.js";
+import { pinnedToTheAddressWeVerified } from "../../core/pinned.js";
 import { seal, unseal } from "../../core/sealed.js";
-import { throughFetch } from "./outbound.js";
 import { answerVerifyChallenge } from "./webhook.js";
 
 const DEFAULT_POLL_EVERY_SECS = 5;
@@ -23,6 +24,9 @@ export interface LightningVerifyConfig {
    * Five by default, which is what a Lightning checkout wants
    */
   pollEverySecs?: number;
+
+  /** How the relay reaches the wallet, pinned to the address it verified unless you say otherwise */
+  send?: Send;
 }
 
 /**
@@ -66,7 +70,11 @@ export function lightningVerifyEndpoint(
     }
 
     const wallet = JSON.parse(opened) as Relayed;
-    const asked = await checkSettled(throughFetch, wallet.url, wallet.hash).catch(() => null);
+    const asked = await checkSettled(
+      config.send ?? pinnedToTheAddressWeVerified,
+      wallet.url,
+      wallet.hash,
+    ).catch(() => null);
     if (asked === null) {
       return Response.json({ settled: false }, { status: 502 });
     }

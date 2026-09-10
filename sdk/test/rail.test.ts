@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preimageMatchesHash } from "../../core/bolt11.js";
 import { checkSettled } from "../../core/lnurl.js";
-import { throughFetch } from "../src/outbound";
 import { bankVerifyEndpoint, type Credit } from "../src/bank";
 import { ThunderBridge } from "../src/client";
 import { NoWalletAvailableError } from "../src/errors";
@@ -19,7 +18,7 @@ import {
   type Rail,
 } from "../src/rail";
 import { bolt11 } from "./encode";
-import { jsonResponse, type Routes, stubFetch } from "./harness";
+import { jsonResponse, stubFetch, throughFetch, type Routes } from "./harness";
 
 vi.mock("node:dns/promises", () => ({
   lookup: async () => [{ address: "203.0.113.1", family: 4 }],
@@ -111,6 +110,7 @@ function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
 
 function blind(overrides: Partial<BlindLightningRailConfig> = {}): Rail {
   return blindLightningRail(new ThunderBridge(GATEWAY, { verify: false, token: "hunter2" }), {
+    send: throughFetch,
     paidTo: [LN_ADDRESS],
     amount: () => msat(AMOUNT_MSAT),
     ...overrides,

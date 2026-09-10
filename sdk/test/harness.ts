@@ -1,5 +1,7 @@
 import { vi } from "vitest";
 
+import type { Send } from "../../core/outbound.js";
+
 export type Routes = Record<string, () => Response>;
 
 export interface FetchCall {
@@ -35,3 +37,12 @@ export function stubFetch(routes: Routes): FetchCall[] {
   );
   return calls;
 }
+
+export const throughFetch: Send = (url, sent, signal) =>
+  fetch(url, {
+    method: sent.method ?? "GET",
+    headers: sent.headers ?? {},
+    body: sent.body,
+    redirect: "manual",
+    signal,
+  });

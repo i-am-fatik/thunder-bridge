@@ -13,7 +13,7 @@ import {
   type WatchTicketConfig,
 } from "../src/trigger";
 import { bolt11 } from "./encode";
-import { type FetchCall, jsonResponse, problemResponse, stubFetch, type Routes } from "./harness";
+import { jsonResponse, problemResponse, stubFetch, throughFetch, type FetchCall, type Routes } from "./harness";
 
 const GATEWAY = "https://gateway.example.net";
 const MOUNT = "https://tips.example.org/pay/coffee";
@@ -74,6 +74,7 @@ function gatewayServing(overrides: Record<string, unknown> = {}): Routes {
 
 function endpoint(overrides: Partial<TriggerConfig> = {}) {
   return lnurlPayEndpoint(new ThunderBridge(GATEWAY, { verify: false }), {
+    send: throughFetch,
     paidTo: [FALLBACK, WINNER],
     amount: () => msat(AMOUNT_MSAT),
     secret: SECRET,
@@ -498,6 +499,7 @@ describe("the binding finding 1 is about", () => {
     });
 
     const handler = lnurlPayEndpoint(new ThunderBridge(GATEWAY), {
+    send: throughFetch,
       paidTo: [FALLBACK, WINNER],
       amount: () => msat(AMOUNT_MSAT),
       secret: SECRET,
@@ -632,6 +634,7 @@ describe("a trigger a payer chooses the amount on", () => {
 
   function jar(least: number, most: number) {
     return lnurlPayEndpoint(new ThunderBridge(GATEWAY, { verify: false }), {
+    send: throughFetch,
       paidTo: [FALLBACK, WINNER],
       amount: { least: msat(least), most: msat(most) },
       secret: SECRET,

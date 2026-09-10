@@ -1,10 +1,11 @@
 import { type Resolved, resolve } from "../../core/lnurl.js";
+import type { Send } from "../../core/outbound.js";
+import { pinnedToTheAddressWeVerified } from "../../core/pinned.js";
 import { NoWalletAvailable } from "../../core/refusal.js";
 import { type Amount, amountNow, type Msat, msat } from "./amount.js";
 import { type BankTransfer, type BankTransferParams, bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
-import { throughFetch } from "./outbound.js";
 import { medianOf, msatFor, type Ticker } from "./price.js";
 import { toLightningUri } from "./qr.js";
 import { relayedVerifyUrl } from "./relay.js";
@@ -94,6 +95,9 @@ export interface BlindLightningRailConfig extends LightningRailConfig {
    * verify challenge will refuse to poll
    */
   relayThrough?: { endpoint: string; secret: string };
+
+  /** How the rail reaches wallets, pinned to the address it verified unless you say otherwise */
+  send?: Send;
 }
 
 /** A bank rail: the account the money lands in, and where its arrival is read back from */
@@ -200,6 +204,7 @@ export function blindLightningRail(gateway: ThunderBridge, config: BlindLightnin
     const resolved = await invoiceFrom(
       config.paidTo,
       await msatForOrder(order, config.amount, config.rate),
+      config.send,
     );
     const relay = config.relayThrough;
     const watched = await gateway.watch({
@@ -237,10 +242,14 @@ export function blindLightningRail(gateway: ThunderBridge, config: BlindLightnin
  * Server side: it resolves hostnames and refuses a private one, which no browser can
  * do. Throws `NoWalletAvailableError` when no address on the list would serve
  */
-export async function invoiceFrom(paidTo: string | string[], amount: Amount): Promise<Resolved> {
+export async function invoiceFrom(
+  paidTo: string | string[],
+  amount: Amount,
+  send: Send = pinnedToTheAddressWeVerified,
+): Promise<Resolved> {
   const addresses = typeof paidTo === "string" ? [paidTo] : paidTo;
   try {
-    return await resolve(throughFetch, addresses, await amountNow(amount));
+    return await resolve(send, addresses, await amountNow(amount));
   } catch (refused: unknown) {
     if (refused instanceof NoWalletAvailable) {
       throw new NoWalletAvailableError({ title: refused.message }, refused.wallets);

@@ -26,6 +26,7 @@ export type Answer = {
 
 export type Verified = { address: string; family: number };
 
+/** Carries one request to an address ask() already verified, so nothing resolves the name again */
 export type Send = (
 	url: string,
 	sent: Sent,

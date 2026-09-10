@@ -1,9 +1,9 @@
 import { createServer } from "node:http";
 import { decodeInvoice, preimageMatchesHash } from "../core/bolt11.ts";
 import { checkSettled } from "../core/lnurl.ts";
+import { pinnedToTheAddressWeVerified } from "../core/pinned.ts";
 import { proveWrapped, wrapFeeCeiling } from "../sdk/dist/index.js";
 import { askWallet, nwcConnection, nwcHoldInvoice, nwcPay } from "../sdk/dist/nwc.js";
-import { pinnedToTheAddressWeVerified } from "../src/pinned.ts";
 import { type Bridged, ledgerAt, settleWhatIsOwed } from "./wrap-ledger.ts";
 
 const PORT = Number(process.env.PORT ?? 8480);

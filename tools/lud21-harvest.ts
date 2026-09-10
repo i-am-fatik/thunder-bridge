@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { cannotReleaseAPreimage } from "../core/lnurl.ts";
 import { ask, type Send } from "../core/outbound.ts";
-import { pinnedToTheAddressWeVerified } from "../src/pinned.ts";
+import { pinnedToTheAddressWeVerified } from "../core/pinned.ts";
 
 const RELAYS = [
 	"wss://relay.damus.io",

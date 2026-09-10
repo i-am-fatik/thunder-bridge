@@ -13,13 +13,13 @@ import { type SigningKey, signingKeyFromSeed } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.ts";
 import type { Send } from "../core/outbound.ts";
+import { pinnedToTheAddressWeVerified } from "../core/pinned.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
 import { allowed, bearer, daysToSecs, positive, secret, secsToMs, whole } from "./env.ts";
 import { Ledger } from "./ledger.ts";
 import * as log from "./log.ts";
 import type { Payment } from "./payment.ts";
-import { pinnedToTheAddressWeVerified } from "./pinned.ts";
 import {
 	ALREADY_WATCHED,
 	BodyTooLarge,

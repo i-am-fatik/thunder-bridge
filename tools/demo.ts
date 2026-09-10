@@ -313,6 +313,8 @@ if (process.argv[1]?.endsWith("demo.ts")) {
 				"--platform=browser",
 				"--external:dns/promises",
 				"--external:timers/promises",
+				"--external:https",
+				"--external:stream",
 				`--outfile=${resolve(root, "docs/demo/bundle.js")}`,
 			],
 			{ stdio: "inherit" },

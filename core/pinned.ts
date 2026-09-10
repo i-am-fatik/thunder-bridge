@@ -1,18 +1,19 @@
 import type { IncomingHttpHeaders, IncomingMessage } from "node:http";
-import { type RequestOptions, request } from "node:https";
-import { Readable } from "node:stream";
+import type { RequestOptions } from "node:https";
 
-import type { Send, Verified } from "../core/outbound.ts";
+import type { Send, Verified } from "./outbound.ts";
 
 const HTTPS_PORT = 443;
 const CARRIES_NO_BODY = [204, 205, 304];
 
-export const pinnedToTheAddressWeVerified: Send = (url, sent, signal, at) => {
+export const pinnedToTheAddressWeVerified: Send = async (url, sent, signal, at) => {
 	const asked = new URL(url);
 	const first = at[0];
 	if (first === undefined) {
 		throw new Error(`${url} resolved to nothing worth connecting to`);
 	}
+	const { request } = await import("node:https");
+	const { Readable } = await import("node:stream");
 
 	return new Promise<Response>((settle, fail) => {
 		if (signal.aborted) {

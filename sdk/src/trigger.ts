@@ -1,12 +1,13 @@
 import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
 import { resolve } from "../../core/lnurl.js";
+import type { Send } from "../../core/outbound.js";
+import { pinnedToTheAddressWeVerified } from "../../core/pinned.js";
 import { seal } from "../../core/sealed.js";
 import { sha256Hex } from "../../core/sha256.js";
 import type { Amount } from "./amount.js";
 import { amountNow, msat } from "./amount.js";
 import type { ThunderBridge } from "./client.js";
 import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
-import { throughFetch } from "./outbound.js";
 import { relayedVerifyUrl } from "./relay.js";
 
 const NONCE_BYTES = 16;
@@ -41,6 +42,9 @@ export interface TriggerConfig {
    * page that opens later still gets to see. Needs `watchSecret`
    */
   replay?: number;
+
+  /** How the endpoint reaches wallets, pinned to the address it verified unless you say otherwise */
+  send?: Send;
 
   /** Override when a proxy hides the public URL from the request, no trailing slash */
   baseUrl?: string;
@@ -273,7 +277,11 @@ async function mintBlind(
   address: string,
   amountMsat: number,
 ): Promise<{ bolt11: string; verifyUrl: string }> {
-  const resolved = await resolve(throughFetch, [address], amountMsat);
+  const resolved = await resolve(
+    config.send ?? pinnedToTheAddressWeVerified,
+    [address],
+    amountMsat,
+  );
   const minted: Minted = { ...resolved, amountMsat, lnAddress: resolved.address };
   const locked = config.sealed;
   const relay = config.relayThrough;

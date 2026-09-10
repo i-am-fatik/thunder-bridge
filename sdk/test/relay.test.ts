@@ -1,7 +1,7 @@
+import { throughFetch } from "./harness";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkSettled } from "../../core/lnurl.js";
-import { throughFetch } from "../src/outbound";
 import { lightningVerifyEndpoint, relayedVerifyUrl } from "../src/relay";
 
 vi.mock("node:dns/promises", () => ({
@@ -45,7 +45,7 @@ describe("lightningVerifyEndpoint", () => {
 
   it("agrees to be polled without ever asking the wallet about it", async () => {
     const asked = walletSaying({ settled: false });
-    const answer = await lightningVerifyEndpoint({ secret: SECRET })(
+    const answer = await lightningVerifyEndpoint({ secret: SECRET, send: throughFetch })(
       new Request(await relayed(), {
         method: "POST",
         body: JSON.stringify({ type: "verify-challenge", nonce: "d4e5f6" }),
@@ -58,7 +58,7 @@ describe("lightningVerifyEndpoint", () => {
 
   it("asks the wallet and relays what it said, without deciding anything", async () => {
     const asked = walletSaying({ settled: true, preimage: PREIMAGE });
-    const answer = await lightningVerifyEndpoint({ secret: SECRET })(new Request(await relayed()));
+    const answer = await lightningVerifyEndpoint({ secret: SECRET, send: throughFetch })(new Request(await relayed()));
 
     expect(asked).toEqual([WALLET]);
     expect(await answer.json()).toEqual({ settled: true, preimage: PREIMAGE });
@@ -66,7 +66,7 @@ describe("lightningVerifyEndpoint", () => {
 
   it("says unsettled while the wallet does, and names the pace it wants", async () => {
     walletSaying({ settled: false });
-    const answer = await lightningVerifyEndpoint({ secret: SECRET, pollEverySecs: 3 })(
+    const answer = await lightningVerifyEndpoint({ secret: SECRET, pollEverySecs: 3, send: throughFetch })(
       new Request(await relayed()),
     );
 
@@ -76,14 +76,14 @@ describe("lightningVerifyEndpoint", () => {
 
   it("never passes on a preimage that does not hash to what was sealed", async () => {
     walletSaying({ settled: true, preimage: "ff".repeat(32) });
-    const answer = await lightningVerifyEndpoint({ secret: SECRET })(new Request(await relayed()));
+    const answer = await lightningVerifyEndpoint({ secret: SECRET, send: throughFetch })(new Request(await relayed()));
 
     expect(answer.status).toBe(502);
     expect(await answer.json()).toEqual({ settled: false });
   });
 
   it("cannot be opened by anyone holding a different secret", async () => {
-    const answer = await lightningVerifyEndpoint({ secret: "another_secret_32_characters_long" })(
+    const answer = await lightningVerifyEndpoint({ secret: "another_secret_32_characters_long", send: throughFetch })(
       new Request(await relayed()),
     );
 
@@ -95,20 +95,20 @@ describe("lightningVerifyEndpoint", () => {
       "fetch",
       vi.fn(() => Promise.reject(new Error("ENOTFOUND"))),
     );
-    const answer = await lightningVerifyEndpoint({ secret: SECRET })(new Request(await relayed()));
+    const answer = await lightningVerifyEndpoint({ secret: SECRET, send: throughFetch })(new Request(await relayed()));
 
     expect(answer.status).toBe(502);
   });
 
   it("refuses a request carrying no sealed wallet at all", async () => {
-    const answer = await lightningVerifyEndpoint({ secret: SECRET })(new Request(MOUNT));
+    const answer = await lightningVerifyEndpoint({ secret: SECRET, send: throughFetch })(new Request(MOUNT));
 
     expect(answer.status).toBe(400);
   });
 
   it("answers the shape the gateway's own settlement check reads", async () => {
     const url = await relayed();
-    const handler = lightningVerifyEndpoint({ secret: SECRET });
+    const handler = lightningVerifyEndpoint({ secret: SECRET, send: throughFetch });
     vi.stubGlobal(
       "fetch",
       vi.fn((target: RequestInfo | URL) =>

@@ -197,17 +197,18 @@ test("a deadline reached mid-flight tears the call down", async () => {
 		deadline.signal,
 		VERIFIED,
 	);
+	await vi.waitFor(() => expect(asked).toHaveLength(1));
 	deadline.abort();
 	await answered;
 
 	expect(destroyed).toBeInstanceOf(Error);
 });
 
-test("no address to connect to is refused rather than resolved from scratch", () => {
+test("no address to connect to is refused rather than resolved from scratch", async () => {
 	freshly();
 
-	expect(() =>
+	await expect(
 		pinnedToTheAddressWeVerified("https://example.com/pay", {}, AbortSignal.timeout(5000), []),
-	).toThrow("resolved to nothing worth connecting to");
+	).rejects.toThrow("resolved to nothing worth connecting to");
 	expect(asked).toHaveLength(0);
 });
