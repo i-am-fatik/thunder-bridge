@@ -74,6 +74,8 @@
   #qrcard, #minted { margin-top: 1.15rem; display: none; }
   #qrcard.on, #minted.on { display: block; }
   #qr, #mintedqr { background: #fff; border-radius: 5px; padding: 0.9rem; display: flex; justify-content: center; }
+  #minted summary { font-family: var(--sans); font-size: 0.85rem; color: var(--ink-soft); cursor: pointer; }
+  #minted[open] summary { margin-bottom: 0.7rem; }
   #qr svg, #mintedqr svg { width: 100%; max-width: 15rem; height: auto; display: block; }
   .bolt { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-faint); word-break: break-all; margin-top: 0.7rem; line-height: 1.5; }
   .ident { font-size: 0.82rem; color: var(--ink-soft); margin-top: 0.7rem; line-height: 1.6; }

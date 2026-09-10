@@ -83,9 +83,9 @@ const WHAT: Record<string, string> = {
 	qr: "draw the QR",
 	wait: "wait for the money",
 	prove: "ask the recipient's own server",
-	ask: "read the payRequest this page's own server answers",
-	callback: "ask the callback for the least the range allows",
-	invoice: "get a real invoice back, the one a wallet would pay",
+	ask: "read what the endpoint answers",
+	callback: "ask its callback for the least",
+	invoice: "get the invoice a wallet would pay",
 };
 
 function escaped(text: string): string {
@@ -219,14 +219,14 @@ ${rows}
             <button id="run">${runnable.action}</button>
             <button id="reset" class="ghost">Back to the defaults</button>
           </div>
-          <p class="warn">${runnable.slug === "pay-me" ? "The QR never changes, what it answers does. Scan it with a wallet, or press the button to ask it the way a wallet would and get a <b>real invoice</b> back for the least." : "This mints a <b>real invoice</b> against the address in the code, on the gateway in the code. Nobody has to pay it, it expires on its own."}</p>
+          <p class="warn">${runnable.slug === "pay-me" ? "The QR never changes, what it answers does. Scan it with a wallet, or press the button to see what a wallet gets." : "This mints a <b>real invoice</b> against the address in the code, on the gateway in the code. Nobody has to pay it, it expires on its own."}</p>
 
           <ul class="steps">
 ${steps}
           </ul>
 
           <div id="qrcard"><div id="qr"></div><div class="bolt" id="bolt"></div><div class="ident" id="ident"></div></div>
-${runnable.slug === "pay-me" ? `          <div id="minted"><div id="mintedqr"></div><div class="bolt" id="mintedbolt"></div></div>` : ""}
+${runnable.slug === "pay-me" ? `          <details id="minted"><summary id="mintedbolt"></summary><div id="mintedqr"></div></details>` : ""}
           <div class="verdict" id="verdict"></div>
         </div>
       </div>

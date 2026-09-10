@@ -14,6 +14,7 @@ import {
 const RECIPE = JSON.parse(document.getElementById("recipe").textContent);
 const KEY = `thunder-bridge:${RECIPE.slug}`;
 const whole = (value) => Number(value.replace(/_/g, ""));
+const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f");
 async function asJson(url) {
   const answer = await fetch(url);
   const body = await answer.json();
@@ -40,7 +41,7 @@ async function askTheEndpoint(values) {
   stepAt("callback", "done");
   stepAt("invoice", "running");
   mintedQr.innerHTML = invoiceToSvg(minted.pr);
-  mintedBolt.textContent = `a real invoice for ${offered.minSendable / 1000} satoshi, the least the range allows. Pay it and it lands below`;
+  mintedBolt.textContent = `the invoice it minted, ${grouped(offered.minSendable / 1000)} sat. Open to scan and pay it`;
   mintedCard.classList.add("on");
   stepAt("invoice", "done");
 
@@ -75,8 +76,8 @@ const RUNS = {
   },
   payMe: {
     run: (_into, values) => askTheEndpoint(values),
-    said: ({ bolt11, least, most }) =>
-      `Your endpoint offered ${least} to ${most} satoshi and its callback minted <code>${bolt11.slice(0, 34)}...</code> for the least. Pay it with any wallet and the tile below fills.`,
+    said: ({ least, most }) =>
+      `Offered ${grouped(least)} to ${grouped(most)} sat, and the callback minted a real invoice for the least. Pay it and the tile below fills.`,
   },
 };
 const PLAUSIBLE = {
@@ -120,7 +121,7 @@ function paint() {
     if (whole(values.most) < whole(values.least)) {
       most.classList.add("wrong");
     }
-    bolt.textContent = `bech32 of ${location.origin}/lnurlp/tips, the way LUD-01 asks. A wallet scanning it is offered ${whole(values.least)} to ${whole(values.most)} satoshi`;
+    bolt.textContent = `${location.origin}/lnurlp/tips as LNURL, offering ${grouped(whole(values.least))} to ${grouped(whole(values.most))} sat`;
   }
   runButton.disabled = running || fields.some((one) => one.classList.contains("wrong"));
 }
@@ -170,6 +171,7 @@ function clearRun() {
   }
   if (RECIPE.call === "payMe") {
     mintedCard.classList.remove("on");
+    mintedCard.open = false;
     mintedQr.replaceChildren();
     mintedBolt.replaceChildren();
 

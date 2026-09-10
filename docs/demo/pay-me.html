@@ -53,16 +53,16 @@
             <button id="run">Ask it the way a wallet would</button>
             <button id="reset" class="ghost">Back to the defaults</button>
           </div>
-          <p class="warn">The QR never changes, what it answers does. Scan it with a wallet, or press the button to ask it the way a wallet would and get a <b>real invoice</b> back for the least.</p>
+          <p class="warn">The QR never changes, what it answers does. Scan it with a wallet, or press the button to see what a wallet gets.</p>
 
           <ul class="steps">
-<li data-step="ask" data-line="19"><span class="dot"></span><span class="what">read the payRequest this page's own server answers</span><span class="at">line 19</span></li>
-<li data-step="callback" data-line="12"><span class="dot"></span><span class="what">ask the callback for the least the range allows</span><span class="at">line 12</span></li>
-<li data-step="invoice" data-line="0"><span class="dot"></span><span class="what">get a real invoice back, the one a wallet would pay</span><span class="at">wallet side</span></li>
+<li data-step="ask" data-line="19"><span class="dot"></span><span class="what">read what the endpoint answers</span><span class="at">line 19</span></li>
+<li data-step="callback" data-line="12"><span class="dot"></span><span class="what">ask its callback for the least</span><span class="at">line 12</span></li>
+<li data-step="invoice" data-line="0"><span class="dot"></span><span class="what">get the invoice a wallet would pay</span><span class="at">wallet side</span></li>
           </ul>
 
           <div id="qrcard"><div id="qr"></div><div class="bolt" id="bolt"></div><div class="ident" id="ident"></div></div>
-          <div id="minted"><div id="mintedqr"></div><div class="bolt" id="mintedbolt"></div></div>
+          <details id="minted"><summary id="mintedbolt"></summary><div id="mintedqr"></div></details>
           <div class="verdict" id="verdict"></div>
         </div>
       </div>
