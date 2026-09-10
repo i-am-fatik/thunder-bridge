@@ -223,8 +223,20 @@ function celled(text: string): string {
 	return text.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
 }
 
-function anchorOf(door: string, name: string): string {
-	return `${door.replace(/[^a-z]+/g, "-")}-${name.toLowerCase()}`;
+export function anchorOf(door: string, item: Item): string {
+	return `${door.replace(/[^a-z]+/g, "-")}-${item.kind}-${item.name.toLowerCase()}`;
+}
+
+export function memberAnchorOf(door: string, item: Item, member: Item): string {
+	return `${anchorOf(door, item)}-${member.name.toLowerCase()}`;
+}
+
+function linked(prose: string, anchors: Map<string, string>): string {
+	return prose.replace(/`([A-Za-z_$][\w$]*)`/g, (found, name: string) => {
+		const anchor = anchors.get(name);
+
+		return anchor === undefined ? found : `[${found}](#${anchor})`;
+	});
 }
 
 export function referenceFrom(doors: Map<string, Item[]>): string {
@@ -238,24 +250,36 @@ export function referenceFrom(doors: Map<string, Item[]>): string {
 	];
 
 	for (const [door, items] of doors) {
+		const anchors = new Map(
+			items.map((item): [string, string] => [item.name, anchorOf(door, item)]),
+		);
 		lines.push(`## \`${door}\``, "");
 		lines.push("| Export | Kind | What it is |", "|---|---|---|");
 		for (const item of items) {
 			lines.push(
-				`| [\`${item.name}\`](#${anchorOf(door, item.name)}) | ${item.kind} | ${celled(item.summary)} |`,
+				`| [\`${item.name}\`](#${anchorOf(door, item)}) | ${item.kind} | ${celled(item.summary)} |`,
 			);
 		}
 		lines.push("");
 
 		for (const item of items) {
-			lines.push(`### ${item.name}`, "", "```ts", item.signature, "```", "");
+			lines.push(
+				`### <a id="${anchorOf(door, item)}"></a>${item.name}`,
+				"",
+				"```ts",
+				item.signature,
+				"```",
+				"",
+			);
 			if (item.documentation !== "") {
-				lines.push(item.documentation, "");
+				lines.push(linked(item.documentation, anchors), "");
 			}
 			if (item.members.length > 0) {
 				lines.push("| Member | What it does |", "|---|---|");
 				for (const member of item.members) {
-					lines.push(`| \`${celled(member.signature)}\` | ${celled(member.summary)} |`);
+					lines.push(
+						`| <a id="${memberAnchorOf(door, item, member)}"></a>\`${celled(member.signature)}\` | ${celled(member.summary)} |`,
+					);
 				}
 				lines.push("");
 			}

@@ -8,96 +8,96 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 
 | Export | Kind | What it is |
 |---|---|---|
-| [`Amount`](#thunder-bridge-amount) | type | What a payment is worth |
-| [`AmountError`](#thunder-bridge-amounterror) | class | Thrown when a price cannot be held exactly |
-| [`AmountFault`](#thunder-bridge-amountfault) | type | Why an amount was refused |
-| [`answerVerifyChallenge`](#thunder-bridge-answerverifychallenge) | function | Answer the challenge the gateway sends a verify URL before it will poll it, which is how a caller shows the endpoint agreed to the traffic rather than merely being named |
-| [`BankRailConfig`](#thunder-bridge-bankrailconfig) | interface | A bank rail: the account the money lands in, and where its arrival is read back from |
-| [`BankVerifyConfig`](#thunder-bridge-bankverifyconfig) | interface | The endpoint the gateway polls for a bank transfer, answering off your own statement |
-| [`BlindLightningRailConfig`](#thunder-bridge-blindlightningrailconfig) | interface | The same rail with the invoice resolved here, so the gateway is told neither address nor amount |
-| [`carriesProof`](#thunder-bridge-carriesproof) | function | Whether a report proves what it claims: it says paid, and it carries a preimage that hashes to the payment hash it itself names |
-| [`Charge`](#thunder-bridge-charge) | interface | Who is paid and how much |
-| [`CreateOptions`](#thunder-bridge-createoptions) | interface | What a mint carries beyond the charge: a retry key, and which trigger it joins |
-| [`decodeInvoice`](#thunder-bridge-decodeinvoice) | function | Read a BOLT11 invoice without trusting anyone for its contents, an undecodable string or a BOLT12 offer yields an invoice with every field null |
-| [`fiat`](#thunder-bridge-fiat) | function | A price named in fiat, converted when the invoice is minted rather than now |
-| [`FiatOptions`](#thunder-bridge-fiatoptions) | interface | How a fiat price is turned into millisatoshi at the moment of minting |
-| [`FollowOptions`](#thunder-bridge-followoptions) | interface | What to do with a trigger's settlements, and how hard to try to keep hearing them |
-| [`GatewayCheatCode`](#thunder-bridge-gatewaycheatcode) | type | The way a gateway was caught out, every code is a check that held against the recipient's own server and failed against what the gateway returned |
-| [`GatewayCheatError`](#thunder-bridge-gatewaycheaterror) | class | Thrown when the gateway demonstrably misbehaved, the invoice it returned is not the one the address you asked for issued, or a settlement it reported carries a preimage that does not hash to the payment hash |
-| [`Gateways`](#thunder-bridge-gateways) | class | The same payment watched at several gateways at once, which is what makes any one of them replaceable |
-| [`GatewaysOptions`](#thunder-bridge-gatewaysoptions) | interface | The client's own options, plus what to do about a gateway that will not take the watch |
-| [`Handler`](#thunder-bridge-handler) | type | A Fetch handler, which is what every runtime this targets mounts |
-| [`Handover`](#thunder-bridge-handover) | interface | An invoice you obtained yourself, handed over to be watched |
-| [`IdempotencyConflict`](#thunder-bridge-idempotencyconflict) | type | Why an `Idempotency-Key` was refused, `request-in-flight` is the benign one and `key-reused` means the same key was sent for a different request |
-| [`IdempotencyConflictError`](#thunder-bridge-idempotencyconflicterror) | class | Thrown when an `Idempotency-Key` is held by another request |
-| [`Invoice`](#thunder-bridge-invoice) | interface | What a BOLT11 invoice says about itself, every field null when it does not carry one |
-| [`invoiceFrom`](#thunder-bridge-invoicefrom) | function | A provable invoice from the first address on the list that will issue one, which is what a client mints for itself rather than asking a gateway to |
-| [`Leg`](#thunder-bridge-leg) | interface | One way to pay one order, already registered with the gateway |
-| [`LightningRailConfig`](#thunder-bridge-lightningrailconfig) | interface | A Lightning rail the gateway mints for, bound once and then given one order at a time |
-| [`LightningVerifyConfig`](#thunder-bridge-lightningverifyconfig) | interface | The verify endpoint that asks the wallet for the gateway, and how often it may be asked |
-| [`Minted`](#thunder-bridge-minted) | interface | What a blind mint produced, which is what the sealed payload is built from |
-| [`MintedPayment`](#thunder-bridge-mintedpayment) | interface | A payment the gateway minted |
-| [`msat`](#thunder-bridge-msat) | function | An exact number of millisatoshi, for a price already in the smallest unit |
-| [`Msat`](#thunder-bridge-msat) | type | A whole number of millisatoshi that came from `sats`, `msat` or `fiat`, and could not have come from anywhere else |
-| [`NoWalletAvailableError`](#thunder-bridge-nowalletavailableerror) | class | Thrown when no wallet on your list could issue a provable invoice, `wallets` says why each refused |
-| [`Order`](#thunder-bridge-order) | interface | What a shop knows about a sale before any rail exists |
-| [`Payment`](#thunder-bridge-payment) | type | A payment as the gateway reports it, of either sort |
-| [`PaymentRequest`](#thunder-bridge-paymentrequest) | interface | One payment asked for: the invoice to show, the QR to draw it with, and one way to find out it was paid |
-| [`PaymentRequestInit`](#thunder-bridge-paymentrequestinit) | interface | What to ask for: who is paid, how much, and how the QR should look |
-| [`PaymentRequestOptions`](#thunder-bridge-paymentrequestoptions) | interface | What `requestPayment` takes beyond the charge itself |
-| [`PaymentStatus`](#thunder-bridge-paymentstatus) | type | Where a payment stands, `paid` is the only status that carries a preimage |
-| [`preimageMatchesHash`](#thunder-bridge-preimagematcheshash) | function | True when `preimage` is the secret behind `paymentHash` |
-| [`Priced`](#thunder-bridge-priced) | interface | A charge with its price settled, which is what a proof compares the gateway's answer against |
-| [`ProblemError`](#thunder-bridge-problemerror) | class | An RFC 9457 problem document the gateway answered with |
-| [`Provable`](#thunder-bridge-provable) | interface | The least a report has to carry for its own proof to be checkable |
-| [`Proven`](#thunder-bridge-proven) | type | A report `carriesProof` has already accepted, so the preimage is there and the status is settled |
-| [`proveOrigin`](#thunder-bridge-proveorigin) | function | Prove the invoice really is the one the recipient issued for what you asked, before the payer ever sees it, both fetches go straight to the recipient's own server and none of them goes back to the gateway |
-| [`proveSettlement`](#thunder-bridge-provesettlement) | function | Prove the money arrived by asking the recipient's own server, not the gateway, returns the preimage when the recipient says it settled and null when it says it has not, and runs the full origin proof first because a verify url the gateway made up would otherwise answer for itself |
-| [`proveWrapped`](#thunder-bridge-provewrapped) | function | Prove a wrapping operator's invoice is the recipient's own payment in disguise, so paying it can only settle by the operator paying the recipient |
-| [`Quote`](#thunder-bridge-quote) | interface | Which address would serve an amount, and what the ones ahead of it refused |
-| [`Rail`](#thunder-bridge-rail) | type | A payment method |
-| [`RailConfig`](#thunder-bridge-railconfig) | interface | What every rail takes, whatever it moves |
-| [`Rails`](#thunder-bridge-rails) | class | One call per sale, whatever the rail moves |
-| [`Range`](#thunder-bridge-range) | interface | What a payer may choose to send, when the endpoint lets them choose at all |
-| [`Relayed`](#thunder-bridge-relayed) | interface | The wallet's own LUD-21 URL and the hash its preimage has to match |
-| [`relayedVerifyUrl`](#thunder-bridge-relayedverifyurl) | function | The URL to hand the gateway instead of the wallet's own, with the wallet's sealed inside it |
-| [`Resolved`](#thunder-bridge-resolved) | type | An invoice a lightning address issued, with everything needed to watch and to prove it |
-| [`sats`](#thunder-bridge-sats) | function | A whole number of satoshi, so `sats(21)` is 21000 millisatoshi |
-| [`seal`](#thunder-bridge-seal) | function | Encrypt what the watcher needs and the gateway must not have |
-| [`Serve`](#thunder-bridge-serve) | class | Everything one gateway lets you mount, in one place so a caller never has to know which handler needs the gateway and which does not |
-| [`Settlement`](#thunder-bridge-settlement) | interface | What a delivery carries |
-| [`SocketTicket`](#thunder-bridge-socketticket) | interface | A one minute pass onto one trigger's stream |
-| [`ThunderBridge`](#thunder-bridge-thunderbridge) | class | Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself |
-| [`ThunderBridgeOptions`](#thunder-bridge-thunderbridgeoptions) | interface | How this instance talks to one gateway, and how much of what it says to check |
-| [`TicketOptions`](#thunder-bridge-ticketoptions) | interface | What a socket ticket opens beyond the trigger it names |
-| [`TriggerConfig`](#thunder-bridge-triggerconfig) | interface | An LNURL-pay endpoint of your own: whose wallets it stands for, and what it charges |
-| [`unseal`](#thunder-bridge-unseal) | function | Read a sealed blob back, null when it was sealed with another secret, edited on the way, or is not one of ours |
-| [`UnverifiedRecipientError`](#thunder-bridge-unverifiedrecipienterror) | class | Thrown when the recipient's own server could not be reached to check the invoice against, a CORS-blocked browser or a provider that is down, this is not proof the gateway cheated and it is not proof it did not |
-| [`WaitOptions`](#thunder-bridge-waitoptions) | interface | How long to wait on a payment, and what the socket URL is allowed to carry |
-| [`WalletFailure`](#thunder-bridge-walletfailure) | interface | One wallet on the list that could not be used, and the reason it could not |
-| [`WalletReason`](#thunder-bridge-walletreason) | type | Why one wallet in the list could not be used |
-| [`WatchedPayment`](#thunder-bridge-watchedpayment) | interface | A payment the gateway was handed rather than asked to mint |
-| [`WatchTicketConfig`](#thunder-bridge-watchticketconfig) | interface | A trigger's live stream is opened with a ticket rather than with the watch secret, so something has to hold the secret and trade it for tickets |
-| [`WebhookCredential`](#thunder-bridge-webhookcredential) | type | What checks a delivery: the hex the gateway publishes at `/webhook-key` |
-| [`WebhookHandlers`](#thunder-bridge-webhookhandlers) | interface | What to do with what the gateway delivers, and what to believe it with |
-| [`WebhookOptions`](#thunder-bridge-webhookoptions) | type | How far the gateway's clock may drift from yours before a webhook is refused |
-| [`WrapAllowance`](#thunder-bridge-wrapallowance) | interface | What a wrapping operator may charge over the recipient's own amount |
-| [`wrapFeeCeiling`](#thunder-bridge-wrapfeeceiling) | function | The most an operator may add over the recipient's own amount, in millisatoshi |
-| [`WrapRefusalCode`](#thunder-bridge-wraprefusalcode) | type | The way a wrapping operator was caught out |
-| [`WrapRefusedError`](#thunder-bridge-wraprefusederror) | class | Thrown when a wrapped invoice does not bind to the recipient's |
+| [`Amount`](#thunder-bridge-type-amount) | type | What a payment is worth |
+| [`AmountError`](#thunder-bridge-class-amounterror) | class | Thrown when a price cannot be held exactly |
+| [`AmountFault`](#thunder-bridge-type-amountfault) | type | Why an amount was refused |
+| [`answerVerifyChallenge`](#thunder-bridge-function-answerverifychallenge) | function | Answer the challenge the gateway sends a verify URL before it will poll it, which is how a caller shows the endpoint agreed to the traffic rather than merely being named |
+| [`BankRailConfig`](#thunder-bridge-interface-bankrailconfig) | interface | A bank rail: the account the money lands in, and where its arrival is read back from |
+| [`BankVerifyConfig`](#thunder-bridge-interface-bankverifyconfig) | interface | The endpoint the gateway polls for a bank transfer, answering off your own statement |
+| [`BlindLightningRailConfig`](#thunder-bridge-interface-blindlightningrailconfig) | interface | The same rail with the invoice resolved here, so the gateway is told neither address nor amount |
+| [`carriesProof`](#thunder-bridge-function-carriesproof) | function | Whether a report proves what it claims: it says paid, and it carries a preimage that hashes to the payment hash it itself names |
+| [`Charge`](#thunder-bridge-interface-charge) | interface | Who is paid and how much |
+| [`CreateOptions`](#thunder-bridge-interface-createoptions) | interface | What a mint carries beyond the charge: a retry key, and which trigger it joins |
+| [`decodeInvoice`](#thunder-bridge-function-decodeinvoice) | function | Read a BOLT11 invoice without trusting anyone for its contents, an undecodable string or a BOLT12 offer yields an invoice with every field null |
+| [`fiat`](#thunder-bridge-function-fiat) | function | A price named in fiat, converted when the invoice is minted rather than now |
+| [`FiatOptions`](#thunder-bridge-interface-fiatoptions) | interface | How a fiat price is turned into millisatoshi at the moment of minting |
+| [`FollowOptions`](#thunder-bridge-interface-followoptions) | interface | What to do with a trigger's settlements, and how hard to try to keep hearing them |
+| [`GatewayCheatCode`](#thunder-bridge-type-gatewaycheatcode) | type | The way a gateway was caught out, every code is a check that held against the recipient's own server and failed against what the gateway returned |
+| [`GatewayCheatError`](#thunder-bridge-class-gatewaycheaterror) | class | Thrown when the gateway demonstrably misbehaved, the invoice it returned is not the one the address you asked for issued, or a settlement it reported carries a preimage that does not hash to the payment hash |
+| [`Gateways`](#thunder-bridge-class-gateways) | class | The same payment watched at several gateways at once, which is what makes any one of them replaceable |
+| [`GatewaysOptions`](#thunder-bridge-interface-gatewaysoptions) | interface | The client's own options, plus what to do about a gateway that will not take the watch |
+| [`Handler`](#thunder-bridge-type-handler) | type | A Fetch handler, which is what every runtime this targets mounts |
+| [`Handover`](#thunder-bridge-interface-handover) | interface | An invoice you obtained yourself, handed over to be watched |
+| [`IdempotencyConflict`](#thunder-bridge-type-idempotencyconflict) | type | Why an `Idempotency-Key` was refused, `request-in-flight` is the benign one and `key-reused` means the same key was sent for a different request |
+| [`IdempotencyConflictError`](#thunder-bridge-class-idempotencyconflicterror) | class | Thrown when an `Idempotency-Key` is held by another request |
+| [`Invoice`](#thunder-bridge-interface-invoice) | interface | What a BOLT11 invoice says about itself, every field null when it does not carry one |
+| [`invoiceFrom`](#thunder-bridge-function-invoicefrom) | function | A provable invoice from the first address on the list that will issue one, which is what a client mints for itself rather than asking a gateway to |
+| [`Leg`](#thunder-bridge-interface-leg) | interface | One way to pay one order, already registered with the gateway |
+| [`LightningRailConfig`](#thunder-bridge-interface-lightningrailconfig) | interface | A Lightning rail the gateway mints for, bound once and then given one order at a time |
+| [`LightningVerifyConfig`](#thunder-bridge-interface-lightningverifyconfig) | interface | The verify endpoint that asks the wallet for the gateway, and how often it may be asked |
+| [`Minted`](#thunder-bridge-interface-minted) | interface | What a blind mint produced, which is what the sealed payload is built from |
+| [`MintedPayment`](#thunder-bridge-interface-mintedpayment) | interface | A payment the gateway minted |
+| [`msat`](#thunder-bridge-function-msat) | function | An exact number of millisatoshi, for a price already in the smallest unit |
+| [`Msat`](#thunder-bridge-type-msat) | type | A whole number of millisatoshi that came from `sats`, `msat` or `fiat`, and could not have come from anywhere else |
+| [`NoWalletAvailableError`](#thunder-bridge-class-nowalletavailableerror) | class | Thrown when no wallet on your list could issue a provable invoice, `wallets` says why each refused |
+| [`Order`](#thunder-bridge-interface-order) | interface | What a shop knows about a sale before any rail exists |
+| [`Payment`](#thunder-bridge-type-payment) | type | A payment as the gateway reports it, of either sort |
+| [`PaymentRequest`](#thunder-bridge-interface-paymentrequest) | interface | One payment asked for: the invoice to show, the QR to draw it with, and one way to find out it was paid |
+| [`PaymentRequestInit`](#thunder-bridge-interface-paymentrequestinit) | interface | What to ask for: who is paid, how much, and how the QR should look |
+| [`PaymentRequestOptions`](#thunder-bridge-interface-paymentrequestoptions) | interface | What `requestPayment` takes beyond the charge itself |
+| [`PaymentStatus`](#thunder-bridge-type-paymentstatus) | type | Where a payment stands, `paid` is the only status that carries a preimage |
+| [`preimageMatchesHash`](#thunder-bridge-function-preimagematcheshash) | function | True when `preimage` is the secret behind `paymentHash` |
+| [`Priced`](#thunder-bridge-interface-priced) | interface | A charge with its price settled, which is what a proof compares the gateway's answer against |
+| [`ProblemError`](#thunder-bridge-class-problemerror) | class | An RFC 9457 problem document the gateway answered with |
+| [`Provable`](#thunder-bridge-interface-provable) | interface | The least a report has to carry for its own proof to be checkable |
+| [`Proven`](#thunder-bridge-type-proven) | type | A report `carriesProof` has already accepted, so the preimage is there and the status is settled |
+| [`proveOrigin`](#thunder-bridge-function-proveorigin) | function | Prove the invoice really is the one the recipient issued for what you asked, before the payer ever sees it, both fetches go straight to the recipient's own server and none of them goes back to the gateway |
+| [`proveSettlement`](#thunder-bridge-function-provesettlement) | function | Prove the money arrived by asking the recipient's own server, not the gateway, returns the preimage when the recipient says it settled and null when it says it has not, and runs the full origin proof first because a verify url the gateway made up would otherwise answer for itself |
+| [`proveWrapped`](#thunder-bridge-function-provewrapped) | function | Prove a wrapping operator's invoice is the recipient's own payment in disguise, so paying it can only settle by the operator paying the recipient |
+| [`Quote`](#thunder-bridge-interface-quote) | interface | Which address would serve an amount, and what the ones ahead of it refused |
+| [`Rail`](#thunder-bridge-type-rail) | type | A payment method |
+| [`RailConfig`](#thunder-bridge-interface-railconfig) | interface | What every rail takes, whatever it moves |
+| [`Rails`](#thunder-bridge-class-rails) | class | One call per sale, whatever the rail moves |
+| [`Range`](#thunder-bridge-interface-range) | interface | What a payer may choose to send, when the endpoint lets them choose at all |
+| [`Relayed`](#thunder-bridge-interface-relayed) | interface | The wallet's own LUD-21 URL and the hash its preimage has to match |
+| [`relayedVerifyUrl`](#thunder-bridge-function-relayedverifyurl) | function | The URL to hand the gateway instead of the wallet's own, with the wallet's sealed inside it |
+| [`Resolved`](#thunder-bridge-type-resolved) | type | An invoice a lightning address issued, with everything needed to watch and to prove it |
+| [`sats`](#thunder-bridge-function-sats) | function | A whole number of satoshi, so `sats(21)` is 21000 millisatoshi |
+| [`seal`](#thunder-bridge-function-seal) | function | Encrypt what the watcher needs and the gateway must not have |
+| [`Serve`](#thunder-bridge-class-serve) | class | Everything one gateway lets you mount, in one place so a caller never has to know which handler needs the gateway and which does not |
+| [`Settlement`](#thunder-bridge-interface-settlement) | interface | What a delivery carries |
+| [`SocketTicket`](#thunder-bridge-interface-socketticket) | interface | A one minute pass onto one trigger's stream |
+| [`ThunderBridge`](#thunder-bridge-class-thunderbridge) | class | Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself |
+| [`ThunderBridgeOptions`](#thunder-bridge-interface-thunderbridgeoptions) | interface | How this instance talks to one gateway, and how much of what it says to check |
+| [`TicketOptions`](#thunder-bridge-interface-ticketoptions) | interface | What a socket ticket opens beyond the trigger it names |
+| [`TriggerConfig`](#thunder-bridge-interface-triggerconfig) | interface | An LNURL-pay endpoint of your own: whose wallets it stands for, and what it charges |
+| [`unseal`](#thunder-bridge-function-unseal) | function | Read a sealed blob back, null when it was sealed with another secret, edited on the way, or is not one of ours |
+| [`UnverifiedRecipientError`](#thunder-bridge-class-unverifiedrecipienterror) | class | Thrown when the recipient's own server could not be reached to check the invoice against, a CORS-blocked browser or a provider that is down, this is not proof the gateway cheated and it is not proof it did not |
+| [`WaitOptions`](#thunder-bridge-interface-waitoptions) | interface | How long to wait on a payment, and what the socket URL is allowed to carry |
+| [`WalletFailure`](#thunder-bridge-interface-walletfailure) | interface | One wallet on the list that could not be used, and the reason it could not |
+| [`WalletReason`](#thunder-bridge-type-walletreason) | type | Why one wallet in the list could not be used |
+| [`WatchedPayment`](#thunder-bridge-interface-watchedpayment) | interface | A payment the gateway was handed rather than asked to mint |
+| [`WatchTicketConfig`](#thunder-bridge-interface-watchticketconfig) | interface | A trigger's live stream is opened with a ticket rather than with the watch secret, so something has to hold the secret and trade it for tickets |
+| [`WebhookCredential`](#thunder-bridge-type-webhookcredential) | type | What checks a delivery: the hex the gateway publishes at `/webhook-key` |
+| [`WebhookHandlers`](#thunder-bridge-interface-webhookhandlers) | interface | What to do with what the gateway delivers, and what to believe it with |
+| [`WebhookOptions`](#thunder-bridge-type-webhookoptions) | type | How far the gateway's clock may drift from yours before a webhook is refused |
+| [`WrapAllowance`](#thunder-bridge-interface-wrapallowance) | interface | What a wrapping operator may charge over the recipient's own amount |
+| [`wrapFeeCeiling`](#thunder-bridge-function-wrapfeeceiling) | function | The most an operator may add over the recipient's own amount, in millisatoshi |
+| [`WrapRefusalCode`](#thunder-bridge-type-wraprefusalcode) | type | The way a wrapping operator was caught out |
+| [`WrapRefusedError`](#thunder-bridge-class-wraprefusederror) | class | Thrown when a wrapped invoice does not bind to the recipient's |
 
-### Amount
+### <a id="thunder-bridge-type-amount"></a>Amount
 
 ```ts
 type Amount = Msat | (() => Msat | Promise<Msat>);
 ```
 
-What a payment is worth. A `Msat` is a price known now, and a function is one
+What a payment is worth. A [`Msat`](#thunder-bridge-type-msat) is a price known now, and a function is one
 worked out when the invoice is minted, which is what a fiat price has to be.
 
-Build one with `sats`, `msat` or `fiat`
+Build one with [`sats`](#thunder-bridge-function-sats), [`msat`](#thunder-bridge-function-msat) or [`fiat`](#thunder-bridge-function-fiat)
 
-### AmountError
+### <a id="thunder-bridge-class-amounterror"></a>AmountError
 
 ```ts
 class AmountError extends Error
@@ -109,10 +109,10 @@ library that rounds silently moves the wrong money
 
 | Member | What it does |
 |---|---|
-| `static is(failure: unknown): failure is AmountError` | Whether a failure is one of these, without asking whether it is this exact class |
-| `readonly code: AmountFault;` |  |
+| <a id="thunder-bridge-class-amounterror-is"></a>`static is(failure: unknown): failure is AmountError` | Whether a failure is one of these, without asking whether it is this exact class |
+| <a id="thunder-bridge-class-amounterror-code"></a>`readonly code: AmountFault;` |  |
 
-### AmountFault
+### <a id="thunder-bridge-type-amountfault"></a>AmountFault
 
 ```ts
 type AmountFault =
@@ -126,7 +126,7 @@ type AmountFault =
 Why an amount was refused. A code rather than a message, because a caller can
 only recover from a failure it can name and a message is free to be reworded
 
-### answerVerifyChallenge
+### <a id="thunder-bridge-function-answerverifychallenge"></a>answerVerifyChallenge
 
 ```ts
 async function answerVerifyChallenge(request: Request): Promise<Response | null>
@@ -140,7 +140,7 @@ verify endpoint hands the request on to its own reading of a payment.
 The nonce is echoed to whoever asked, which grants them nothing, so there is
 no signature to check here and no secret to hold
 
-### BankRailConfig
+### <a id="thunder-bridge-interface-bankrailconfig"></a>BankRailConfig
 
 ```ts
 interface BankRailConfig extends RailConfig {
@@ -172,7 +172,7 @@ interface BankRailConfig extends RailConfig {
 
 A bank rail: the account the money lands in, and where its arrival is read back from
 
-### BankVerifyConfig
+### <a id="thunder-bridge-interface-bankverifyconfig"></a>BankVerifyConfig
 
 ```ts
 interface BankVerifyConfig {
@@ -197,7 +197,7 @@ interface BankVerifyConfig {
 
 The endpoint the gateway polls for a bank transfer, answering off your own statement
 
-### BlindLightningRailConfig
+### <a id="thunder-bridge-interface-blindlightningrailconfig"></a>BlindLightningRailConfig
 
 ```ts
 interface BlindLightningRailConfig extends LightningRailConfig {
@@ -218,7 +218,7 @@ interface BlindLightningRailConfig extends LightningRailConfig {
 
 The same rail with the invoice resolved here, so the gateway is told neither address nor amount
 
-### carriesProof
+### <a id="thunder-bridge-function-carriesproof"></a>carriesProof
 
 ```ts
 function carriesProof<T extends Provable>(report: T): report is Proven<T>
@@ -233,9 +233,9 @@ answer this, because all three carry those fields and no other question about
 one matters.
 
 It asks nobody anything, so it costs no round trip and is not a proof of
-arrival. Only `proveSettlement` asks the recipient
+arrival. Only [`proveSettlement`](#thunder-bridge-function-provesettlement) asks the recipient
 
-### Charge
+### <a id="thunder-bridge-interface-charge"></a>Charge
 
 ```ts
 interface Charge {
@@ -251,7 +251,7 @@ Who is paid and how much. `to` is a priority list when it is an array: the
 gateway takes the first address that can issue a provable invoice for the
 amount and the rest are the fallback
 
-### CreateOptions
+### <a id="thunder-bridge-interface-createoptions"></a>CreateOptions
 
 ```ts
 interface CreateOptions {
@@ -285,7 +285,7 @@ interface CreateOptions {
 
 What a mint carries beyond the charge: a retry key, and which trigger it joins
 
-### decodeInvoice
+### <a id="thunder-bridge-function-decodeinvoice"></a>decodeInvoice
 
 ```ts
 function decodeInvoice(bolt11: string): Invoice
@@ -294,7 +294,7 @@ function decodeInvoice(bolt11: string): Invoice
 Read a BOLT11 invoice without trusting anyone for its contents, an
 undecodable string or a BOLT12 offer yields an invoice with every field null
 
-### fiat
+### <a id="thunder-bridge-function-fiat"></a>fiat
 
 ```ts
 function fiat(
@@ -315,7 +315,7 @@ Every conversion asks the rate afresh, so two calls a second apart can
 differ. That is the honest behaviour for a fiat price, and the reason an
 amount is a function rather than a number
 
-### FiatOptions
+### <a id="thunder-bridge-interface-fiatoptions"></a>FiatOptions
 
 ```ts
 interface FiatOptions {
@@ -337,7 +337,7 @@ interface FiatOptions {
 
 How a fiat price is turned into millisatoshi at the moment of minting
 
-### FollowOptions
+### <a id="thunder-bridge-interface-followoptions"></a>FollowOptions
 
 ```ts
 interface FollowOptions {
@@ -377,7 +377,7 @@ interface FollowOptions {
 
 What to do with a trigger's settlements, and how hard to try to keep hearing them
 
-### GatewayCheatCode
+### <a id="thunder-bridge-type-gatewaycheatcode"></a>GatewayCheatCode
 
 ```ts
 type GatewayCheatCode =
@@ -394,7 +394,7 @@ type GatewayCheatCode =
 The way a gateway was caught out, every code is a check that held against the
 recipient's own server and failed against what the gateway returned
 
-### GatewayCheatError
+### <a id="thunder-bridge-class-gatewaycheaterror"></a>GatewayCheatError
 
 ```ts
 class GatewayCheatError extends Error
@@ -406,10 +406,10 @@ carries a preimage that does not hash to the payment hash
 
 | Member | What it does |
 |---|---|
-| `readonly code: GatewayCheatCode;` |  |
-| `readonly paymentId: string;` |  |
+| <a id="thunder-bridge-class-gatewaycheaterror-code"></a>`readonly code: GatewayCheatCode;` |  |
+| <a id="thunder-bridge-class-gatewaycheaterror-paymentid"></a>`readonly paymentId: string;` |  |
 
-### Gateways
+### <a id="thunder-bridge-class-gateways"></a>Gateways
 
 ```ts
 class Gateways
@@ -425,12 +425,12 @@ from the wallet and only one of them could ever be paid
 
 | Member | What it does |
 |---|---|
-| `readonly each: readonly ThunderBridge[];` |  |
-| `async nameFor(paymentHash: string): Promise<string \| null>` | What this payment is called, which every gateway here will agree on |
-| `async watch(handover: Handover): Promise<Payment>` | Hand the same invoice to every gateway |
-| `async settled(id: string, options?: WaitOptions): Promise<Payment>` | Wait for whichever gateway speaks first |
+| <a id="thunder-bridge-class-gateways-each"></a>`readonly each: readonly ThunderBridge[];` |  |
+| <a id="thunder-bridge-class-gateways-namefor"></a>`async nameFor(paymentHash: string): Promise<string \| null>` | What this payment is called, which every gateway here will agree on |
+| <a id="thunder-bridge-class-gateways-watch"></a>`async watch(handover: Handover): Promise<Payment>` | Hand the same invoice to every gateway |
+| <a id="thunder-bridge-class-gateways-settled"></a>`async settled(id: string, options?: WaitOptions): Promise<Payment>` | Wait for whichever gateway speaks first |
 
-### GatewaysOptions
+### <a id="thunder-bridge-interface-gatewaysoptions"></a>GatewaysOptions
 
 ```ts
 interface GatewaysOptions extends ThunderBridgeOptions {
@@ -446,7 +446,7 @@ interface GatewaysOptions extends ThunderBridgeOptions {
 
 The client's own options, plus what to do about a gateway that will not take the watch
 
-### Handler
+### <a id="thunder-bridge-type-handler"></a>Handler
 
 ```ts
 type Handler = (request: Request) => Promise<Response>;
@@ -454,7 +454,7 @@ type Handler = (request: Request) => Promise<Response>;
 
 A Fetch handler, which is what every runtime this targets mounts
 
-### Handover
+### <a id="thunder-bridge-interface-handover"></a>Handover
 
 ```ts
 interface Handover {
@@ -483,7 +483,7 @@ An invoice you obtained yourself, handed over to be watched. The gateway is
 given no address and no amount, so it cannot refuse one recipient rather than
 all of them
 
-### IdempotencyConflict
+### <a id="thunder-bridge-type-idempotencyconflict"></a>IdempotencyConflict
 
 ```ts
 type IdempotencyConflict = "request-in-flight" | "key-reused";
@@ -492,7 +492,7 @@ type IdempotencyConflict = "request-in-flight" | "key-reused";
 Why an `Idempotency-Key` was refused, `request-in-flight` is the benign one and
 `key-reused` means the same key was sent for a different request
 
-### IdempotencyConflictError
+### <a id="thunder-bridge-class-idempotencyconflicterror"></a>IdempotencyConflictError
 
 ```ts
 class IdempotencyConflictError extends ProblemError
@@ -505,9 +505,9 @@ is bound to the addresses, amount and webhook that claimed it
 
 | Member | What it does |
 |---|---|
-| `readonly conflict: IdempotencyConflict;` |  |
+| <a id="thunder-bridge-class-idempotencyconflicterror-conflict"></a>`readonly conflict: IdempotencyConflict;` |  |
 
-### Invoice
+### <a id="thunder-bridge-interface-invoice"></a>Invoice
 
 ```ts
 interface Invoice {
@@ -520,7 +520,7 @@ interface Invoice {
 
 What a BOLT11 invoice says about itself, every field null when it does not carry one
 
-### invoiceFrom
+### <a id="thunder-bridge-function-invoicefrom"></a>invoiceFrom
 
 ```ts
 async function invoiceFrom(paidTo: string | string[], amount: Amount): Promise<Resolved>
@@ -532,9 +532,9 @@ gateway needs to watch it comes back with everything you need to prove it came
 from the address you asked for, so you can hand over the first and keep the second.
 
 Server side: it resolves hostnames and refuses a private one, which no browser can
-do. Throws `NoWalletAvailableError` when no address on the list would serve
+do. Throws [`NoWalletAvailableError`](#thunder-bridge-class-nowalletavailableerror) when no address on the list would serve
 
-### Leg
+### <a id="thunder-bridge-interface-leg"></a>Leg
 
 ```ts
 interface Leg {
@@ -556,7 +556,7 @@ interface Leg {
 
 One way to pay one order, already registered with the gateway
 
-### LightningRailConfig
+### <a id="thunder-bridge-interface-lightningrailconfig"></a>LightningRailConfig
 
 ```ts
 interface LightningRailConfig extends RailConfig {
@@ -579,7 +579,7 @@ interface LightningRailConfig extends RailConfig {
 
 A Lightning rail the gateway mints for, bound once and then given one order at a time
 
-### LightningVerifyConfig
+### <a id="thunder-bridge-interface-lightningverifyconfig"></a>LightningVerifyConfig
 
 ```ts
 interface LightningVerifyConfig {
@@ -597,7 +597,7 @@ interface LightningVerifyConfig {
 
 The verify endpoint that asks the wallet for the gateway, and how often it may be asked
 
-### Minted
+### <a id="thunder-bridge-interface-minted"></a>Minted
 
 ```ts
 interface Minted {
@@ -612,7 +612,7 @@ interface Minted {
 
 What a blind mint produced, which is what the sealed payload is built from
 
-### MintedPayment
+### <a id="thunder-bridge-interface-mintedpayment"></a>MintedPayment
 
 ```ts
 interface MintedPayment {
@@ -635,7 +635,7 @@ A payment the gateway minted. It resolved the address itself, so it knows who
 is paid, how much, and which invoice says so, and none of the three can be
 null here
 
-### msat
+### <a id="thunder-bridge-function-msat"></a>msat
 
 ```ts
 function msat(exact: number): Msat
@@ -643,20 +643,20 @@ function msat(exact: number): Msat
 
 An exact number of millisatoshi, for a price already in the smallest unit
 
-### Msat
+### <a id="thunder-bridge-type-msat"></a>Msat
 
 ```ts
 type Msat = number & { readonly [brand]: "Msat" };
 ```
 
-A whole number of millisatoshi that came from `sats`, `msat` or `fiat`, and
+A whole number of millisatoshi that came from [`sats`](#thunder-bridge-function-sats), [`msat`](#thunder-bridge-function-msat) or [`fiat`](#thunder-bridge-function-fiat), and
 could not have come from anywhere else.
 
 The brand is why: a bare number is not one of these, so `21` cannot be passed
 where a price is wanted and quietly mean twenty-one thousandths of a satoshi.
 It costs nothing at runtime, where the value is an ordinary number
 
-### NoWalletAvailableError
+### <a id="thunder-bridge-class-nowalletavailableerror"></a>NoWalletAvailableError
 
 ```ts
 class NoWalletAvailableError extends ProblemError
@@ -666,9 +666,9 @@ Thrown when no wallet on your list could issue a provable invoice, `wallets` say
 
 | Member | What it does |
 |---|---|
-| `readonly wallets: WalletFailure[];` |  |
+| <a id="thunder-bridge-class-nowalletavailableerror-wallets"></a>`readonly wallets: WalletFailure[];` |  |
 
-### Order
+### <a id="thunder-bridge-interface-order"></a>Order
 
 ```ts
 interface Order {
@@ -685,7 +685,7 @@ interface Order {
 
 What a shop knows about a sale before any rail exists
 
-### Payment
+### <a id="thunder-bridge-type-payment"></a>Payment
 
 ```ts
 type Payment = MintedPayment | WatchedPayment;
@@ -695,7 +695,7 @@ A payment as the gateway reports it, of either sort. Check `kind` and the
 three fields a watched payment does not carry stop being null, so nothing here
 needs an assertion to read
 
-### PaymentRequest
+### <a id="thunder-bridge-interface-paymentrequest"></a>PaymentRequest
 
 ```ts
 interface PaymentRequest {
@@ -745,7 +745,7 @@ One payment asked for: the invoice to show, the QR to draw it with, and one
 way to find out it was paid. Everything on it is already proved against the
 recipient's own server, so nothing here is the gateway's word
 
-### PaymentRequestInit
+### <a id="thunder-bridge-interface-paymentrequestinit"></a>PaymentRequestInit
 
 ```ts
 interface PaymentRequestInit extends Charge, PaymentRequestOptions {}
@@ -755,7 +755,7 @@ What to ask for: who is paid, how much, and how the QR should look. Every
 field beyond `paidTo` and `amount` has a default, so the shortest request
 names two
 
-### PaymentRequestOptions
+### <a id="thunder-bridge-interface-paymentrequestoptions"></a>PaymentRequestOptions
 
 ```ts
 interface PaymentRequestOptions extends WaitOptions {
@@ -775,7 +775,7 @@ interface PaymentRequestOptions extends WaitOptions {
 
 What `requestPayment` takes beyond the charge itself
 
-### PaymentStatus
+### <a id="thunder-bridge-type-paymentstatus"></a>PaymentStatus
 
 ```ts
 type PaymentStatus = "pending" | "paid" | "expired";
@@ -783,7 +783,7 @@ type PaymentStatus = "pending" | "paid" | "expired";
 
 Where a payment stands, `paid` is the only status that carries a preimage
 
-### preimageMatchesHash
+### <a id="thunder-bridge-function-preimagematcheshash"></a>preimageMatchesHash
 
 ```ts
 function preimageMatchesHash(preimage: string, paymentHash: string): boolean
@@ -791,7 +791,7 @@ function preimageMatchesHash(preimage: string, paymentHash: string): boolean
 
 True when `preimage` is the secret behind `paymentHash`
 
-### Priced
+### <a id="thunder-bridge-interface-priced"></a>Priced
 
 ```ts
 interface Priced {
@@ -804,7 +804,7 @@ A charge with its price settled, which is what a proof compares the gateway's
 answer against. Asking a fiat price twice gives two numbers, so the proof is
 handed the one that was actually asked for
 
-### ProblemError
+### <a id="thunder-bridge-class-problemerror"></a>ProblemError
 
 ```ts
 class ProblemError extends Error
@@ -814,24 +814,24 @@ An RFC 9457 problem document the gateway answered with
 
 | Member | What it does |
 |---|---|
-| `static readonly NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge:no-wallet-available";` |  |
-| `static readonly REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge:request-in-flight";` |  |
-| `static readonly IDEMPOTENCY_KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reused";` |  |
-| `static readonly PAYMENT_ALREADY_WATCHED = "urn:problem-type:thunder-bridge:payment-already-watched";` |  |
-| `static readonly INVALID_REQUEST = "urn:problem-type:thunder-bridge:invalid-request";` |  |
-| `static readonly CALLER_UNKNOWN = "urn:problem-type:thunder-bridge:caller-unknown";` |  |
-| `static readonly VERIFY_HOST_REFUSED = "urn:problem-type:thunder-bridge:verify-host-refused";` |  |
-| `static readonly VERIFY_UNCONFIRMED = "urn:problem-type:thunder-bridge:verify-unconfirmed";` |  |
-| `static readonly VERIFY_UNCONSENTED = "urn:problem-type:thunder-bridge:verify-unconsented";` |  |
-| `static readonly WEBHOOK_UNCONFIRMED = "urn:problem-type:thunder-bridge:webhook-unconfirmed";` |  |
-| `static readonly TOO_MANY_PENDING = "urn:problem-type:thunder-bridge:too-many-pending";` |  |
-| `static is(problem: { type?: string }, type: string): boolean` | Whether a problem carries this type |
-| `readonly type: string;` |  |
-| `readonly title: string;` |  |
-| `readonly status: number;` |  |
-| `readonly detail: string \| null;` |  |
+| <a id="thunder-bridge-class-problemerror-no_wallet_available"></a>`static readonly NO_WALLET_AVAILABLE = "urn:problem-type:thunder-bridge:no-wallet-available";` |  |
+| <a id="thunder-bridge-class-problemerror-request_in_flight"></a>`static readonly REQUEST_IN_FLIGHT = "urn:problem-type:thunder-bridge:request-in-flight";` |  |
+| <a id="thunder-bridge-class-problemerror-idempotency_key_reused"></a>`static readonly IDEMPOTENCY_KEY_REUSED = "urn:problem-type:thunder-bridge:idempotency-key-reused";` |  |
+| <a id="thunder-bridge-class-problemerror-payment_already_watched"></a>`static readonly PAYMENT_ALREADY_WATCHED = "urn:problem-type:thunder-bridge:payment-already-watched";` |  |
+| <a id="thunder-bridge-class-problemerror-invalid_request"></a>`static readonly INVALID_REQUEST = "urn:problem-type:thunder-bridge:invalid-request";` |  |
+| <a id="thunder-bridge-class-problemerror-caller_unknown"></a>`static readonly CALLER_UNKNOWN = "urn:problem-type:thunder-bridge:caller-unknown";` |  |
+| <a id="thunder-bridge-class-problemerror-verify_host_refused"></a>`static readonly VERIFY_HOST_REFUSED = "urn:problem-type:thunder-bridge:verify-host-refused";` |  |
+| <a id="thunder-bridge-class-problemerror-verify_unconfirmed"></a>`static readonly VERIFY_UNCONFIRMED = "urn:problem-type:thunder-bridge:verify-unconfirmed";` |  |
+| <a id="thunder-bridge-class-problemerror-verify_unconsented"></a>`static readonly VERIFY_UNCONSENTED = "urn:problem-type:thunder-bridge:verify-unconsented";` |  |
+| <a id="thunder-bridge-class-problemerror-webhook_unconfirmed"></a>`static readonly WEBHOOK_UNCONFIRMED = "urn:problem-type:thunder-bridge:webhook-unconfirmed";` |  |
+| <a id="thunder-bridge-class-problemerror-too_many_pending"></a>`static readonly TOO_MANY_PENDING = "urn:problem-type:thunder-bridge:too-many-pending";` |  |
+| <a id="thunder-bridge-class-problemerror-is"></a>`static is(problem: { type?: string }, type: string): boolean` | Whether a problem carries this type |
+| <a id="thunder-bridge-class-problemerror-type"></a>`readonly type: string;` |  |
+| <a id="thunder-bridge-class-problemerror-title"></a>`readonly title: string;` |  |
+| <a id="thunder-bridge-class-problemerror-status"></a>`readonly status: number;` |  |
+| <a id="thunder-bridge-class-problemerror-detail"></a>`readonly detail: string \| null;` |  |
 
-### Provable
+### <a id="thunder-bridge-interface-provable"></a>Provable
 
 ```ts
 interface Provable {
@@ -844,16 +844,16 @@ interface Provable {
 
 The least a report has to carry for its own proof to be checkable
 
-### Proven
+### <a id="thunder-bridge-type-proven"></a>Proven
 
 ```ts
 type Proven<T extends Provable> = T & { status: "paid"; preimage: string };
 ```
 
-A report `carriesProof` has already accepted, so the preimage is there and the
+A report [`carriesProof`](#thunder-bridge-function-carriesproof) has already accepted, so the preimage is there and the
 status is settled. Nothing downstream of the check needs a null guard
 
-### proveOrigin
+### <a id="thunder-bridge-function-proveorigin"></a>proveOrigin
 
 ```ts
 async function proveOrigin(payment: MintedPayment, asked: Priced): Promise<void>
@@ -863,10 +863,10 @@ Prove the invoice really is the one the recipient issued for what you asked,
 before the payer ever sees it, both fetches go straight to the recipient's own
 server and none of them goes back to the gateway
 
-Throws `GatewayCheatError` when a check fails and `UnverifiedRecipientError`
+Throws [`GatewayCheatError`](#thunder-bridge-class-gatewaycheaterror) when a check fails and [`UnverifiedRecipientError`](#thunder-bridge-class-unverifiedrecipienterror)
 when the recipient could not be reached to run one
 
-### proveSettlement
+### <a id="thunder-bridge-function-provesettlement"></a>proveSettlement
 
 ```ts
 async function proveSettlement(
@@ -880,7 +880,7 @@ returns the preimage when the recipient says it settled and null when it says
 it has not, and runs the full origin proof first because a verify url the
 gateway made up would otherwise answer for itself
 
-### proveWrapped
+### <a id="thunder-bridge-function-provewrapped"></a>proveWrapped
 
 ```ts
 function proveWrapped(wrapped: string, recipient: string, allowance?: WrapAllowance): void
@@ -890,17 +890,17 @@ Prove a wrapping operator's invoice is the recipient's own payment in
 disguise, so paying it can only settle by the operator paying the recipient.
 
 It compares two invoices and asks nobody anything, so it runs in a browser and
-costs no round trip. Prove the recipient's own invoice with `proveOrigin`
+costs no round trip. Prove the recipient's own invoice with [`proveOrigin`](#thunder-bridge-function-proveorigin)
 first, because this says nothing about where that one came from.
 
 There is no settlement check here and there does not need to be. Both invoices
 carry one payment hash, so the preimage that settles the wrap is the preimage
-the recipient released, and `proveSettlement` already reads it from the
+the recipient released, and [`proveSettlement`](#thunder-bridge-function-provesettlement) already reads it from the
 recipient's own server.
 
-Throws `WrapRefusedError` naming which binding failed
+Throws [`WrapRefusedError`](#thunder-bridge-class-wraprefusederror) naming which binding failed
 
-### Quote
+### <a id="thunder-bridge-interface-quote"></a>Quote
 
 ```ts
 interface Quote {
@@ -918,7 +918,7 @@ Which address would serve an amount, and what the ones ahead of it refused.
 `feeMsat` is always zero, the payer pays the recipient's own invoice and the
 gateway is never in the money's path
 
-### Rail
+### <a id="thunder-bridge-type-rail"></a>Rail
 
 ```ts
 type Rail = (order: Order) => Promise<Leg>;
@@ -927,7 +927,7 @@ type Rail = (order: Order) => Promise<Leg>;
 A payment method. Everything that differs between rails is bound once when the
 rail is built, so the only thing passed per sale is which sale it is
 
-### RailConfig
+### <a id="thunder-bridge-interface-railconfig"></a>RailConfig
 
 ```ts
 interface RailConfig {
@@ -947,7 +947,7 @@ interface RailConfig {
 
 What every rail takes, whatever it moves
 
-### Rails
+### <a id="thunder-bridge-class-rails"></a>Rails
 
 ```ts
 class Rails
@@ -959,12 +959,12 @@ what deleted that field
 
 | Member | What it does |
 |---|---|
-| `lightning(config: LightningRailConfig): Rail` | Lightning, with the gateway minting against a priority list of addresses |
-| `blindLightning(config: BlindLightningRailConfig): Rail` | Lightning, with the invoice resolved here so the gateway is told neither the address nor the amount |
-| `bank(config: BankRailConfig): Rail` | A bank transfer, proved the way a Lightning payment is |
-| `transfer(params: BankTransferParams): Promise<BankTransfer>` | One bank transfer without building a rail first, for a shop that asks for them one at a time rather than beside another payment method |
+| <a id="thunder-bridge-class-rails-lightning"></a>`lightning(config: LightningRailConfig): Rail` | Lightning, with the gateway minting against a priority list of addresses |
+| <a id="thunder-bridge-class-rails-blindlightning"></a>`blindLightning(config: BlindLightningRailConfig): Rail` | Lightning, with the invoice resolved here so the gateway is told neither the address nor the amount |
+| <a id="thunder-bridge-class-rails-bank"></a>`bank(config: BankRailConfig): Rail` | A bank transfer, proved the way a Lightning payment is |
+| <a id="thunder-bridge-class-rails-transfer"></a>`transfer(params: BankTransferParams): Promise<BankTransfer>` | One bank transfer without building a rail first, for a shop that asks for them one at a time rather than beside another payment method |
 
-### Range
+### <a id="thunder-bridge-interface-range"></a>Range
 
 ```ts
 interface Range {
@@ -976,7 +976,7 @@ interface Range {
 What a payer may choose to send, when the endpoint lets them choose at all.
 Both ends are asked once per payRequest, so a fiat range moves with the rate
 
-### Relayed
+### <a id="thunder-bridge-interface-relayed"></a>Relayed
 
 ```ts
 interface Relayed {
@@ -987,7 +987,7 @@ interface Relayed {
 
 The wallet's own LUD-21 URL and the hash its preimage has to match
 
-### relayedVerifyUrl
+### <a id="thunder-bridge-function-relayedverifyurl"></a>relayedVerifyUrl
 
 ```ts
 async function relayedVerifyUrl(
@@ -1000,7 +1000,7 @@ async function relayedVerifyUrl(
 The URL to hand the gateway instead of the wallet's own, with the wallet's
 sealed inside it. Point it at wherever `lightningVerifyEndpoint` is mounted
 
-### Resolved
+### <a id="thunder-bridge-type-resolved"></a>Resolved
 
 ```ts
 type Resolved = {
@@ -1014,7 +1014,7 @@ type Resolved = {
 
 An invoice a lightning address issued, with everything needed to watch and to prove it
 
-### sats
+### <a id="thunder-bridge-function-sats"></a>sats
 
 ```ts
 function sats(whole: number): Msat
@@ -1022,7 +1022,7 @@ function sats(whole: number): Msat
 
 A whole number of satoshi, so `sats(21)` is 21000 millisatoshi
 
-### seal
+### <a id="thunder-bridge-function-seal"></a>seal
 
 ```ts
 async function seal(secret: string, plaintext: string): Promise<string>
@@ -1032,7 +1032,7 @@ Encrypt what the watcher needs and the gateway must not have. The gateway
 stores the result and hands it back untouched, so anything readable you put
 in `sealed` is something you told it, which is what blind mode exists to avoid
 
-### Serve
+### <a id="thunder-bridge-class-serve"></a>Serve
 
 ```ts
 class Serve
@@ -1047,17 +1047,17 @@ because a reader looking for a handler should find every handler in one list
 
 | Member | What it does |
 |---|---|
-| `lnurlPay(config: TriggerConfig): Handler` | An LNURL-pay endpoint of your own, standing in front of a priority list of addresses, so a printed QR points at your domain and never expires |
-| `watchTicket(config: WatchTicketConfig): Handler` | Trades the watch secret for a one minute socket ticket, refusing anyone without it |
-| `publicWatchTicket(config: WatchTicketConfig): Handler` | Mints a socket ticket for anybody who asks, which makes the trigger's whole stream public, preimages included |
-| `verify(config: LightningVerifyConfig): Handler` | A verify endpoint of your own that asks the recipient's wallet for you, so the gateway polls you and never the wallet |
-| `bankVerify(config: BankVerifyConfig): Handler` | The verify endpoint a bank rail is polled at, answering off your own statement |
-| `webhook(handlers: WebhookHandlers): Handler` | The whole webhook route: it answers the gateway's challenge, checks the signature against the key the gateway publishes, refuses a settlement that proves nothing, and calls you for the one that does |
-| `async readSettlement(request: Request, options?: WebhookOptions): Promise<Settlement \| null>` | Verify a delivery and read the settlement out of it, null when it is not believable |
-| `async readPayment(request: Request, options?: WebhookOptions): Promise<Payment \| null>` | Verify a delivery and read the payment out of it, null when it is not believable |
-| `async answerWebhookChallenge( request: Request, options?: WebhookOptions, ): Promise<Response \| null>` | Answer the challenge the gateway sends before it will post to a webhook of yours |
+| <a id="thunder-bridge-class-serve-lnurlpay"></a>`lnurlPay(config: TriggerConfig): Handler` | An LNURL-pay endpoint of your own, standing in front of a priority list of addresses, so a printed QR points at your domain and never expires |
+| <a id="thunder-bridge-class-serve-watchticket"></a>`watchTicket(config: WatchTicketConfig): Handler` | Trades the watch secret for a one minute socket ticket, refusing anyone without it |
+| <a id="thunder-bridge-class-serve-publicwatchticket"></a>`publicWatchTicket(config: WatchTicketConfig): Handler` | Mints a socket ticket for anybody who asks, which makes the trigger's whole stream public, preimages included |
+| <a id="thunder-bridge-class-serve-verify"></a>`verify(config: LightningVerifyConfig): Handler` | A verify endpoint of your own that asks the recipient's wallet for you, so the gateway polls you and never the wallet |
+| <a id="thunder-bridge-class-serve-bankverify"></a>`bankVerify(config: BankVerifyConfig): Handler` | The verify endpoint a bank rail is polled at, answering off your own statement |
+| <a id="thunder-bridge-class-serve-webhook"></a>`webhook(handlers: WebhookHandlers): Handler` | The whole webhook route: it answers the gateway's challenge, checks the signature against the key the gateway publishes, refuses a settlement that proves nothing, and calls you for the one that does |
+| <a id="thunder-bridge-class-serve-readsettlement"></a>`async readSettlement(request: Request, options?: WebhookOptions): Promise<Settlement \| null>` | Verify a delivery and read the settlement out of it, null when it is not believable |
+| <a id="thunder-bridge-class-serve-readpayment"></a>`async readPayment(request: Request, options?: WebhookOptions): Promise<Payment \| null>` | Verify a delivery and read the payment out of it, null when it is not believable |
+| <a id="thunder-bridge-class-serve-answerwebhookchallenge"></a>`async answerWebhookChallenge( request: Request, options?: WebhookOptions, ): Promise<Response \| null>` | Answer the challenge the gateway sends before it will post to a webhook of yours |
 
-### Settlement
+### <a id="thunder-bridge-interface-settlement"></a>Settlement
 
 ```ts
 interface Settlement {
@@ -1072,7 +1072,7 @@ interface Settlement {
 What a delivery carries. Everything needed to act on a settlement and to check
 it, and nothing else, so a retry is the same size every time
 
-### SocketTicket
+### <a id="thunder-bridge-interface-socketticket"></a>SocketTicket
 
 ```ts
 interface SocketTicket {
@@ -1085,7 +1085,7 @@ A one minute pass onto one trigger's stream. It opens that trigger and nothing
 else, which is what makes it the thing to hand a browser when the trigger
 secret is not. `expiresAt` is unix seconds, like every other time here
 
-### ThunderBridge
+### <a id="thunder-bridge-class-thunderbridge"></a>ThunderBridge
 
 ```ts
 class ThunderBridge
@@ -1095,24 +1095,24 @@ Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself
 
 | Member | What it does |
 |---|---|
-| `readonly serve: Serve;` | Everything this gateway lets you mount, from an LNURL endpoint to a webhook route |
-| `readonly rails: Rails;` | One call per sale, whatever the rail moves |
-| `get hasToken(): boolean` | Whether a token was given to this instance, which is your side of the arrangement and says nothing about the gateway's |
-| `async refusesStrangers(): Promise<boolean>` | Whether the gateway turns away a caller carrying no token, asked by making one unauthenticated read it would have to refuse |
-| `async requestPayment(asked: PaymentRequestInit): Promise<PaymentRequest>` | Ask to be paid for one thing |
-| `async mint(charge: Charge, options?: CreateOptions): Promise<MintedPayment>` | Ask the gateway for an invoice payable to the first address on your list that can issue a provable one, throws `NoWalletAvailableError` when none can and `GatewayCheatError` when what comes back is not what you asked for |
-| `async quote(charge: Charge): Promise<Quote>` | Ask which address would serve an amount without minting anything, throws `NoWalletAvailableError` when none would |
-| `async webhookKey(): Promise<string>` | The key this gateway signs webhooks with when you registered none of your own |
-| `async payment(id: string): Promise<Payment \| null>` | Read a payment back, null when the gateway has never heard of it |
-| `async payments(limit?: number): Promise<{ payments: Payment[]; scanned: number }>` | List what this gateway is watching, newest first |
-| `async settled(id: string, options?: WaitOptions): Promise<Payment>` | Follow a payment over WebSocket until it is paid or expired, reconnecting through a drop |
-| `async firstSettled(ids: string[], options?: WaitOptions): Promise<Payment \| null>` | Wait on several payments and keep the first one that is really paid, then stop waiting on the losers, which closes their sockets |
-| `async watch(handover: Handover): Promise<Payment>` | Hand over an invoice you obtained yourself so the gateway watches it without being told the address or the amount |
-| `async nameFor(paymentHash: string): Promise<string \| null>` | What this payment is called, which you can work out before any gateway has heard of it |
-| `follow(secret: string, options: FollowOptions): () => void` | Follow every payment made to one trigger, replayed from the recent ones on connect and then live, reconnecting on its own until the returned function is called |
-| `async ticket(trigger: string, options?: TicketOptions): Promise<SocketTicket>` | A one minute pass onto one trigger's stream, for something that must hold neither the token nor the trigger secret |
+| <a id="thunder-bridge-class-thunderbridge-serve"></a>`readonly serve: Serve;` | Everything this gateway lets you mount, from an LNURL endpoint to a webhook route |
+| <a id="thunder-bridge-class-thunderbridge-rails"></a>`readonly rails: Rails;` | One call per sale, whatever the rail moves |
+| <a id="thunder-bridge-class-thunderbridge-hastoken"></a>`get hasToken(): boolean` | Whether a token was given to this instance, which is your side of the arrangement and says nothing about the gateway's |
+| <a id="thunder-bridge-class-thunderbridge-refusesstrangers"></a>`async refusesStrangers(): Promise<boolean>` | Whether the gateway turns away a caller carrying no token, asked by making one unauthenticated read it would have to refuse |
+| <a id="thunder-bridge-class-thunderbridge-requestpayment"></a>`async requestPayment(asked: PaymentRequestInit): Promise<PaymentRequest>` | Ask to be paid for one thing |
+| <a id="thunder-bridge-class-thunderbridge-mint"></a>`async mint(charge: Charge, options?: CreateOptions): Promise<MintedPayment>` | Ask the gateway for an invoice payable to the first address on your list that can issue a provable one, throws `NoWalletAvailableError` when none can and `GatewayCheatError` when what comes back is not what you asked for |
+| <a id="thunder-bridge-class-thunderbridge-quote"></a>`async quote(charge: Charge): Promise<Quote>` | Ask which address would serve an amount without minting anything, throws `NoWalletAvailableError` when none would |
+| <a id="thunder-bridge-class-thunderbridge-webhookkey"></a>`async webhookKey(): Promise<string>` | The key this gateway signs webhooks with when you registered none of your own |
+| <a id="thunder-bridge-class-thunderbridge-payment"></a>`async payment(id: string): Promise<Payment \| null>` | Read a payment back, null when the gateway has never heard of it |
+| <a id="thunder-bridge-class-thunderbridge-payments"></a>`async payments(limit?: number): Promise<{ payments: Payment[]; scanned: number }>` | List what this gateway is watching, newest first |
+| <a id="thunder-bridge-class-thunderbridge-settled"></a>`async settled(id: string, options?: WaitOptions): Promise<Payment>` | Follow a payment over WebSocket until it is paid or expired, reconnecting through a drop |
+| <a id="thunder-bridge-class-thunderbridge-firstsettled"></a>`async firstSettled(ids: string[], options?: WaitOptions): Promise<Payment \| null>` | Wait on several payments and keep the first one that is really paid, then stop waiting on the losers, which closes their sockets |
+| <a id="thunder-bridge-class-thunderbridge-watch"></a>`async watch(handover: Handover): Promise<Payment>` | Hand over an invoice you obtained yourself so the gateway watches it without being told the address or the amount |
+| <a id="thunder-bridge-class-thunderbridge-namefor"></a>`async nameFor(paymentHash: string): Promise<string \| null>` | What this payment is called, which you can work out before any gateway has heard of it |
+| <a id="thunder-bridge-class-thunderbridge-follow"></a>`follow(secret: string, options: FollowOptions): () => void` | Follow every payment made to one trigger, replayed from the recent ones on connect and then live, reconnecting on its own until the returned function is called |
+| <a id="thunder-bridge-class-thunderbridge-ticket"></a>`async ticket(trigger: string, options?: TicketOptions): Promise<SocketTicket>` | A one minute pass onto one trigger's stream, for something that must hold neither the token nor the trigger secret |
 
-### ThunderBridgeOptions
+### <a id="thunder-bridge-interface-thunderbridgeoptions"></a>ThunderBridgeOptions
 
 ```ts
 interface ThunderBridgeOptions {
@@ -1143,7 +1143,7 @@ interface ThunderBridgeOptions {
 
 How this instance talks to one gateway, and how much of what it says to check
 
-### TicketOptions
+### <a id="thunder-bridge-interface-ticketoptions"></a>TicketOptions
 
 ```ts
 interface TicketOptions {
@@ -1157,7 +1157,7 @@ interface TicketOptions {
 
 What a socket ticket opens beyond the trigger it names
 
-### TriggerConfig
+### <a id="thunder-bridge-interface-triggerconfig"></a>TriggerConfig
 
 ```ts
 interface TriggerConfig {
@@ -1224,7 +1224,7 @@ interface TriggerConfig {
 
 An LNURL-pay endpoint of your own: whose wallets it stands for, and what it charges
 
-### unseal
+### <a id="thunder-bridge-function-unseal"></a>unseal
 
 ```ts
 async function unseal(secret: string, sealed: string): Promise<string | null>
@@ -1234,7 +1234,7 @@ Read a sealed blob back, null when it was sealed with another secret, edited
 on the way, or is not one of ours. A secret too short to be a key throws,
 because that is your bug rather than someone else's input
 
-### UnverifiedRecipientError
+### <a id="thunder-bridge-class-unverifiedrecipienterror"></a>UnverifiedRecipientError
 
 ```ts
 class UnverifiedRecipientError extends Error
@@ -1246,10 +1246,10 @@ not proof the gateway cheated and it is not proof it did not
 
 | Member | What it does |
 |---|---|
-| `readonly lnAddress: string;` |  |
-| `readonly paymentId: string;` |  |
+| <a id="thunder-bridge-class-unverifiedrecipienterror-lnaddress"></a>`readonly lnAddress: string;` |  |
+| <a id="thunder-bridge-class-unverifiedrecipienterror-paymentid"></a>`readonly paymentId: string;` |  |
 
-### WaitOptions
+### <a id="thunder-bridge-interface-waitoptions"></a>WaitOptions
 
 ```ts
 interface WaitOptions {
@@ -1268,7 +1268,7 @@ interface WaitOptions {
 
 How long to wait on a payment, and what the socket URL is allowed to carry
 
-### WalletFailure
+### <a id="thunder-bridge-interface-walletfailure"></a>WalletFailure
 
 ```ts
 interface WalletFailure {
@@ -1279,7 +1279,7 @@ interface WalletFailure {
 
 One wallet on the list that could not be used, and the reason it could not
 
-### WalletReason
+### <a id="thunder-bridge-type-walletreason"></a>WalletReason
 
 ```ts
 type WalletReason =
@@ -1292,7 +1292,7 @@ type WalletReason =
 
 Why one wallet in the list could not be used
 
-### WatchedPayment
+### <a id="thunder-bridge-interface-watchedpayment"></a>WatchedPayment
 
 ```ts
 interface WatchedPayment {
@@ -1315,7 +1315,7 @@ A payment the gateway was handed rather than asked to mint. It was told a hash,
 a URL and an expiry and nothing else, which is the point of `watch`, so the
 address, the amount and the invoice are all absent rather than merely unknown
 
-### WatchTicketConfig
+### <a id="thunder-bridge-interface-watchticketconfig"></a>WatchTicketConfig
 
 ```ts
 interface WatchTicketConfig {
@@ -1335,7 +1335,7 @@ secret, so something has to hold the secret and trade it for tickets. That is
 what these two endpoints are, and they are the only place the gateway's token
 has to be
 
-### WebhookCredential
+### <a id="thunder-bridge-type-webhookcredential"></a>WebhookCredential
 
 ```ts
 type WebhookCredential = { publicKey: string };
@@ -1346,7 +1346,7 @@ is no shared secret to register, so a gateway holds nothing of yours. Rotating
 its cluster key rotates this too, so a signature that stops verifying is a
 reason to read the key again before it is a reason to distrust the gateway
 
-### WebhookHandlers
+### <a id="thunder-bridge-interface-webhookhandlers"></a>WebhookHandlers
 
 ```ts
 interface WebhookHandlers {
@@ -1379,7 +1379,7 @@ interface WebhookHandlers {
 
 What to do with what the gateway delivers, and what to believe it with
 
-### WebhookOptions
+### <a id="thunder-bridge-type-webhookoptions"></a>WebhookOptions
 
 ```ts
 type WebhookOptions = { toleranceSecs?: number };
@@ -1387,7 +1387,7 @@ type WebhookOptions = { toleranceSecs?: number };
 
 How far the gateway's clock may drift from yours before a webhook is refused
 
-### WrapAllowance
+### <a id="thunder-bridge-interface-wrapallowance"></a>WrapAllowance
 
 ```ts
 interface WrapAllowance {
@@ -1403,7 +1403,7 @@ What a wrapping operator may charge over the recipient's own amount. This is a
 ceiling the client sets rather than a price the operator names, so it sits
 above what any operator lists and refuses only the ones reaching past it
 
-### wrapFeeCeiling
+### <a id="thunder-bridge-function-wrapfeeceiling"></a>wrapFeeCeiling
 
 ```ts
 function wrapFeeCeiling(amountMsat: number, allowance?: WrapAllowance): Msat
@@ -1414,7 +1414,7 @@ The proportion is what routing and the liquidity behind it costs, and the base
 is the floor it never drops below, because a fraction of a small payment
 rounds to nothing the operator can work for
 
-### WrapRefusalCode
+### <a id="thunder-bridge-type-wraprefusalcode"></a>WrapRefusalCode
 
 ```ts
 type WrapRefusalCode =
@@ -1429,7 +1429,7 @@ The way a wrapping operator was caught out. Every code is the wrapped invoice
 failing to bind to the recipient's own, which is the only thing that makes
 paying the wrap the same act as paying the recipient
 
-### WrapRefusedError
+### <a id="thunder-bridge-class-wraprefusederror"></a>WrapRefusedError
 
 ```ts
 class WrapRefusedError extends Error
@@ -1441,24 +1441,24 @@ hash, which is the whole of what makes wrapping safe
 
 | Member | What it does |
 |---|---|
-| `readonly code: WrapRefusalCode;` |  |
+| <a id="thunder-bridge-class-wraprefusederror-code"></a>`readonly code: WrapRefusalCode;` |  |
 
 ## `thunder-bridge/qr`
 
 | Export | Kind | What it is |
 |---|---|---|
-| [`invoiceToDataUrl`](#thunder-bridge-qr-invoicetodataurl) | function | SVG data URL for an `<img>` `src` |
-| [`invoiceToSvg`](#thunder-bridge-qr-invoicetosvg) | function | Render a BOLT11 invoice or a lightning address as an SVG QR code |
-| [`lnurlEndpointToDataUrl`](#thunder-bridge-qr-lnurlendpointtodataurl) | function | SVG data URL of the endpoint's QR, for an `<img>` `src` |
-| [`lnurlEndpointToSvg`](#thunder-bridge-qr-lnurlendpointtosvg) | function | Render your own LNURL-pay endpoint, the URL `serve.lnurlPay` is mounted on, as the QR a payer scans |
-| [`QrOptions`](#thunder-bridge-qr-qroptions) | interface | How the QR is drawn, which is the only thing about it worth configuring |
-| [`qrToDataUrl`](#thunder-bridge-qr-qrtodataurl) | function | SVG data URL of a leg's QR, for an `<img>` `src` |
-| [`qrToSvg`](#thunder-bridge-qr-qrtosvg) | function | Render any rail's `Leg.qr` as an SVG QR code |
-| [`spdToDataUrl`](#thunder-bridge-qr-spdtodataurl) | function | SVG data URL of the bank transfer's QR, for an `<img>` `src` |
-| [`spdToSvg`](#thunder-bridge-qr-spdtosvg) | function | Render the `spd` from `bankTransfer` as the QR a Czech banking app scans |
-| [`toLnurl`](#thunder-bridge-qr-tolnurl) | function | Bech32-encode a pay endpoint as the `LNURL1` string LUD-01 defines, uppercase because that is the form it asks a QR to carry |
+| [`invoiceToDataUrl`](#thunder-bridge-qr-function-invoicetodataurl) | function | SVG data URL for an `<img>` `src` |
+| [`invoiceToSvg`](#thunder-bridge-qr-function-invoicetosvg) | function | Render a BOLT11 invoice or a lightning address as an SVG QR code |
+| [`lnurlEndpointToDataUrl`](#thunder-bridge-qr-function-lnurlendpointtodataurl) | function | SVG data URL of the endpoint's QR, for an `<img>` `src` |
+| [`lnurlEndpointToSvg`](#thunder-bridge-qr-function-lnurlendpointtosvg) | function | Render your own LNURL-pay endpoint, the URL `serve.lnurlPay` is mounted on, as the QR a payer scans |
+| [`QrOptions`](#thunder-bridge-qr-interface-qroptions) | interface | How the QR is drawn, which is the only thing about it worth configuring |
+| [`qrToDataUrl`](#thunder-bridge-qr-function-qrtodataurl) | function | SVG data URL of a leg's QR, for an `<img>` `src` |
+| [`qrToSvg`](#thunder-bridge-qr-function-qrtosvg) | function | Render any rail's `Leg.qr` as an SVG QR code |
+| [`spdToDataUrl`](#thunder-bridge-qr-function-spdtodataurl) | function | SVG data URL of the bank transfer's QR, for an `<img>` `src` |
+| [`spdToSvg`](#thunder-bridge-qr-function-spdtosvg) | function | Render the `spd` from `bankTransfer` as the QR a Czech banking app scans |
+| [`toLnurl`](#thunder-bridge-qr-function-tolnurl) | function | Bech32-encode a pay endpoint as the `LNURL1` string LUD-01 defines, uppercase because that is the form it asks a QR to carry |
 
-### invoiceToDataUrl
+### <a id="thunder-bridge-qr-function-invoicetodataurl"></a>invoiceToDataUrl
 
 ```ts
 function invoiceToDataUrl(destination: string, options?: QrOptions): string
@@ -1466,7 +1466,7 @@ function invoiceToDataUrl(destination: string, options?: QrOptions): string
 
 SVG data URL for an `<img>` `src`
 
-### invoiceToSvg
+### <a id="thunder-bridge-qr-function-invoicetosvg"></a>invoiceToSvg
 
 ```ts
 function invoiceToSvg(destination: string, options?: QrOptions): string
@@ -1474,7 +1474,7 @@ function invoiceToSvg(destination: string, options?: QrOptions): string
 
 Render a BOLT11 invoice or a lightning address as an SVG QR code
 
-### lnurlEndpointToDataUrl
+### <a id="thunder-bridge-qr-function-lnurlendpointtodataurl"></a>lnurlEndpointToDataUrl
 
 ```ts
 function lnurlEndpointToDataUrl(endpoint: string, options?: QrOptions): string
@@ -1482,7 +1482,7 @@ function lnurlEndpointToDataUrl(endpoint: string, options?: QrOptions): string
 
 SVG data URL of the endpoint's QR, for an `<img>` `src`
 
-### lnurlEndpointToSvg
+### <a id="thunder-bridge-qr-function-lnurlendpointtosvg"></a>lnurlEndpointToSvg
 
 ```ts
 function lnurlEndpointToSvg(endpoint: string, options?: QrOptions): string
@@ -1490,12 +1490,12 @@ function lnurlEndpointToSvg(endpoint: string, options?: QrOptions): string
 
 Render your own LNURL-pay endpoint, the URL `serve.lnurlPay` is mounted on, as
 the QR a payer scans. It takes the endpoint URL and does the bech32 itself, so
-do not hand it the output of `toLnurl` - that is what this calls for you.
+do not hand it the output of [`toLnurl`](#thunder-bridge-qr-function-tolnurl) - that is what this calls for you.
 
 Nothing is minted and nothing expires, so this is the code a tip jar prints
 once and an overlay shows all stream
 
-### QrOptions
+### <a id="thunder-bridge-qr-interface-qroptions"></a>QrOptions
 
 ```ts
 interface QrOptions {
@@ -1508,7 +1508,7 @@ interface QrOptions {
 
 How the QR is drawn, which is the only thing about it worth configuring
 
-### qrToDataUrl
+### <a id="thunder-bridge-qr-function-qrtodataurl"></a>qrToDataUrl
 
 ```ts
 function qrToDataUrl(payload: string, options?: QrOptions): string
@@ -1516,7 +1516,7 @@ function qrToDataUrl(payload: string, options?: QrOptions): string
 
 SVG data URL of a leg's QR, for an `<img>` `src`
 
-### qrToSvg
+### <a id="thunder-bridge-qr-function-qrtosvg"></a>qrToSvg
 
 ```ts
 function qrToSvg(payload: string, options?: QrOptions): string
@@ -1526,7 +1526,7 @@ Render any rail's `Leg.qr` as an SVG QR code. Each rail states its own payload,
 a BOLT11 invoice under the `LIGHTNING` scheme or a Short Payment Descriptor as
 it stands, so this draws a leg without being told which rail made it
 
-### spdToDataUrl
+### <a id="thunder-bridge-qr-function-spdtodataurl"></a>spdToDataUrl
 
 ```ts
 function spdToDataUrl(spd: string, options?: QrOptions): string
@@ -1534,7 +1534,7 @@ function spdToDataUrl(spd: string, options?: QrOptions): string
 
 SVG data URL of the bank transfer's QR, for an `<img>` `src`
 
-### spdToSvg
+### <a id="thunder-bridge-qr-function-spdtosvg"></a>spdToSvg
 
 ```ts
 function spdToSvg(spd: string, options?: QrOptions): string
@@ -1544,7 +1544,7 @@ Render the `spd` from `bankTransfer` as the QR a Czech banking app scans. The
 payload is a Short Payment Descriptor, so it carries the account, the amount
 and the reference the payer must leave on the transfer
 
-### toLnurl
+### <a id="thunder-bridge-qr-function-tolnurl"></a>toLnurl
 
 ```ts
 function toLnurl(endpoint: string): string
@@ -1558,20 +1558,20 @@ rather than https, which LUD-17 spells out, so both are taken here
 
 | Export | Kind | What it is |
 |---|---|---|
-| [`AmountError`](#thunder-bridge-price-amounterror) | class | Thrown when a price cannot be held exactly |
-| [`AmountFault`](#thunder-bridge-price-amountfault) | type | Why an amount was refused |
-| [`bitstamp`](#thunder-bridge-price-bitstamp) | function | Bitstamp, CASP authorised by the CSSF in Luxembourg |
-| [`coinbase`](#thunder-bridge-price-coinbase) | function | Coinbase, CASP authorised in Luxembourg |
-| [`coinmate`](#thunder-bridge-price-coinmate) | function | Coinmate, on the ESMA CASP register, Czech and the one with a real BTC/CZK book |
-| [`kraken`](#thunder-bridge-price-kraken) | function | Kraken, CASP authorised by the Central Bank of Ireland |
-| [`medianOf`](#thunder-bridge-price-medianof) | function | Ask several venues and take the middle answer, refusing the lot when they disagree too much |
-| [`MedianOptions`](#thunder-bridge-price-medianoptions) | interface | How many venues have to agree, how far apart they may be, and how long an answer is held |
-| [`minorScaleOf`](#thunder-bridge-price-minorscaleof) | function | The scale that minor unit implies, so 100 for a crown, 1 for a yen, 1000 for a dinar |
-| [`minorUnitsOf`](#thunder-bridge-price-minorunitsof) | function | How many digits ISO 4217 gives the currency's minor unit, so 2 for a crown and a euro, 0 for a yen and 3 for a dinar |
-| [`msatFor`](#thunder-bridge-price-msatfor) | function | What to ask for over Lightning for a price named in fiat, in millisatoshi |
-| [`Ticker`](#thunder-bridge-price-ticker) | type | How many minor units of `currency` one bitcoin costs at one venue, so 134883815 is 1,348,838.15 CZK |
+| [`AmountError`](#thunder-bridge-price-class-amounterror) | class | Thrown when a price cannot be held exactly |
+| [`AmountFault`](#thunder-bridge-price-type-amountfault) | type | Why an amount was refused |
+| [`bitstamp`](#thunder-bridge-price-function-bitstamp) | function | Bitstamp, CASP authorised by the CSSF in Luxembourg |
+| [`coinbase`](#thunder-bridge-price-function-coinbase) | function | Coinbase, CASP authorised in Luxembourg |
+| [`coinmate`](#thunder-bridge-price-function-coinmate) | function | Coinmate, on the ESMA CASP register, Czech and the one with a real BTC/CZK book |
+| [`kraken`](#thunder-bridge-price-function-kraken) | function | Kraken, CASP authorised by the Central Bank of Ireland |
+| [`medianOf`](#thunder-bridge-price-function-medianof) | function | Ask several venues and take the middle answer, refusing the lot when they disagree too much |
+| [`MedianOptions`](#thunder-bridge-price-interface-medianoptions) | interface | How many venues have to agree, how far apart they may be, and how long an answer is held |
+| [`minorScaleOf`](#thunder-bridge-price-function-minorscaleof) | function | The scale that minor unit implies, so 100 for a crown, 1 for a yen, 1000 for a dinar |
+| [`minorUnitsOf`](#thunder-bridge-price-function-minorunitsof) | function | How many digits ISO 4217 gives the currency's minor unit, so 2 for a crown and a euro, 0 for a yen and 3 for a dinar |
+| [`msatFor`](#thunder-bridge-price-function-msatfor) | function | What to ask for over Lightning for a price named in fiat, in millisatoshi |
+| [`Ticker`](#thunder-bridge-price-type-ticker) | type | How many minor units of `currency` one bitcoin costs at one venue, so 134883815 is 1,348,838.15 CZK |
 
-### AmountError
+### <a id="thunder-bridge-price-class-amounterror"></a>AmountError
 
 ```ts
 class AmountError extends Error
@@ -1583,10 +1583,10 @@ library that rounds silently moves the wrong money
 
 | Member | What it does |
 |---|---|
-| `static is(failure: unknown): failure is AmountError` | Whether a failure is one of these, without asking whether it is this exact class |
-| `readonly code: AmountFault;` |  |
+| <a id="thunder-bridge-price-class-amounterror-is"></a>`static is(failure: unknown): failure is AmountError` | Whether a failure is one of these, without asking whether it is this exact class |
+| <a id="thunder-bridge-price-class-amounterror-code"></a>`readonly code: AmountFault;` |  |
 
-### AmountFault
+### <a id="thunder-bridge-price-type-amountfault"></a>AmountFault
 
 ```ts
 type AmountFault =
@@ -1600,7 +1600,7 @@ type AmountFault =
 Why an amount was refused. A code rather than a message, because a caller can
 only recover from a failure it can name and a message is free to be reworded
 
-### bitstamp
+### <a id="thunder-bridge-price-function-bitstamp"></a>bitstamp
 
 ```ts
 function bitstamp(baseUrl = "https://www.bitstamp.net"): Ticker
@@ -1612,7 +1612,7 @@ An unknown pair is answered with a `200` and the whole ticker list, whose first
 entry is BTC/USD, so asking it for CZK and reading the number would quote a
 bitcoin at 64,000 crowns. Anything but a single object is therefore refused
 
-### coinbase
+### <a id="thunder-bridge-price-function-coinbase"></a>coinbase
 
 ```ts
 function coinbase(baseUrl = "https://api.coinbase.com"): Ticker
@@ -1620,7 +1620,7 @@ function coinbase(baseUrl = "https://api.coinbase.com"): Ticker
 
 Coinbase, CASP authorised in Luxembourg. Quotes CZK, EUR and most fiat
 
-### coinmate
+### <a id="thunder-bridge-price-function-coinmate"></a>coinmate
 
 ```ts
 function coinmate(baseUrl = "https://coinmate.io"): Ticker
@@ -1628,7 +1628,7 @@ function coinmate(baseUrl = "https://coinmate.io"): Ticker
 
 Coinmate, on the ESMA CASP register, Czech and the one with a real BTC/CZK book
 
-### kraken
+### <a id="thunder-bridge-price-function-kraken"></a>kraken
 
 ```ts
 function kraken(baseUrl = "https://api.kraken.com"): Ticker
@@ -1636,7 +1636,7 @@ function kraken(baseUrl = "https://api.kraken.com"): Ticker
 
 Kraken, CASP authorised by the Central Bank of Ireland. Quotes EUR and USD, no CZK
 
-### medianOf
+### <a id="thunder-bridge-price-function-medianof"></a>medianOf
 
 ```ts
 function medianOf(
@@ -1657,7 +1657,7 @@ The middle is taken rather than the mean so one stuck venue moves the answer by
 nothing instead of by half its error, and the spread check is what catches the
 stuck venue that stays inside the pack.
 
-### MedianOptions
+### <a id="thunder-bridge-price-interface-medianoptions"></a>MedianOptions
 
 ```ts
 interface MedianOptions {
@@ -1681,7 +1681,7 @@ interface MedianOptions {
 
 How many venues have to agree, how far apart they may be, and how long an answer is held
 
-### minorScaleOf
+### <a id="thunder-bridge-price-function-minorscaleof"></a>minorScaleOf
 
 ```ts
 function minorScaleOf(currency: string): number
@@ -1689,7 +1689,7 @@ function minorScaleOf(currency: string): number
 
 The scale that minor unit implies, so 100 for a crown, 1 for a yen, 1000 for a dinar
 
-### minorUnitsOf
+### <a id="thunder-bridge-price-function-minorunitsof"></a>minorUnitsOf
 
 ```ts
 function minorUnitsOf(currency: string): number
@@ -1703,7 +1703,7 @@ being treated as two. Assuming two turns 1000 yen into 10 and a dinar into a
 tenth of itself, and a payment library that guesses at this is a payment library
 that moves the wrong amount.
 
-### msatFor
+### <a id="thunder-bridge-price-function-msatfor"></a>msatFor
 
 ```ts
 function msatFor(
@@ -1715,7 +1715,7 @@ function msatFor(
 
 What to ask for over Lightning for a price named in fiat, in millisatoshi.
 
-`priceMinorPerBtc` is what a `Ticker` returns. The arithmetic is exact, in
+`priceMinorPerBtc` is what a [`Ticker`](#thunder-bridge-price-type-ticker) returns. The arithmetic is exact, in
 BigInt, because a million crown order times a hundred billion millisatoshi
 leaves what a double can count, and it rounds up, because the extra
 millisatoshi is worth nothing and belongs to the recipient rather than to a
@@ -1725,7 +1725,7 @@ rounding rule.
 invoice lives an hour and a bank transfer takes days, so a shop pricing in fiat is
 carrying that volatility whether or not it charges for it
 
-### Ticker
+### <a id="thunder-bridge-price-type-ticker"></a>Ticker
 
 ```ts
 type Ticker = (currency: string) => Promise<number>;
@@ -1742,15 +1742,15 @@ shape
 
 | Export | Kind | What it is |
 |---|---|---|
-| [`BankTransfer`](#thunder-bridge-bank-banktransfer) | interface | A transfer the gateway is now watching, and the descriptor the payer scans |
-| [`BankTransferParams`](#thunder-bridge-bank-banktransferparams) | interface | One transfer to ask for: what is owed, where it lands, and where its arrival is read back from |
-| [`BankVerifyConfig`](#thunder-bridge-bank-bankverifyconfig) | interface | The endpoint the gateway polls for a bank transfer, answering off your own statement |
-| [`Credit`](#thunder-bridge-bank-credit) | interface | One incoming payment as the bank booked it, in the smallest unit of its currency |
-| [`FioConfig`](#thunder-bridge-bank-fioconfig) | interface | A Fio account to read credits from, as its own API describes one |
-| [`fioStatement`](#thunder-bridge-bank-fiostatement) | function | Read one Fio account as a `Statement`, so a bank transfer proves itself the way a Lightning payment does |
-| [`Statement`](#thunder-bridge-bank-statement) | type | Recent credits on one account, oldest or newest first, it makes no difference |
+| [`BankTransfer`](#thunder-bridge-bank-interface-banktransfer) | interface | A transfer the gateway is now watching, and the descriptor the payer scans |
+| [`BankTransferParams`](#thunder-bridge-bank-interface-banktransferparams) | interface | One transfer to ask for: what is owed, where it lands, and where its arrival is read back from |
+| [`BankVerifyConfig`](#thunder-bridge-bank-interface-bankverifyconfig) | interface | The endpoint the gateway polls for a bank transfer, answering off your own statement |
+| [`Credit`](#thunder-bridge-bank-interface-credit) | interface | One incoming payment as the bank booked it, in the smallest unit of its currency |
+| [`FioConfig`](#thunder-bridge-bank-interface-fioconfig) | interface | A Fio account to read credits from, as its own API describes one |
+| [`fioStatement`](#thunder-bridge-bank-function-fiostatement) | function | Read one Fio account as a `Statement`, so a bank transfer proves itself the way a Lightning payment does |
+| [`Statement`](#thunder-bridge-bank-type-statement) | type | Recent credits on one account, oldest or newest first, it makes no difference |
 
-### BankTransfer
+### <a id="thunder-bridge-bank-interface-banktransfer"></a>BankTransfer
 
 ```ts
 interface BankTransfer {
@@ -1770,7 +1770,7 @@ interface BankTransfer {
 
 A transfer the gateway is now watching, and the descriptor the payer scans
 
-### BankTransferParams
+### <a id="thunder-bridge-bank-interface-banktransferparams"></a>BankTransferParams
 
 ```ts
 interface BankTransferParams {
@@ -1832,7 +1832,7 @@ interface BankTransferParams {
 
 One transfer to ask for: what is owed, where it lands, and where its arrival is read back from
 
-### BankVerifyConfig
+### <a id="thunder-bridge-bank-interface-bankverifyconfig"></a>BankVerifyConfig
 
 ```ts
 interface BankVerifyConfig {
@@ -1857,7 +1857,7 @@ interface BankVerifyConfig {
 
 The endpoint the gateway polls for a bank transfer, answering off your own statement
 
-### Credit
+### <a id="thunder-bridge-bank-interface-credit"></a>Credit
 
 ```ts
 interface Credit {
@@ -1877,7 +1877,7 @@ interface Credit {
 
 One incoming payment as the bank booked it, in the smallest unit of its currency
 
-### FioConfig
+### <a id="thunder-bridge-bank-interface-fioconfig"></a>FioConfig
 
 ```ts
 interface FioConfig {
@@ -1908,13 +1908,13 @@ interface FioConfig {
 
 A Fio account to read credits from, as its own API describes one
 
-### fioStatement
+### <a id="thunder-bridge-bank-function-fiostatement"></a>fioStatement
 
 ```ts
 function fioStatement(config: FioConfig): Statement
 ```
 
-Read one Fio account as a `Statement`, so a bank transfer proves itself the
+Read one Fio account as a [`Statement`](#thunder-bridge-bank-type-statement), so a bank transfer proves itself the
 way a Lightning payment does.
 
 The token is the read only kind, generated in internetbanking under Nastavení
@@ -1928,7 +1928,7 @@ and the date is a day and a UTC offset, `2026-07-15+0200`. This reads all
 three the way the bank answers them and treats a missing field as absent
 rather than guessing.
 
-### Statement
+### <a id="thunder-bridge-bank-type-statement"></a>Statement
 
 ```ts
 type Statement = (sinceUnix: number) => Promise<Credit[]>;
@@ -1936,27 +1936,27 @@ type Statement = (sinceUnix: number) => Promise<Credit[]>;
 
 Recent credits on one account, oldest or newest first, it makes no difference.
 This is the whole plugin seam: a bank is a function of this shape, and
-`fioStatement` is one implementation of it
+[`fioStatement`](#thunder-bridge-bank-function-fiostatement) is one implementation of it
 
 ## `thunder-bridge/nwc`
 
 | Export | Kind | What it is |
 |---|---|---|
-| [`askWallet`](#thunder-bridge-nwc-askwallet) | function | One NIP-47 call, for a method this SDK does not wrap |
-| [`nwcConnection`](#thunder-bridge-nwc-nwcconnection) | function | Read a `nostr+walletconnect://` URI |
-| [`NwcConnection`](#thunder-bridge-nwc-nwcconnection) | interface | A wallet reachable over NIP-47, as its `nostr+walletconnect://` URI describes it |
-| [`nwcHoldInvoice`](#thunder-bridge-nwc-nwcholdinvoice) | function | Mint a hold invoice on a hash the wallet does not hold the preimage for, which is what lets an operator be paid only by paying somebody else first |
-| [`nwcInvoice`](#thunder-bridge-nwc-nwcinvoice) | function | Mint an invoice on the connected wallet, decoded so the caller need not trust its word |
-| [`NwcInvoice`](#thunder-bridge-nwc-nwcinvoice) | interface | A minted invoice and everything needed to watch it |
-| [`nwcPay`](#thunder-bridge-nwc-nwcpay) | function | Pay an invoice and keep the preimage the network handed back |
-| [`nwcRail`](#thunder-bridge-nwc-nwcrail) | function | Sell for Lightning against a wallet of your own over NIP-47, for a wallet that has no LUD-21 address to be watched at |
-| [`NwcRailConfig`](#thunder-bridge-nwc-nwcrailconfig) | interface | A Lightning rail minting on a wallet of your own over NIP-47, bound once per shop |
-| [`nwcSettlement`](#thunder-bridge-nwc-nwcsettlement) | function | The preimage the wallet released for this hash, null while it has released none |
-| [`NwcVerifyConfig`](#thunder-bridge-nwc-nwcverifyconfig) | interface | The endpoint the gateway polls for an NWC payment, answering off your own wallet |
-| [`nwcVerifyEndpoint`](#thunder-bridge-nwc-nwcverifyendpoint) | function | A verify endpoint of your own that asks your wallet over NIP-47, so the gateway polls you and never learns the connection, the relay, or which wallet it is |
-| [`nwcVerifyUrl`](#thunder-bridge-nwc-nwcverifyurl) | function | The URL to hand the gateway, with the payment hash sealed inside it |
+| [`askWallet`](#thunder-bridge-nwc-function-askwallet) | function | One NIP-47 call, for a method this SDK does not wrap |
+| [`nwcConnection`](#thunder-bridge-nwc-function-nwcconnection) | function | Read a `nostr+walletconnect://` URI |
+| [`NwcConnection`](#thunder-bridge-nwc-interface-nwcconnection) | interface | A wallet reachable over NIP-47, as its `nostr+walletconnect://` URI describes it |
+| [`nwcHoldInvoice`](#thunder-bridge-nwc-function-nwcholdinvoice) | function | Mint a hold invoice on a hash the wallet does not hold the preimage for, which is what lets an operator be paid only by paying somebody else first |
+| [`nwcInvoice`](#thunder-bridge-nwc-function-nwcinvoice) | function | Mint an invoice on the connected wallet, decoded so the caller need not trust its word |
+| [`NwcInvoice`](#thunder-bridge-nwc-interface-nwcinvoice) | interface | A minted invoice and everything needed to watch it |
+| [`nwcPay`](#thunder-bridge-nwc-function-nwcpay) | function | Pay an invoice and keep the preimage the network handed back |
+| [`nwcRail`](#thunder-bridge-nwc-function-nwcrail) | function | Sell for Lightning against a wallet of your own over NIP-47, for a wallet that has no LUD-21 address to be watched at |
+| [`NwcRailConfig`](#thunder-bridge-nwc-interface-nwcrailconfig) | interface | A Lightning rail minting on a wallet of your own over NIP-47, bound once per shop |
+| [`nwcSettlement`](#thunder-bridge-nwc-function-nwcsettlement) | function | The preimage the wallet released for this hash, null while it has released none |
+| [`NwcVerifyConfig`](#thunder-bridge-nwc-interface-nwcverifyconfig) | interface | The endpoint the gateway polls for an NWC payment, answering off your own wallet |
+| [`nwcVerifyEndpoint`](#thunder-bridge-nwc-function-nwcverifyendpoint) | function | A verify endpoint of your own that asks your wallet over NIP-47, so the gateway polls you and never learns the connection, the relay, or which wallet it is |
+| [`nwcVerifyUrl`](#thunder-bridge-nwc-function-nwcverifyurl) | function | The URL to hand the gateway, with the payment hash sealed inside it |
 
-### askWallet
+### <a id="thunder-bridge-nwc-function-askwallet"></a>askWallet
 
 ```ts
 async function askWallet(
@@ -1971,7 +1971,7 @@ One NIP-47 call, for a method this SDK does not wrap. The wallet's own info
 event lists what it will answer, and anything it refuses comes back as a
 `WalletRefused` whose `reason` says which kind of refusal it was
 
-### nwcConnection
+### <a id="thunder-bridge-nwc-function-nwcconnection"></a>nwcConnection
 
 ```ts
 function nwcConnection(uri: string): NwcConnection
@@ -1980,7 +1980,7 @@ function nwcConnection(uri: string): NwcConnection
 Read a `nostr+walletconnect://` URI. Refuses a relay that is not `wss`, for the
 reason the gateway refuses a verify URL that is not https
 
-### NwcConnection
+### <a id="thunder-bridge-nwc-interface-nwcconnection"></a>NwcConnection
 
 ```ts
 interface NwcConnection {
@@ -1997,7 +1997,7 @@ interface NwcConnection {
 
 A wallet reachable over NIP-47, as its `nostr+walletconnect://` URI describes it
 
-### nwcHoldInvoice
+### <a id="thunder-bridge-nwc-function-nwcholdinvoice"></a>nwcHoldInvoice
 
 ```ts
 async function nwcHoldInvoice(
@@ -2018,7 +2018,7 @@ is what lets an operator be paid only by paying somebody else first. The hash
 has to come from the recipient's own invoice, and the invoice that comes back
 is decoded rather than believed
 
-### nwcInvoice
+### <a id="thunder-bridge-nwc-function-nwcinvoice"></a>nwcInvoice
 
 ```ts
 async function nwcInvoice(
@@ -2031,7 +2031,7 @@ async function nwcInvoice(
 
 Mint an invoice on the connected wallet, decoded so the caller need not trust its word
 
-### NwcInvoice
+### <a id="thunder-bridge-nwc-interface-nwcinvoice"></a>NwcInvoice
 
 ```ts
 interface NwcInvoice {
@@ -2043,7 +2043,7 @@ interface NwcInvoice {
 
 A minted invoice and everything needed to watch it
 
-### nwcPay
+### <a id="thunder-bridge-nwc-function-nwcpay"></a>nwcPay
 
 ```ts
 async function nwcPay(
@@ -2058,7 +2058,7 @@ learns it, which is what makes delivery provable to a recipient publishing no
 LUD-21 of their own. A preimage that does not hash to the invoice's own hash is
 a lie rather than a receipt, so it throws instead of being passed on
 
-### nwcRail
+### <a id="thunder-bridge-nwc-function-nwcrail"></a>nwcRail
 
 ```ts
 function nwcRail(gateway: ThunderBridge, config: NwcRailConfig): Rail
@@ -2072,7 +2072,7 @@ manage, and the gateway sees a hash and a URL of yours.
 This rail lives here rather than on `gateway.rails` because NIP-47 needs the
 nostr crypto in this module, and a browser showing a QR should not download it
 
-### NwcRailConfig
+### <a id="thunder-bridge-nwc-interface-nwcrailconfig"></a>NwcRailConfig
 
 ```ts
 interface NwcRailConfig {
@@ -2091,7 +2091,7 @@ interface NwcRailConfig {
 
 A Lightning rail minting on a wallet of your own over NIP-47, bound once per shop
 
-### nwcSettlement
+### <a id="thunder-bridge-nwc-function-nwcsettlement"></a>nwcSettlement
 
 ```ts
 async function nwcSettlement(
@@ -2105,7 +2105,7 @@ The preimage the wallet released for this hash, null while it has released
 none. A preimage that does not hash to what was asked for is a lie rather than
 an answer, so it throws instead of being passed on
 
-### NwcVerifyConfig
+### <a id="thunder-bridge-nwc-interface-nwcverifyconfig"></a>NwcVerifyConfig
 
 ```ts
 interface NwcVerifyConfig {
@@ -2125,7 +2125,7 @@ interface NwcVerifyConfig {
 
 The endpoint the gateway polls for an NWC payment, answering off your own wallet
 
-### nwcVerifyEndpoint
+### <a id="thunder-bridge-nwc-function-nwcverifyendpoint"></a>nwcVerifyEndpoint
 
 ```ts
 function nwcVerifyEndpoint(
@@ -2136,14 +2136,14 @@ function nwcVerifyEndpoint(
 A verify endpoint of your own that asks your wallet over NIP-47, so the gateway
 polls you and never learns the connection, the relay, or which wallet it is.
 
-`nwcVerifyUrl` seals the payment hash into the query with your secret, which is
+[`nwcVerifyUrl`](#thunder-bridge-nwc-function-nwcverifyurl) seals the payment hash into the query with your secret, which is
 what stops a stranger driving your wallet through this handler. It answers the
 LUD-21 shape the gateway already speaks, so nothing on that side changes.
 
 A wallet it cannot reach answers `502` rather than "not settled", because those
 are different claims and only one of them is true.
 
-### nwcVerifyUrl
+### <a id="thunder-bridge-nwc-function-nwcverifyurl"></a>nwcVerifyUrl
 
 ```ts
 async function nwcVerifyUrl(
@@ -2154,4 +2154,4 @@ async function nwcVerifyUrl(
 ```
 
 The URL to hand the gateway, with the payment hash sealed inside it. Point it at
-wherever `nwcVerifyEndpoint` is mounted
+wherever [`nwcVerifyEndpoint`](#thunder-bridge-nwc-function-nwcverifyendpoint) is mounted
