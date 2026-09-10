@@ -4,8 +4,11 @@ export const DEMO_GATEWAY = "https://public.thunder-bridge.agora.gripe";
 
 export function watchAPlace(
   watchSecret: string,
-  arrived: (settled: Payment) => void,
+  onPayment: (settled: Payment) => void,
   via = DEMO_GATEWAY,
 ): () => void {
-  return new ThunderBridge(via).follow(watchSecret, { onPayment: arrived });
+  const gateway = new ThunderBridge(via);
+  const stop = gateway.follow(watchSecret, { onPayment });
+
+  return stop;
 }

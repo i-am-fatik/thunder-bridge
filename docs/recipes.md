@@ -156,10 +156,13 @@ export const DEMO_GATEWAY = "https://public.thunder-bridge.agora.gripe";
 
 export function watchAPlace(
   watchSecret: string,
-  arrived: (settled: <a href="api.md#thunder-bridge-type-payment">Payment</a>) =&gt; void,
+  onPayment: (settled: <a href="api.md#thunder-bridge-type-payment">Payment</a>) =&gt; void,
   via = DEMO_GATEWAY,
 ): () =&gt; void {
-  return new <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a>(via).<a href="api.md#thunder-bridge-class-thunderbridge-follow">follow</a>(watchSecret, { onPayment: arrived });
+  const gateway = new <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a>(via);
+  const stop = gateway.<a href="api.md#thunder-bridge-class-thunderbridge-follow">follow</a>(watchSecret, { onPayment });
+
+  return stop;
 }</code></pre>
 
 - the watch secret is the only handle, and it never travels in a QR

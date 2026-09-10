@@ -232,8 +232,8 @@ async function followThisPlace() {
     arrived.querySelector(".empty")?.remove();
     const row = document.createElement("div");
     row.innerHTML =
-      `<span class="verb">paid</span><span class="code2 ok">${settled.amountMsat / 1000}</span>` +
-      `<span class="where">satoshi, preimage ${String(settled.preimage).slice(0, 16)}...</span>`;
+      `<span class="verb ok">paid</span>` +
+      `<span class="where">${settled.amountMsat / 1000} satoshi, preimage ${String(settled.preimage).slice(0, 16)}...</span>`;
     arrived.append(row);
     arrived.scrollTop = arrived.scrollHeight;
   });

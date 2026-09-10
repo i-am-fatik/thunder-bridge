@@ -94,6 +94,7 @@
   .wire .ok { color: var(--signal); }
   .wire .no { color: var(--bad); }
   .wire .where { color: var(--ink-soft); word-break: break-all; }
+  #arrived .where { grid-column: 2 / -1; }
   .wire .empty { display: block; color: var(--ink-faint); font-family: var(--serif); font-size: 0.86rem; }
   footer { margin-top: 2.5rem; border-top: 1px solid var(--rule); padding-top: 1.25rem; font-family: var(--sans); font-size: 0.78rem; color: var(--ink-faint); }
 

@@ -79,11 +79,14 @@
 <div class="row" id="L4"><span class="ln">4</span><span class="src">&nbsp;</span></div>
 <div class="row" id="L5"><span class="ln">5</span><span class="src">export function watchAPlace(</span></div>
 <div class="row" id="L6"><span class="ln">6</span><span class="src">  watchSecret: string,</span></div>
-<div class="row" id="L7"><span class="ln">7</span><span class="src">  arrived: (settled: <a href="../api.md#thunder-bridge-type-payment" title="Payment">Payment</a>) =&gt; void,</span></div>
+<div class="row" id="L7"><span class="ln">7</span><span class="src">  onPayment: (settled: <a href="../api.md#thunder-bridge-type-payment" title="Payment">Payment</a>) =&gt; void,</span></div>
 <div class="row" id="L8"><span class="ln">8</span><span class="src">  via = DEMO_GATEWAY,</span></div>
 <div class="row" id="L9"><span class="ln">9</span><span class="src">): () =&gt; void {</span></div>
-<div class="row" id="L10"><span class="ln">10</span><span class="src">  return new <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a>(via).<a href="../api.md#thunder-bridge-class-thunderbridge-follow" title="ThunderBridge.follow">follow</a>(watchSecret, { onPayment: arrived });</span></div>
-<div class="row" id="L11"><span class="ln">11</span><span class="src">}</span></div>
+<div class="row" id="L10"><span class="ln">10</span><span class="src">  const gateway = new <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a>(via);</span></div>
+<div class="row" id="L11"><span class="ln">11</span><span class="src">  const stop = gateway.<a href="../api.md#thunder-bridge-class-thunderbridge-follow" title="ThunderBridge.follow">follow</a>(watchSecret, { onPayment });</span></div>
+<div class="row" id="L12"><span class="ln">12</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L13"><span class="ln">13</span><span class="src">  return stop;</span></div>
+<div class="row" id="L14"><span class="ln">14</span><span class="src">}</span></div>
         </div>
         <div class="wire" id="arrived"><span class="empty">Nothing yet. Pay one of these invoices and
         it lands here, because the endpoint carries a watch secret and this page follows it.</span></div>
