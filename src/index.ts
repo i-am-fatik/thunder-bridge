@@ -15,7 +15,7 @@ import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.
 import { sendThrough } from "../core/outbound.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
-import { allowed, bearer, positive, secret, whole } from "./env.ts";
+import { allowed, bearer, daysToSecs, positive, secret, secsToMs, whole } from "./env.ts";
 import { Ledger } from "./ledger.ts";
 import * as log from "./log.ts";
 import type { Payment } from "./payment.ts";
@@ -118,22 +118,22 @@ const DOCS = `<!doctype html>
 type Follower = { id: string | null; trigger: string | null; answered: boolean };
 
 export type Options = {
-	port: number;
+	key: Uint8Array;
+	port?: number;
 	host?: string;
 	socket?: string;
-	eagerDelayMs: number;
-	pollsPerSecond: number;
-	workPerTick: number;
-	verifyHosts: Set<string> | null;
-	verifyChallenge: boolean;
-	clientKeys: Set<string> | null;
-	mints: boolean;
-	tickStallMs: number;
-	drainTimeoutMs: number;
-	keepSealedSecs: number;
-	maxReplay: number;
-	token: string | null;
-	key: Uint8Array;
+	mints?: boolean;
+	token?: string | null;
+	clientKeys?: Set<string> | null;
+	verifyHosts?: Set<string> | null;
+	verifyChallenge?: boolean;
+	eagerDelayMs?: number;
+	pollsPerSecond?: number;
+	workPerTick?: number;
+	tickStallMs?: number;
+	drainTimeoutMs?: number;
+	keepSealedSecs?: number;
+	maxReplay?: number;
 };
 
 export type Service = {
@@ -155,25 +155,44 @@ type Serving = {
 	maxReplay: number;
 };
 
-export async function start(options: Options, store: Store): Promise<Service> {
-	const token = options.token === "" ? null : options.token;
+export async function start(
+	{
+		key,
+		port = 3000,
+		host = "0.0.0.0",
+		socket,
+		mints = false,
+		token = null,
+		clientKeys = null,
+		verifyHosts = null,
+		verifyChallenge = true,
+		eagerDelayMs = 5_000,
+		pollsPerSecond = 5,
+		workPerTick = 50,
+		tickStallMs = 30_000,
+		drainTimeoutMs = 10_000,
+		keepSealedSecs = 90 * 86_400,
+		maxReplay = 100,
+	}: Options,
+	store: Store,
+): Promise<Service> {
 	const serving: Serving = {
-		token,
-		key: options.key,
-		keepSealedSecs: options.keepSealedSecs,
-		clientKeys: options.clientKeys,
-		mints: options.mints,
-		webhookKey: await webhookSigningKey(options.key),
-		verifyHosts: options.verifyHosts,
-		verifyChallenge: options.verifyChallenge,
-		maxReplay: options.maxReplay,
+		token: token === "" ? null : token,
+		key,
+		keepSealedSecs,
+		clientKeys,
+		mints,
+		webhookKey: await webhookSigningKey(key),
+		verifyHosts,
+		verifyChallenge,
+		maxReplay,
 	};
 	const watcher: Watcher = {
 		store,
-		eagerDelayMs: options.eagerDelayMs,
+		eagerDelayMs,
 		budget: {
-			perSecond: options.pollsPerSecond,
-			perTick: options.workPerTick,
+			perSecond: pollsPerSecond,
+			perTick: workPerTick,
 			nextAt: new Map(),
 			pace: new Map(),
 			ceiling: new Map(),
@@ -184,7 +203,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	let draining = false;
 	let firedAt = Date.now();
 	const vitals = (): Vitals =>
-		draining ? "draining" : Date.now() - firedAt > options.tickStallMs ? "stalled" : "serving";
+		draining ? "draining" : Date.now() - firedAt > tickStallMs ? "stalled" : "serving";
 
 	const followers = new Map<WebSocket, Follower>();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
@@ -201,7 +220,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 		const path = pathOf(incoming);
 		const ticketed = TICKETED.exec(path);
 		if (ticketed) {
-			void readTicket(options.key, ticketed[1]!, unixNow())
+			void readTicket(key, ticketed[1]!, unixNow())
 				.then((permits) => {
 					if (socket.destroyed) {
 						return;
@@ -268,10 +287,10 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	store.onChange = publish;
 
 	await new Promise<void>((listening) => {
-		if (options.socket === undefined) {
-			server.listen(options.port, options.host ?? "0.0.0.0", listening);
+		if (socket === undefined) {
+			server.listen(port, host, listening);
 		} else {
-			server.listen(options.socket, listening);
+			server.listen(socket, listening);
 		}
 	});
 
@@ -287,7 +306,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	}, PING_INTERVAL_MS);
 
 	const sweeper = setInterval(() => {
-		for (const expired of store.sweep(EXPIRED_GRACE_SECS, options.keepSealedSecs)) {
+		for (const expired of store.sweep(EXPIRED_GRACE_SECS, keepSealedSecs)) {
 			publish(expired);
 		}
 	}, SWEEP_INTERVAL_MS);
@@ -321,7 +340,7 @@ export async function start(options: Options, store: Store): Promise<Service> {
 			clearInterval(keepalive);
 			clearInterval(ticker);
 			clearInterval(sweeper);
-			await Promise.race([inFlight, sleep(options.drainTimeoutMs, undefined, { ref: false })]);
+			await Promise.race([inFlight, sleep(drainTimeoutMs, undefined, { ref: false })]);
 			for (const socket of followers.keys()) {
 				socket.close();
 			}
@@ -1029,13 +1048,13 @@ if (import.meta.main) {
 	const clusterKey = secret("CLUSTER_KEY");
 
 	const ledger = new Ledger(path, clusterKey, {
-		takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS", 600),
-		deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS", 30),
+		takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS"),
+		deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS"),
 	});
-	const store = new Store(ledger, clusterKey, whole("MAX_PENDING", 5000));
+	const store = new Store(ledger, clusterKey, whole("MAX_PENDING"));
 	const cluster = new Cluster(store.gossip, {
 		key: clusterKey,
-		listenPort: whole("REPLICATE_LISTEN", 0),
+		listenPort: whole("REPLICATE_LISTEN"),
 		peers: (process.env["REPLICATE_PEERS"] ?? "").split(",").filter((peer) => peer.length > 0),
 		swarm: process.env["SWARM"] !== "0",
 	});
@@ -1043,22 +1062,22 @@ if (import.meta.main) {
 
 	const service = await start(
 		{
-			port: whole("PORT", 3000),
-			host: process.env["HOST"] ?? "0.0.0.0",
+			key: clusterKey,
+			port: whole("PORT"),
+			host: process.env["HOST"],
 			socket: process.env["SOCKET"],
-			eagerDelayMs: positive("POLL_INTERVAL_SECS", 5) * 1000,
-			workPerTick: positive("WORK_PER_TICK", 50),
+			mints: process.env["MINTING"] === "1",
+			token: bearer("GATEWAY_TOKEN"),
+			clientKeys: allowed("CLIENT_KEYS"),
 			verifyHosts: allowed("VERIFY_HOSTS"),
 			verifyChallenge: process.env["VERIFY_CHALLENGE"] !== "0",
-			clientKeys: allowed("CLIENT_KEYS"),
-			mints: process.env["MINTING"] === "1",
-			pollsPerSecond: positive("POLLS_PER_SEC", 5),
-			tickStallMs: positive("TICK_STALL_SECS", 30) * 1000,
-			drainTimeoutMs: positive("DRAIN_TIMEOUT_SECS", 10) * 1000,
-			keepSealedSecs: positive("KEEP_SEALED_DAYS", 90) * 86_400,
-			maxReplay: whole("MAX_REPLAY", 100),
-			token: bearer("GATEWAY_TOKEN"),
-			key: clusterKey,
+			eagerDelayMs: secsToMs(positive("POLL_INTERVAL_SECS")),
+			pollsPerSecond: positive("POLLS_PER_SEC"),
+			workPerTick: positive("WORK_PER_TICK"),
+			tickStallMs: secsToMs(positive("TICK_STALL_SECS")),
+			drainTimeoutMs: secsToMs(positive("DRAIN_TIMEOUT_SECS")),
+			keepSealedSecs: daysToSecs(positive("KEEP_SEALED_DAYS")),
+			maxReplay: whole("MAX_REPLAY"),
 		},
 		store,
 	);

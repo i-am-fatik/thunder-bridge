@@ -19,7 +19,7 @@ export type Opened = {
 };
 
 export type TestOptions = {
-	ledger?: string;
+	ledgerPath?: string;
 	listenPort?: number;
 	peers?: string[];
 	maxPending?: number;
@@ -28,27 +28,26 @@ export type TestOptions = {
 	key?: Uint8Array;
 };
 
-export function openStore(options: TestOptions = {}): Opened {
-	const path = options.ledger ?? join(mkdtempSync(join(tmpdir(), "tbd-")), "ledger.db");
-	const key = options.key ?? CLUSTER_KEY;
-	const ledger = new Ledger(path, key, {
-		takeoverAfterSecs: options.takeoverAfterSecs ?? 600,
-		deliveryBackoffSecs: options.deliveryBackoffSecs ?? 30,
-	});
-	const store = new Store(ledger, key, options.maxPending ?? 5000);
-	const cluster = new Cluster(store.gossip, {
-		key,
-		listenPort: options.listenPort ?? 0,
-		peers: options.peers ?? [],
-		swarm: false,
-	});
+export function openStore({
+	ledgerPath,
+	key = CLUSTER_KEY,
+	listenPort,
+	peers,
+	maxPending,
+	takeoverAfterSecs,
+	deliveryBackoffSecs,
+}: TestOptions = {}): Opened {
+	const path = ledgerPath ?? join(mkdtempSync(join(tmpdir(), "tbd-")), "ledger.db");
+	const ledger = new Ledger(path, key, { takeoverAfterSecs, deliveryBackoffSecs });
+	const store = new Store(ledger, key, maxPending);
+	const cluster = new Cluster(store.gossip, { key, listenPort, peers, swarm: false });
 
 	return {
 		store,
 		stop: () => {
 			cluster.close();
 			store.close();
-			if (!options.ledger) {
+			if (ledgerPath === undefined) {
 				rmSync(dirname(path), { recursive: true, force: true });
 			}
 		},

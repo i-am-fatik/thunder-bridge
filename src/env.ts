@@ -1,6 +1,10 @@
-export function whole(name: string, fallback: number): number {
+export function whole(name: string): number | undefined {
 	const raw = process.env[name];
-	const value = raw === undefined || raw === "" ? fallback : Number(raw);
+	if (raw === undefined || raw === "") {
+		return undefined;
+	}
+
+	const value = Number(raw);
 	if (!Number.isInteger(value) || value < 0) {
 		throw new Error(`${name} must be a whole number, zero or more`);
 	}
@@ -8,8 +12,8 @@ export function whole(name: string, fallback: number): number {
 	return value;
 }
 
-export function positive(name: string, fallback: number): number {
-	const value = whole(name, fallback);
+export function positive(name: string): number | undefined {
+	const value = whole(name);
 	if (value === 0) {
 		throw new Error(`${name} must be greater than zero`);
 	}
@@ -17,16 +21,24 @@ export function positive(name: string, fallback: number): number {
 	return value;
 }
 
-export function bearer(name: string): string | null {
-	const raw = (process.env[name] ?? "").trim();
-
-	return raw === "" ? null : raw;
+export function secsToMs(secs: number | undefined): number | undefined {
+	return secs === undefined ? undefined : secs * 1000;
 }
 
-export function allowed(name: string): Set<string> | null {
+export function daysToSecs(days: number | undefined): number | undefined {
+	return days === undefined ? undefined : days * 86_400;
+}
+
+export function bearer(name: string): string | undefined {
+	const raw = (process.env[name] ?? "").trim();
+
+	return raw === "" ? undefined : raw;
+}
+
+export function allowed(name: string): Set<string> | undefined {
 	const raw = (process.env[name] ?? "").trim();
 	if (raw === "") {
-		return null;
+		return undefined;
 	}
 
 	return new Set(raw.split(",").map((one) => one.trim().toLowerCase()));

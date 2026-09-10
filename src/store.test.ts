@@ -157,13 +157,13 @@ test("settling a payment owes its webhooks and takes it off the worklist", () =>
 
 test("a webhook owed outlives the app that settled the payment", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-restart-"));
-	const ledger = join(directory, "ledger.db");
-	const first = openStore({ ledger });
+	const ledgerPath = join(directory, "ledger.db");
+	const first = openStore({ ledgerPath });
 	const one = first.store.insert(payment(1));
 	first.store.paid(one.id, preimage(1));
 	first.stop();
 
-	const second = openStore({ ledger });
+	const second = openStore({ ledgerPath });
 	try {
 		expect(second.store.dueDeliveries(10, 0).map((hook) => hook.id)).toEqual([one.id]);
 	} finally {
@@ -426,14 +426,14 @@ test("a peer that names no accepted facts is still heard on the ones it does nam
 
 test("the worklist a rollback used to read is gone, and the stamp says so", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-retired-"));
-	const ledger = join(directory, "ledger.db");
-	const { store, stop } = openStore({ ledger });
+	const ledgerPath = join(directory, "ledger.db");
+	const { store, stop } = openStore({ ledgerPath });
 	store.insert(payment(0));
 	stop();
 
-	const opened = new DatabaseSync(ledger);
+	const opened = new DatabaseSync(ledgerPath);
 	try {
-		expect(schemaVersionOf(ledger)).toBe(3);
+		expect(schemaVersionOf(ledgerPath)).toBe(3);
 		const tables = opened
 			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending'")
 			.all();
@@ -446,12 +446,12 @@ test("the worklist a rollback used to read is gone, and the stamp says so", () =
 
 test("a ledger written before accepted facts existed keeps its worklist", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-adopt-"));
-	const ledger = join(directory, "ledger.db");
-	const before = openStore({ ledger });
+	const ledgerPath = join(directory, "ledger.db");
+	const before = openStore({ ledgerPath });
 	const waiting = before.store.insert(payment(0));
 	before.stop();
 
-	const written = new DatabaseSync(ledger);
+	const written = new DatabaseSync(ledgerPath);
 	written.exec(
 		"CREATE TABLE pending (id TEXT PRIMARY KEY, expiresAt INTEGER NOT NULL, dueAt INTEGER, announced INTEGER NOT NULL DEFAULT 0, payment TEXT NOT NULL)",
 	);
@@ -464,7 +464,7 @@ test("a ledger written before accepted facts existed keeps its worklist", () => 
 	written.exec("PRAGMA user_version = 1");
 	written.close();
 
-	const { store, stop } = openStore({ ledger });
+	const { store, stop } = openStore({ ledgerPath });
 	try {
 		expect(store.get(waiting.id)?.paymentHash).toBe(waiting.paymentHash);
 		expect(store.info().pending).toBe(1);
@@ -476,19 +476,19 @@ test("a ledger written before accepted facts existed keeps its worklist", () => 
 
 test("a ledger from before the schema was versioned keeps its payments and gets stamped", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-unstamped-"));
-	const ledger = join(directory, "ledger.db");
-	const before = openStore({ ledger });
+	const ledgerPath = join(directory, "ledger.db");
+	const before = openStore({ ledgerPath });
 	const waiting = before.store.insert(payment(0));
 	before.stop();
 
-	const unstamped = new DatabaseSync(ledger);
+	const unstamped = new DatabaseSync(ledgerPath);
 	unstamped.exec("PRAGMA user_version = 0");
 	unstamped.close();
 
-	const { store, stop } = openStore({ ledger });
+	const { store, stop } = openStore({ ledgerPath });
 	try {
 		expect(store.get(waiting.id)).not.toBeNull();
-		expect(schemaVersionOf(ledger)).toBe(3);
+		expect(schemaVersionOf(ledgerPath)).toBe(3);
 	} finally {
 		stop();
 		rmSync(directory, { recursive: true, force: true });
@@ -497,13 +497,13 @@ test("a ledger from before the schema was versioned keeps its payments and gets 
 
 test("a ledger a newer build wrote is refused instead of opened", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-newer-"));
-	const ledger = join(directory, "ledger.db");
-	const newer = new DatabaseSync(ledger);
+	const ledgerPath = join(directory, "ledger.db");
+	const newer = new DatabaseSync(ledgerPath);
 	newer.exec("PRAGMA user_version = 99");
 	newer.close();
 
 	try {
-		expect(() => openStore({ ledger })).toThrow(/schema 99/);
+		expect(() => openStore({ ledgerPath })).toThrow(/schema 99/);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
 	}
@@ -511,17 +511,17 @@ test("a ledger a newer build wrote is refused instead of opened", () => {
 
 test("a stamped ledger still rebuilds an index that went missing", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-index-"));
-	const ledger = join(directory, "ledger.db");
-	openStore({ ledger }).stop();
+	const ledgerPath = join(directory, "ledger.db");
+	openStore({ ledgerPath }).stop();
 
-	const damaged = new DatabaseSync(ledger);
+	const damaged = new DatabaseSync(ledgerPath);
 	damaged.exec("DROP INDEX schedule_by_due");
 	damaged.close();
-	expect(indexesOf(ledger)).not.toContain("schedule_by_due");
+	expect(indexesOf(ledgerPath)).not.toContain("schedule_by_due");
 
-	const { stop } = openStore({ ledger });
+	const { stop } = openStore({ ledgerPath });
 	try {
-		expect(indexesOf(ledger)).toContain("schedule_by_due");
+		expect(indexesOf(ledgerPath)).toContain("schedule_by_due");
 	} finally {
 		stop();
 		rmSync(directory, { recursive: true, force: true });
@@ -548,15 +548,15 @@ function schemaVersionOf(path: string): number {
 
 test("a ledger left over from before the request cache changed shape still boots", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-stale-"));
-	const ledger = join(directory, "ledger.db");
-	const stale = new DatabaseSync(ledger);
+	const ledgerPath = join(directory, "ledger.db");
+	const stale = new DatabaseSync(ledgerPath);
 	stale.exec(
 		"CREATE TABLE requests (key TEXT PRIMARY KEY, paymentId TEXT NOT NULL, storedAt INTEGER NOT NULL)",
 	);
 	stale.prepare("INSERT INTO requests VALUES (?, ?, ?)").run("stale", "payment", 1_700_000_000);
 	stale.close();
 
-	const { store, stop } = openStore({ ledger });
+	const { store, stop } = openStore({ ledgerPath });
 	try {
 		expect(store.claim("stale", "fingerprint", 60)).toEqual({ state: "mine" });
 	} finally {
@@ -622,12 +622,12 @@ test("a payment that sealed nothing leaves nothing behind at all", () => {
 
 test("a record written before callers existed reads back as anonymous, not as nobody's", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-before-callers-"));
-	const ledger = join(directory, "ledger.db");
-	const before = openStore({ ledger });
+	const ledgerPath = join(directory, "ledger.db");
+	const before = openStore({ ledgerPath });
 	const mine = before.store.insert(payment(0));
 	before.stop();
 
-	const written = new DatabaseSync(ledger);
+	const written = new DatabaseSync(ledgerPath);
 	const held = written.prepare("SELECT payment FROM accepted WHERE id = ?").get(mine.id) as {
 		payment: string;
 	};
@@ -638,7 +638,7 @@ test("a record written before callers existed reads back as anonymous, not as no
 		.run(JSON.stringify(asItUsedToBe), mine.id);
 	written.close();
 
-	const after = openStore({ ledger });
+	const after = openStore({ ledgerPath });
 	try {
 		expect(after.store.get(mine.id)?.caller).toBeNull();
 	} finally {

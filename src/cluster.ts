@@ -11,9 +11,9 @@ const RECONNECT_DELAY_MS = 1000;
 
 export type ClusterOptions = {
 	key: Uint8Array;
-	listenPort: number;
-	peers: string[];
-	swarm: boolean;
+	listenPort?: number;
+	peers?: string[];
+	swarm?: boolean;
 };
 
 export class Cluster {
@@ -24,11 +24,11 @@ export class Cluster {
 	private readonly swarm: Hyperswarm | null;
 	private closed = false;
 
-	constructor(gossip: Gossip, options: ClusterOptions) {
+	constructor(gossip: Gossip, { key, listenPort = 0, peers = [], swarm = true }: ClusterOptions) {
 		this.gossip = gossip;
-		this.listener = options.listenPort > 0 ? this.listen(options.listenPort) : null;
-		this.swarm = options.swarm ? this.join(options.key) : null;
-		for (const peer of options.peers) {
+		this.listener = listenPort > 0 ? this.listen(listenPort) : null;
+		this.swarm = swarm ? this.join(key) : null;
+		for (const peer of peers) {
 			this.dial(peer);
 		}
 		this.timers.add(setInterval(() => resync(gossip), RESYNC_INTERVAL_MS).unref());

@@ -37,7 +37,7 @@ export class Store {
 	private readonly maxPending: number;
 	private convergedAt: number | null = null;
 
-	constructor(ledger: Ledger, key: Uint8Array, maxPending: number) {
+	constructor(ledger: Ledger, key: Uint8Array, maxPending = 5000) {
 		this.ledger = ledger;
 		this.key = key;
 		this.maxPending = maxPending;

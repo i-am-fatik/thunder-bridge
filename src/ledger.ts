@@ -186,7 +186,7 @@ export type Taken = { payment: Payment; facts: Facts };
 
 export type Watermarks = Record<Source, Record<string, number>>;
 
-export type Tuning = { takeoverAfterSecs: number; deliveryBackoffSecs: number };
+export type Tuning = { takeoverAfterSecs?: number; deliveryBackoffSecs?: number };
 
 export type Retry = "scheduled" | "abandoned";
 
@@ -268,16 +268,22 @@ export class Ledger {
 	readonly origin: string;
 	private readonly db: DatabaseSync;
 	private readonly key: Uint8Array;
-	private readonly tuning: Tuning;
+	private readonly takeoverAfterSecs: number;
+	private readonly deliveryBackoffSecs: number;
 	private readonly statements: Statements;
 
-	constructor(path: string, key: Uint8Array, tuning: Tuning) {
+	constructor(
+		path: string,
+		key: Uint8Array,
+		{ takeoverAfterSecs = 600, deliveryBackoffSecs = 30 }: Tuning = {},
+	) {
 		this.db = new DatabaseSync(path);
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec("PRAGMA foreign_keys = ON");
 		this.migrate();
 		this.key = key;
-		this.tuning = tuning;
+		this.takeoverAfterSecs = takeoverAfterSecs;
+		this.deliveryBackoffSecs = deliveryBackoffSecs;
 
 		this.db
 			.prepare("INSERT INTO meta (key, value) VALUES ('origin', ?) ON CONFLICT(key) DO NOTHING")
@@ -555,7 +561,7 @@ export class Ledger {
 		const rank =
 			createHash("sha256").update(`${id}\x00${this.origin}`).digest().readUInt32BE(0) %
 			TAKEOVER_SPREAD;
-		const after = this.tuning.takeoverAfterSecs;
+		const after = this.takeoverAfterSecs;
 
 		return unixNow() + after + Math.max(1, Math.round(after / TAKEOVER_SPREAD)) * rank;
 	}
@@ -664,7 +670,7 @@ export class Ledger {
 		}
 
 		const attempts = tried.attempts + 1;
-		const nextAt = unixNow() + this.tuning.deliveryBackoffSecs * attempts;
+		const nextAt = unixNow() + this.deliveryBackoffSecs * attempts;
 		const abandoned = nextAt > this.retryUntil(owed.id, tried.owedAt);
 		this.statements.undelivered.run(attempts, abandoned ? null : nextAt, owed.origin, owed.seq);
 
@@ -1096,7 +1102,7 @@ export class Ledger {
 				.update(`${fact.id}\x00${fact.url}\x00${this.origin}`)
 				.digest()
 				.readUInt32BE(0) % TAKEOVER_SPREAD;
-		const after = this.tuning.takeoverAfterSecs;
+		const after = this.takeoverAfterSecs;
 
 		return fact.owedAt + after + Math.max(1, Math.round(after / TAKEOVER_SPREAD)) * rank;
 	}

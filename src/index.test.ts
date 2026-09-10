@@ -44,20 +44,12 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 	const opened = openStore();
 	const service = await start(
 		{
-			port: 0,
-			eagerDelayMs: 3000,
-			pollsPerSecond: 5,
-			workPerTick: 50,
-			verifyHosts: null,
-			verifyChallenge: true,
-			clientKeys: null,
-			mints: true,
-			tickStallMs: 30_000,
-			drainTimeoutMs,
-			keepSealedSecs: 90 * 86_400,
-			maxReplay: 100,
-			token,
 			key: CLUSTER_KEY,
+			port: 0,
+			mints: true,
+			token,
+			eagerDelayMs: 3000,
+			drainTimeoutMs,
 		},
 		opened.store,
 	);
@@ -76,21 +68,11 @@ async function runningOn(where: { host?: string; socket?: string }): Promise<App
 	const opened = openStore();
 	const service = await start(
 		{
+			key: CLUSTER_KEY,
 			port: 0,
 			...where,
-			eagerDelayMs: 3000,
-			pollsPerSecond: 5,
-			workPerTick: 50,
-			verifyHosts: null,
-			verifyChallenge: true,
-			clientKeys: null,
 			mints: true,
-			tickStallMs: 30_000,
-			drainTimeoutMs: 10_000,
-			keepSealedSecs: 90 * 86_400,
-			maxReplay: 100,
-			token: null,
-			key: CLUSTER_KEY,
+			eagerDelayMs: 3000,
 		},
 		opened.store,
 	);
@@ -109,20 +91,11 @@ async function runningWithoutTheVerifyChallenge(): Promise<App> {
 	const opened = openStore();
 	const service = await start(
 		{
-			port: 0,
-			eagerDelayMs: 3000,
-			pollsPerSecond: 5,
-			workPerTick: 50,
-			verifyHosts: null,
-			verifyChallenge: false,
-			clientKeys: null,
-			mints: true,
-			tickStallMs: 30_000,
-			drainTimeoutMs: 10_000,
-			keepSealedSecs: 90 * 86_400,
-			maxReplay: 100,
-			token: null,
 			key: CLUSTER_KEY,
+			port: 0,
+			mints: true,
+			verifyChallenge: false,
+			eagerDelayMs: 3000,
 		},
 		opened.store,
 	);
@@ -805,20 +778,10 @@ async function runningWith(overrides: Partial<Options> & { maxPending?: number }
 	const opened = openStore(maxPending === undefined ? {} : { maxPending });
 	const service = await start(
 		{
-			port: 0,
-			eagerDelayMs: 3000,
-			pollsPerSecond: 5,
-			workPerTick: 50,
-			verifyHosts: null,
-			verifyChallenge: true,
-			clientKeys: null,
-			mints: true,
-			tickStallMs: 30_000,
-			drainTimeoutMs: 10_000,
-			keepSealedSecs: 90 * 86_400,
-			maxReplay: 100,
-			token: null,
 			key: CLUSTER_KEY,
+			port: 0,
+			mints: true,
+			eagerDelayMs: 3000,
 			...serving,
 		},
 		opened.store,
@@ -1094,20 +1057,11 @@ async function pinnedTo(allowed: string[]): Promise<App> {
 	const opened = openStore();
 	const service = await start(
 		{
-			port: 0,
-			eagerDelayMs: 3000,
-			pollsPerSecond: 5,
-			workPerTick: 50,
-			verifyHosts: new Set(allowed),
-			verifyChallenge: true,
-			clientKeys: null,
-			mints: true,
-			tickStallMs: 30_000,
-			drainTimeoutMs: 10_000,
-			keepSealedSecs: 90 * 86_400,
-			maxReplay: 100,
-			token: null,
 			key: CLUSTER_KEY,
+			port: 0,
+			mints: true,
+			verifyHosts: new Set(allowed),
+			eagerDelayMs: 3000,
 		},
 		opened.store,
 	);

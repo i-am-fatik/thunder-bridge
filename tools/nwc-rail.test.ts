@@ -32,20 +32,11 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 		closeStore = opened.stop;
 		gateway = await start(
 			{
-				port: 0,
-				eagerDelayMs: 3000,
-				pollsPerSecond: 5,
-				workPerTick: 50,
-				verifyHosts: null,
-				verifyChallenge: false,
-				clientKeys: null,
-				mints: true,
-				tickStallMs: 30_000,
-				drainTimeoutMs: 10_000,
-				keepSealedSecs: 90 * 86_400,
-				maxReplay: 100,
-				token: null,
 				key: CLUSTER_KEY,
+				port: 0,
+				mints: true,
+				verifyChallenge: false,
+				eagerDelayMs: 3000,
 			},
 			opened.store,
 		);

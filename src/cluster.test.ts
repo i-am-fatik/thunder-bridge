@@ -386,15 +386,15 @@ test("an instance on a new key refuses the facts the old key signed, which is wh
 
 test("a ledger rolled onto a new key keeps every payment, because the facts are re-signed", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-rolled-"));
-	const ledger = join(directory, "ledger.db");
+	const ledgerPath = join(directory, "ledger.db");
 	const NEXT_KEY = Buffer.from("22".repeat(32), "hex");
 
-	const before = openStore({ ledger });
+	const before = openStore({ ledgerPath });
 	const taken = before.store.insert(payment(1));
 	before.store.paid(taken.id, preimage(1));
 	before.stop();
 
-	const after = openStore({ ledger, key: NEXT_KEY });
+	const after = openStore({ ledgerPath, key: NEXT_KEY });
 	try {
 		expect(after.store.get(taken.id)?.status).toBe("paid");
 
@@ -408,16 +408,16 @@ test("a ledger rolled onto a new key keeps every payment, because the facts are 
 
 test("a caller's payment replicates across a rotation, and the old key opens nothing", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-resigned-"));
-	const ledger = join(directory, "ledger.db");
+	const ledgerPath = join(directory, "ledger.db");
 	const NEXT_KEY = Buffer.from("33".repeat(32), "hex");
 	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
 	const owner = (await callerKey("rail_rolled_8c2f5a1d")).publicKeyHex;
 
-	const before = openStore({ ledger });
+	const before = openStore({ ledgerPath });
 	const taken = before.store.insert({ ...payment(2), caller: owner });
 	before.stop();
 
-	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const rolled = openStore({ ledgerPath, key: NEXT_KEY });
 	const { facts } = rolled.store.gossip.since(nothingSeen);
 	rolled.stop();
 
@@ -437,15 +437,15 @@ test("a caller's payment replicates across a rotation, and the old key opens not
 
 test("a payment nobody signed for stops replicating after a rotation, because the key named it", () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-anonymous-"));
-	const ledger = join(directory, "ledger.db");
+	const ledgerPath = join(directory, "ledger.db");
 	const NEXT_KEY = Buffer.from("44".repeat(32), "hex");
 	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
 
-	const before = openStore({ ledger });
+	const before = openStore({ ledgerPath });
 	const taken = before.store.insert(payment(3));
 	before.stop();
 
-	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const rolled = openStore({ ledgerPath, key: NEXT_KEY });
 	const { facts } = rolled.store.gossip.since(nothingSeen);
 	const peer = openStore({ key: NEXT_KEY });
 	try {
@@ -510,12 +510,12 @@ test("a fact named after one caller but claiming another is refused, key or no k
 
 test("every kind of fact survives a rotation, because re-signing reads the same fields the signing did", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "tbd-allkinds-"));
-	const ledger = join(directory, "ledger.db");
+	const ledgerPath = join(directory, "ledger.db");
 	const NEXT_KEY = Buffer.from("55".repeat(32), "hex");
 	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
 	const owner = (await callerKey("rail_allkinds_1f7b")).publicKeyHex;
 
-	const before = openStore({ ledger });
+	const before = openStore({ ledgerPath });
 	const mine = before.store.insert({
 		...payment(4),
 		caller: owner,
@@ -528,7 +528,7 @@ test("every kind of fact survives a rotation, because re-signing reads the same 
 	expect(before.store.info().rows).toMatchObject({ accepted: 1, paid: 1, outbox: 1, delivered: 1 });
 	before.stop();
 
-	const rolled = openStore({ ledger, key: NEXT_KEY });
+	const rolled = openStore({ ledgerPath, key: NEXT_KEY });
 	const { facts } = rolled.store.gossip.since(nothingSeen);
 	rolled.stop();
 
