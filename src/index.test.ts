@@ -1750,3 +1750,52 @@ function statusOverSocket(socketPath: string, path: string): Promise<number> {
 		asked.end();
 	});
 }
+
+function specServedAs(app: App, headers: Record<string, string>): Promise<string[]> {
+	return new Promise((settle, fail) => {
+		httpRequest(
+			{ host: "127.0.0.1", port: app.service.at, path: "/openapi.yaml", headers },
+			(answer) => {
+				let body = "";
+				answer.setEncoding("utf8");
+				answer.on("data", (chunk: string) => {
+					body += chunk;
+				});
+				answer.on("end", () => {
+					settle([...body.matchAll(/^  - url: (.+)$/gm)].map((found) => found[1] as string));
+				});
+			},
+		)
+			.on("error", fail)
+			.end();
+	});
+}
+
+test("the spec this gateway serves names itself first, so the docs page tries requests against the origin it came from", async () => {
+	const app = await running();
+	try {
+		const servers = await specServedAs(app, { host: `127.0.0.1:${app.service.at}` });
+
+		expect(servers[0]).toBe(`http://127.0.0.1:${app.service.at}`);
+		expect(servers.filter((url) => url === "http://localhost:3000")).toHaveLength(1);
+	} finally {
+		app.stop();
+	}
+});
+
+test("behind a proxy the spec names the outside origin, and names it once", async () => {
+	const app = await running();
+	try {
+		const servers = await specServedAs(app, {
+			host: "public.thunder-bridge.agora.gripe",
+			"x-forwarded-proto": "https",
+		});
+
+		expect(servers[0]).toBe("https://public.thunder-bridge.agora.gripe");
+		expect(
+			servers.filter((url) => url === "https://public.thunder-bridge.agora.gripe"),
+		).toHaveLength(1);
+	} finally {
+		app.stop();
+	}
+});

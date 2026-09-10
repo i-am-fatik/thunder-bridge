@@ -509,7 +509,7 @@ async function route(
 		return readiness(incoming, store, serving.token, vitals);
 	}
 	if (path === "/openapi.yaml") {
-		return spec();
+		return spec(incoming);
 	}
 	if (path === "/docs") {
 		return rendered();
@@ -884,8 +884,33 @@ function unreadable(error: unknown): Response {
 	throw error;
 }
 
-function spec(): Response {
-	return new Response(SPEC, { headers: { "content-type": "application/yaml" } });
+function spec(incoming: IncomingMessage): Response {
+	const here = originOf(incoming);
+
+	return new Response(here === null ? SPEC : withThisGatewayFirst(SPEC, here), {
+		headers: { "content-type": "application/yaml" },
+	});
+}
+
+function originOf(incoming: IncomingMessage): string | null {
+	const host = incoming.headers.host;
+	if (host === undefined) {
+		return null;
+	}
+	const forwarded = incoming.headers["x-forwarded-proto"];
+	const scheme = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim();
+
+	return `${scheme === "https" ? "https" : "http"}://${host}`;
+}
+
+function withThisGatewayFirst(spec: string, here: string): string {
+	return spec.replace(/^servers:\n((?:  .*\n)+)/m, (_listed, entries: string) => {
+		const others = entries
+			.split(/(?=^  - url: )/m)
+			.filter((entry) => !entry.startsWith(`  - url: ${here}\n`));
+
+		return `servers:\n  - url: ${here}\n    description: This gateway, the one serving this page\n${others.join("")}`;
+	});
 }
 
 function rendered(): Response {
