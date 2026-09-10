@@ -10,6 +10,7 @@ recipe below was found by the TypeScript compiler and links to its own entry in
 | [A price named in dollars, paid in bitcoin](#fiat-checkout) | `rails.lightning` | Charge 0.21 USD without ever converting it yourself |
 | [A lightning address of your own](#pay-me) | `rails.lightning` | Print one QR that never expires and lets the payer choose what to give |
 | [Pick a wait back up after a reload](#resume-a-wait) | `rails.lightning` | Carry on waiting for an invoice you already minted, holding nothing but its id |
+| [Run the gateway in your own process](#run-a-gateway) | `gateway` | Keep a gateway inside a runtime you already have, on a unix socket, so nothing new needs hosting |
 | [Tip jar on a static page](#tip-jar) | `rails.lightning` | Take a tip with no backend of your own and no wallet of your own |
 | [Watch every payment made to one place](#watch-a-place) | `rails.lightning` | See the money arrive at an endpoint nobody is standing in front of |
 
@@ -112,6 +113,37 @@ export async function resumeAWait(
 - payment reads the invoice back and the QR redraws from its own bolt11
 - settled opens the socket again, so a payment made while nobody watched still arrives
 - the proof takes the invoice as it was read, because nothing it checks changes when the money lands
+
+## <a id="run-a-gateway"></a>Run the gateway in your own process
+
+Keep a gateway inside a runtime you already have, on a unix socket, so nothing new needs hosting. It lives in `examples/run-a-gateway/main.ts`, and what it claims is asserted in `examples/run-a-gateway/main.test.ts`.
+
+<pre><code>import { type Service, start } from "../../src/index.ts";
+import { Ledger } from "../../src/ledger.ts";
+import { Store } from "../../src/store.ts";
+
+export async function runAGateway(
+  key: Uint8Array,
+  socket = "./gateway.sock",
+  ledgerPath = "./ledger.db",
+): Promise&lt;Service&gt; {
+  const ledger = new Ledger(ledgerPath, key);
+  const store = new Store(ledger, key);
+  const gateway = await start({ key, socket, mints: true }, store);
+
+  return {
+    at: gateway.at,
+    stop: async () =&gt; {
+      await gateway.stop();
+      store.close();
+    },
+  };
+}</code></pre>
+
+- a ledger, a store and start are the whole boot, and only the cluster key has no default
+- a unix socket opens no TCP port, so the file's permissions are the only way in
+- mints is opt-in, a gateway that only watches never sees an address or an amount
+- the key must outlive the process, because every fact in the ledger is signed under it
 
 ## <a id="tip-jar"></a>Tip jar on a static page
 

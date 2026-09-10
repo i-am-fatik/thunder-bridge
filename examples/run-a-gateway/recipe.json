@@ -1,0 +1,11 @@
+{
+  "title": "Run the gateway in your own process",
+  "intent": "Keep a gateway inside a runtime you already have, on a unix socket, so nothing new needs hosting",
+  "rail": "gateway",
+  "shows": [
+    "a ledger, a store and start are the whole boot, and only the cluster key has no default",
+    "a unix socket opens no TCP port, so the file's permissions are the only way in",
+    "mints is opt-in, a gateway that only watches never sees an address or an amount",
+    "the key must outlive the process, because every fact in the ledger is signed under it"
+  ]
+}

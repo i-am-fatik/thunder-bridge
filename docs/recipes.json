@@ -248,6 +248,20 @@
 			]
 		},
 		{
+			"slug": "run-a-gateway",
+			"title": "Run the gateway in your own process",
+			"intent": "Keep a gateway inside a runtime you already have, on a unix socket, so nothing new needs hosting",
+			"rail": "gateway",
+			"shows": [
+				"a ledger, a store and start are the whole boot, and only the cluster key has no default",
+				"a unix socket opens no TCP port, so the file's permissions are the only way in",
+				"mints is opt-in, a gateway that only watches never sees an address or an amount",
+				"the key must outlive the process, because every fact in the ledger is signed under it"
+			],
+			"source": "import { type Service, start } from \"../../src/index.ts\";\nimport { Ledger } from \"../../src/ledger.ts\";\nimport { Store } from \"../../src/store.ts\";\n\nexport async function runAGateway(\n  key: Uint8Array,\n  socket = \"./gateway.sock\",\n  ledgerPath = \"./ledger.db\",\n): Promise<Service> {\n  const ledger = new Ledger(ledgerPath, key);\n  const store = new Store(ledger, key);\n  const gateway = await start({ key, socket, mints: true }, store);\n\n  return {\n    at: gateway.at,\n    stop: async () => {\n      await gateway.stop();\n      store.close();\n    },\n  };\n}\n",
+			"calls": []
+		},
+		{
 			"slug": "tip-jar",
 			"title": "Tip jar on a static page",
 			"intent": "Take a tip with no backend of your own and no wallet of your own",
