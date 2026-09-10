@@ -2,6 +2,176 @@
 	"reference": "api.md",
 	"recipes": [
 		{
+			"slug": "fiat-checkout",
+			"title": "A price named in dollars, paid in bitcoin",
+			"intent": "Charge 0.21 USD without ever converting it yourself",
+			"rail": "rails.lightning",
+			"shows": [
+				"the price stays in dollars and becomes millisatoshi at the moment the invoice is minted",
+				"the rate is the median of the venues you name, refused when they disagree by more than you allow",
+				"the spread over the rate is yours to set, because a lightning invoice lives an hour",
+				"everything after the price is the tip jar unchanged, so pricing in fiat costs the flow nothing"
+			],
+			"source": "import { type Charge, fiat, ThunderBridge } from \"thunder-bridge\";\nimport { coinbase, kraken, medianOf } from \"thunder-bridge/price\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport async function checkout(\n  into: { innerHTML: string },\n  charge: Charge = {\n    paidTo: [\"iamfatik@blink.sv\"],\n    amount: fiat(\"0.21\", \"USD\", {\n      rate: medianOf([coinbase(), kraken()], { maxSpreadBps: 50 }),\n      spreadBps: 100,\n    }),\n  },\n  via = DEMO_GATEWAY,\n): Promise<string | null> {\n  const gateway = new ThunderBridge(via);\n\n  const asked = await gateway.requestPayment(charge);\n\n  into.innerHTML = asked.qr;\n\n  await asked.paid();\n\n  return await asked.prove();\n}\n",
+			"calls": [
+				{
+					"name": "Charge",
+					"line": 1,
+					"anchor": "thunder-bridge-interface-charge"
+				},
+				{
+					"name": "fiat",
+					"line": 1,
+					"anchor": "thunder-bridge-function-fiat"
+				},
+				{
+					"name": "ThunderBridge",
+					"line": 1,
+					"anchor": "thunder-bridge-class-thunderbridge"
+				},
+				{
+					"name": "coinbase",
+					"line": 2,
+					"anchor": "thunder-bridge-price-function-coinbase"
+				},
+				{
+					"name": "kraken",
+					"line": 2,
+					"anchor": "thunder-bridge-price-function-kraken"
+				},
+				{
+					"name": "medianOf",
+					"line": 2,
+					"anchor": "thunder-bridge-price-function-medianof"
+				},
+				{
+					"name": "Charge",
+					"line": 8,
+					"anchor": "thunder-bridge-interface-charge"
+				},
+				{
+					"name": "fiat",
+					"line": 10,
+					"anchor": "thunder-bridge-function-fiat"
+				},
+				{
+					"name": "coinbase",
+					"line": 11,
+					"anchor": "thunder-bridge-price-function-coinbase"
+				},
+				{
+					"name": "kraken",
+					"line": 11,
+					"anchor": "thunder-bridge-price-function-kraken"
+				},
+				{
+					"name": "medianOf",
+					"line": 11,
+					"anchor": "thunder-bridge-price-function-medianof"
+				},
+				{
+					"name": "ThunderBridge",
+					"line": 17,
+					"anchor": "thunder-bridge-class-thunderbridge"
+				},
+				{
+					"name": "ThunderBridge.requestPayment",
+					"line": 19,
+					"anchor": "thunder-bridge-class-thunderbridge-requestpayment"
+				},
+				{
+					"name": "PaymentRequest.qr",
+					"line": 21,
+					"anchor": "thunder-bridge-interface-paymentrequest"
+				},
+				{
+					"name": "PaymentRequest.paid",
+					"line": 23,
+					"anchor": "thunder-bridge-interface-paymentrequest"
+				},
+				{
+					"name": "PaymentRequest.prove",
+					"line": 25,
+					"anchor": "thunder-bridge-interface-paymentrequest"
+				}
+			]
+		},
+		{
+			"slug": "resume-a-wait",
+			"title": "Pick a wait back up after a reload",
+			"intent": "Carry on waiting for an invoice you already minted, holding nothing but its id",
+			"rail": "rails.lightning",
+			"shows": [
+				"the id is the whole handle, so a page that reloads keeps nothing else",
+				"payment reads the invoice back and the QR redraws from its own bolt11",
+				"settled opens the socket again, so a payment made while nobody watched still arrives",
+				"the proof takes the invoice as it was read, because nothing it checks changes when the money lands"
+			],
+			"source": "import { proveSettlement, ThunderBridge } from \"thunder-bridge\";\nimport { invoiceToSvg } from \"thunder-bridge/qr\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport async function resumeAWait(\n  into: { innerHTML: string },\n  id: string,\n  via = DEMO_GATEWAY,\n): Promise<string | null> {\n  const gateway = new ThunderBridge(via);\n\n  const asked = await gateway.payment(id);\n  if (asked?.kind !== \"minted\") {\n    throw new Error(`${id} is not an invoice this gateway minted`);\n  }\n\n  into.innerHTML = invoiceToSvg(asked.bolt11);\n\n  await gateway.settled(id);\n\n  return await proveSettlement(asked, { paidTo: [asked.lnAddress], amountMsat: asked.amountMsat });\n}\n",
+			"calls": [
+				{
+					"name": "proveSettlement",
+					"line": 1,
+					"anchor": "thunder-bridge-function-provesettlement"
+				},
+				{
+					"name": "ThunderBridge",
+					"line": 1,
+					"anchor": "thunder-bridge-class-thunderbridge"
+				},
+				{
+					"name": "invoiceToSvg",
+					"line": 2,
+					"anchor": "thunder-bridge-qr-function-invoicetosvg"
+				},
+				{
+					"name": "ThunderBridge",
+					"line": 11,
+					"anchor": "thunder-bridge-class-thunderbridge"
+				},
+				{
+					"name": "ThunderBridge.payment",
+					"line": 13,
+					"anchor": "thunder-bridge-class-thunderbridge-payment"
+				},
+				{
+					"name": "MintedPayment.kind",
+					"line": 14,
+					"anchor": "thunder-bridge-interface-mintedpayment"
+				},
+				{
+					"name": "invoiceToSvg",
+					"line": 18,
+					"anchor": "thunder-bridge-qr-function-invoicetosvg"
+				},
+				{
+					"name": "MintedPayment.bolt11",
+					"line": 18,
+					"anchor": "thunder-bridge-interface-mintedpayment"
+				},
+				{
+					"name": "ThunderBridge.settled",
+					"line": 20,
+					"anchor": "thunder-bridge-class-thunderbridge-settled"
+				},
+				{
+					"name": "MintedPayment.amountMsat",
+					"line": 22,
+					"anchor": "thunder-bridge-interface-mintedpayment"
+				},
+				{
+					"name": "MintedPayment.lnAddress",
+					"line": 22,
+					"anchor": "thunder-bridge-interface-mintedpayment"
+				},
+				{
+					"name": "proveSettlement",
+					"line": 22,
+					"anchor": "thunder-bridge-function-provesettlement"
+				}
+			]
+		},
+		{
 			"slug": "tip-jar",
 			"title": "Tip jar on a static page",
 			"intent": "Take a tip with no backend of your own and no wallet of your own",

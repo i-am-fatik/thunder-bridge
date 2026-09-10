@@ -1,0 +1,11 @@
+{
+  "title": "Pick a wait back up after a reload",
+  "intent": "Carry on waiting for an invoice you already minted, holding nothing but its id",
+  "rail": "rails.lightning",
+  "shows": [
+    "the id is the whole handle, so a page that reloads keeps nothing else",
+    "payment reads the invoice back and the QR redraws from its own bolt11",
+    "settled opens the socket again, so a payment made while nobody watched still arrives",
+    "the proof takes the invoice as it was read, because nothing it checks changes when the money lands"
+  ]
+}

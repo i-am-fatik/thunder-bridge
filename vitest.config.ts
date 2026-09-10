@@ -1,9 +1,15 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
+import { DOORS } from "./tools/api-reference.ts";
+
+const doors = [...DOORS].sort((one, other) => other.specifier.length - one.specifier.length);
+
 export default defineConfig({
 	resolve: {
-		alias: { "thunder-bridge": resolve(import.meta.dirname, "sdk/src/index.ts") },
+		alias: Object.fromEntries(
+			doors.map((door) => [door.specifier, resolve(import.meta.dirname, door.entry)]),
+		),
 	},
 	test: {
 		include: [

@@ -1,0 +1,11 @@
+{
+  "title": "A price named in dollars, paid in bitcoin",
+  "intent": "Charge 0.21 USD without ever converting it yourself",
+  "rail": "rails.lightning",
+  "shows": [
+    "the price stays in dollars and becomes millisatoshi at the moment the invoice is minted",
+    "the rate is the median of the venues you name, refused when they disagree by more than you allow",
+    "the spread over the rate is yours to set, because a lightning invoice lives an hour",
+    "everything after the price is the tip jar unchanged, so pricing in fiat costs the flow nothing"
+  ]
+}
