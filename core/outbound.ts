@@ -33,22 +33,7 @@ export type Send = (
 	at: readonly Verified[],
 ) => Promise<Response>;
 
-const throughFetch: Send = (url, sent, signal) =>
-	fetch(url, {
-		method: sent.method ?? "GET",
-		headers: sent.headers ?? {},
-		body: sent.body,
-		redirect: "manual",
-		signal,
-	});
-
-let send: Send = throughFetch;
-
-export function sendThrough(transport: Send): void {
-	send = transport;
-}
-
-export async function ask(url: string, sent: Sent = {}): Promise<Answer> {
+export async function ask(send: Send, url: string, sent: Sent = {}): Promise<Answer> {
 	const capped = AbortSignal.timeout(HTTP_TIMEOUT_MS);
 	const signal = sent.deadline ? AbortSignal.any([sent.deadline, capped]) : capped;
 

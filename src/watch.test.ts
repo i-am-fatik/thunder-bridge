@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { expect, test, vi } from "vitest";
 
 import { signingKeyFromSeed, verifyHex } from "../core/ed25519.ts";
+import type { Send } from "../core/outbound.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
 import {
@@ -33,32 +34,30 @@ const NEVER_OVERLAPPED_MS = 2000;
 type Call = { url: string; method: string; headers: Record<string, string>; body: string };
 
 function intercepting(answer: (call: Call) => Response | Promise<Response>): {
+	send: Send;
 	calls: Call[];
-	restore: () => void;
 } {
-	const real = globalThis.fetch;
 	const calls: Call[] = [];
-	globalThis.fetch = ((target: string | URL | Request, options?: RequestInit) => {
+	const send: Send = async (url, sent) => {
 		const call = {
-			url: String(target),
-			method: options?.method ?? "GET",
-			headers: (options?.headers as Record<string, string>) ?? {},
-			body: String(options?.body ?? ""),
+			url,
+			method: sent.method ?? "GET",
+			headers: sent.headers ?? {},
+			body: sent.body ?? "",
 		};
 		calls.push(call);
-		return Promise.resolve(answer(call));
-	}) as typeof fetch;
+		return answer(call);
+	};
 
-	return { calls, restore: () => void (globalThis.fetch = real) };
+	return { send, calls };
 }
 
-function counting(answer: (url: string) => Response): { peak: () => number; restore: () => void } {
-	const real = globalThis.fetch;
+function counting(answer: (url: string) => Response): { send: Send; peak: () => number } {
 	let live = 0;
 	let peak = 0;
 	let bothInFlight = () => {};
 	const overlapped = new Promise<void>((resolve) => (bothInFlight = resolve));
-	globalThis.fetch = (async (target: string | URL | Request) => {
+	const send: Send = async (url) => {
 		live += 1;
 		peak = Math.max(peak, live);
 		if (live >= 2) {
@@ -67,10 +66,10 @@ function counting(answer: (url: string) => Response): { peak: () => number; rest
 		await Promise.race([overlapped, sleep(NEVER_OVERLAPPED_MS)]);
 		live -= 1;
 
-		return answer(String(target));
-	}) as unknown as typeof fetch;
+		return answer(url);
+	};
 
-	return { peak: () => peak, restore: () => void (globalThis.fetch = real) };
+	return { send, peak: () => peak };
 }
 
 function paced(perSecond = 1000): Budget {
@@ -98,7 +97,7 @@ function payment(overrides: Partial<Payment> = {}): Payment {
 	};
 }
 
-function queueing(work: Payment[], settle: (id: string, preimage: string) => Settled) {
+function queueing(send: Send, work: Payment[], settle: (id: string, preimage: string) => Settled) {
 	const due = [...work];
 	const parked: { id: string; dueAt: number | null }[] = [];
 	const handed: string[] = [];
@@ -117,11 +116,17 @@ function queueing(work: Payment[], settle: (id: string, preimage: string) => Set
 	return {
 		parked,
 		handed,
-		watcher: { store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY } satisfies Watcher,
+		watcher: {
+			store,
+			eagerDelayMs: 5,
+			budget: paced(),
+			webhookKey: GATEWAY_KEY,
+			send,
+		} satisfies Watcher,
 	};
 }
 
-function owing(work: Delivery[]) {
+function owing(send: Send, work: Delivery[]) {
 	const due = [...work];
 	const done: string[] = [];
 	const failed: string[] = [];
@@ -139,7 +144,13 @@ function owing(work: Delivery[]) {
 	return {
 		done,
 		failed,
-		watcher: { store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY } satisfies Watcher,
+		watcher: {
+			store,
+			eagerDelayMs: 5,
+			budget: paced(),
+			webhookKey: GATEWAY_KEY,
+			send,
+		} satisfies Watcher,
 	};
 }
 
@@ -164,71 +175,55 @@ function settlesAs(won: boolean): (id: string, preimage: string) => Settled {
 
 test("an unsettled payment goes back on the queue with a later due time", async () => {
 	const wire = intercepting(() => verified(false));
-	const { parked, handed, watcher } = queueing([payment()], settlesAs(true));
+	const { parked, handed, watcher } = queueing(wire.send, [payment()], settlesAs(true));
 
-	try {
-		await tick(watcher);
+	await tick(watcher);
 
-		expect(wire.calls.map((call) => call.url)).toEqual([VERIFY_URL]);
-		expect(handed).toEqual([]);
-		expect(parked).toHaveLength(1);
-		expect(parked[0]?.dueAt).toBeGreaterThan(unixNow());
-	} finally {
-		wire.restore();
-	}
+	expect(wire.calls.map((call) => call.url)).toEqual([VERIFY_URL]);
+	expect(handed).toEqual([]);
+	expect(parked).toHaveLength(1);
+	expect(parked[0]?.dueAt).toBeGreaterThan(unixNow());
 });
 
 test("a settled payment is handed to the store with its preimage", async () => {
 	const wire = intercepting((call) =>
 		call.url === VERIFY_URL ? verified(true) : new Response(""),
 	);
-	const { parked, handed, watcher } = queueing([payment()], settlesAs(false));
+	const { parked, handed, watcher } = queueing(wire.send, [payment()], settlesAs(false));
 
-	try {
-		await tick(watcher);
+	await tick(watcher);
 
-		expect(handed).toEqual([PREIMAGE]);
-		expect(parked).toEqual([]);
-	} finally {
-		wire.restore();
-	}
+	expect(handed).toEqual([PREIMAGE]);
+	expect(parked).toEqual([]);
 });
 
 test("a payment at its expiry is asked once more and then parked for good", async () => {
 	const wire = intercepting(() => verified(false));
 	const expiring = payment({ createdAt: unixNow() - 3600, expiresAt: unixNow() });
-	const { parked, watcher } = queueing([expiring], settlesAs(true));
+	const { parked, watcher } = queueing(wire.send, [expiring], settlesAs(true));
 
-	try {
-		await tick(watcher);
+	await tick(watcher);
 
-		expect(wire.calls.map((call) => call.url)).toEqual([VERIFY_URL]);
-		expect(parked).toEqual([{ id: expiring.id, dueAt: null }]);
-	} finally {
-		wire.restore();
-	}
+	expect(wire.calls.map((call) => call.url)).toEqual([VERIFY_URL]);
+	expect(parked).toEqual([{ id: expiring.id, dueAt: null }]);
 });
 
 test("a webhook the merchant takes is struck off the outbox", async () => {
 	const wire = intercepting(() => new Response("", { status: 200 }));
-	const { done, failed, watcher } = owing([owed()]);
+	const { done, failed, watcher } = owing(wire.send, [owed()]);
 
-	try {
-		await tick(watcher);
+	await tick(watcher);
 
-		expect(wire.calls.map((call) => call.url)).toEqual([HOOK_URL]);
-		expect(done).toEqual([HOOK_URL]);
-		expect(failed).toEqual([]);
-	} finally {
-		wire.restore();
-	}
+	expect(wire.calls.map((call) => call.url)).toEqual([HOOK_URL]);
+	expect(done).toEqual([HOOK_URL]);
+	expect(failed).toEqual([]);
 });
 
 test("a webhook the merchant rejects goes back on the outbox", async () => {
 	const wire = intercepting(() => new Response("", { status: 500 }));
 	const quiet = console.warn;
 	console.warn = () => {};
-	const { done, failed, watcher } = owing([owed()]);
+	const { done, failed, watcher } = owing(wire.send, [owed()]);
 
 	try {
 		await tick(watcher);
@@ -237,44 +232,40 @@ test("a webhook the merchant rejects goes back on the outbox", async () => {
 		expect(failed).toEqual([HOOK_URL]);
 	} finally {
 		console.warn = quiet;
-		wire.restore();
 	}
 });
 
 test("a delivery is signed with the key the gateway publishes, and nothing of the receiver's", async () => {
 	const wire = intercepting(() => new Response("", { status: 200 }));
 	const url = "https://other.example/hook";
-	const { watcher } = owing([owed({ url })]);
+	const { watcher } = owing(wire.send, [owed({ url })]);
 
-	try {
-		await tick(watcher);
+	await tick(watcher);
 
-		const sent = wire.calls.find((call) => call.url === url);
-		const signature = sent?.headers["x-signature"] ?? "";
-		const stamp = sent?.headers["x-timestamp"] ?? "";
+	const sent = wire.calls.find((call) => call.url === url);
+	const signature = sent?.headers["x-signature"] ?? "";
+	const stamp = sent?.headers["x-timestamp"] ?? "";
 
-		expect(signature).toMatch(/^ed25519=[0-9a-f]{128}$/);
-		expect(stamp).toMatch(/^\d{10}$/);
+	expect(signature).toMatch(/^ed25519=[0-9a-f]{128}$/);
+	expect(stamp).toMatch(/^\d{10}$/);
 
-		const payload = new TextEncoder().encode(`${stamp}.${owed().body}`);
-		expect(
-			await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
-		).toBe(true);
-	} finally {
-		wire.restore();
-	}
+	const payload = new TextEncoder().encode(`${stamp}.${owed().body}`);
+	expect(
+		await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
+	).toBe(true);
 });
 
 test("the webhook carries a deadline, and one that runs out puts it back on the outbox", async () => {
 	const deadlines: unknown[] = [];
-	const real = globalThis.fetch;
-	globalThis.fetch = ((_target: string | URL | Request, options?: RequestInit) => {
-		deadlines.push(options?.signal);
-		return Promise.reject(new DOMException("The operation was aborted", "TimeoutError"));
-	}) as typeof fetch;
+	const wire = {
+		send: (async (_url, _sent, signal) => {
+			deadlines.push(signal);
+			throw new DOMException("The operation was aborted", "TimeoutError");
+		}) satisfies Send,
+	};
 	const quiet = console.warn;
 	console.warn = () => {};
-	const { done, failed, watcher } = owing([owed()]);
+	const { done, failed, watcher } = owing(wire.send, [owed()]);
 
 	try {
 		await tick(watcher);
@@ -284,7 +275,6 @@ test("the webhook carries a deadline, and one that runs out puts it back on the 
 		expect(failed).toEqual([HOOK_URL]);
 	} finally {
 		console.warn = quiet;
-		globalThis.fetch = real;
 	}
 });
 
@@ -294,7 +284,7 @@ test("a settlement the store refuses leaves the rest of the batch alone", async 
 	console.error = () => {};
 	const doomed = payment({ id: "doomed" });
 	const survivor = payment({ id: "survivor" });
-	const { handed, watcher } = queueing([doomed, survivor], (id, preimage) => {
+	const { handed, watcher } = queueing(wire.send, [doomed, survivor], (id, preimage) => {
 		if (id === "doomed") {
 			throw new Error("payment doomed is not on the worklist");
 		}
@@ -309,25 +299,21 @@ test("a settlement the store refuses leaves the rest of the batch alone", async 
 		expect(handed).toEqual([PREIMAGE, PREIMAGE]);
 	} finally {
 		console.error = quiet;
-		wire.restore();
 	}
 });
 
 test("the polls in one batch go out together, so a slow wallet does not hold up the rest", async () => {
 	const wire = counting(() => verified(false));
 	const { parked, watcher } = queueing(
+		wire.send,
 		[payment({ id: "one" }), payment({ id: "two" })],
 		settlesAs(true),
 	);
 
-	try {
-		await tick(watcher);
+	await tick(watcher);
 
-		expect(wire.peak()).toBe(2);
-		expect(parked).toHaveLength(2);
-	} finally {
-		wire.restore();
-	}
+	expect(wire.peak()).toBe(2);
+	expect(parked).toHaveLength(2);
 });
 
 test("a poll and a webhook owed in the same tick go out together, not one after the other", async () => {
@@ -341,13 +327,9 @@ test("a poll and a webhook owed in the same tick go out together, not one after 
 		delivered: () => {},
 	} as unknown as Store;
 
-	try {
-		await tick({ store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY });
+	await tick({ store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY, send: wire.send });
 
-		expect(wire.peak()).toBe(2);
-	} finally {
-		wire.restore();
-	}
+	expect(wire.peak()).toBe(2);
 });
 
 test("the next poll never lands after the invoice has expired", () => {
@@ -384,19 +366,16 @@ test("an endpoint that asks for a pace is polled at it, and one that does not ke
 		Response.json({ settled: false }, { headers: { "cache-control": "public, max-age=60" } }),
 	);
 	const { parked, watcher } = queueing(
+		wire.send,
 		[payment(), payment({ id: "bb".repeat(32) })],
 		settlesAs(true),
 	);
 
-	try {
-		await tick(watcher);
+	await tick(watcher);
 
-		expect(watcher.budget.pace.get("coinos.io")).toBe(60);
-		expect(parked[0]?.dueAt).toBe(unixNow() + 60);
-		expect(parked[1]?.dueAt).toBe(unixNow() + 60);
-	} finally {
-		wire.restore();
-	}
+	expect(watcher.budget.pace.get("coinos.io")).toBe(60);
+	expect(parked[0]?.dueAt).toBe(unixNow() + 60);
+	expect(parked[1]?.dueAt).toBe(unixNow() + 60);
 });
 
 test("an endpoint that names its own ceiling is spaced by that, not by the operator's number", async () => {
@@ -406,20 +385,16 @@ test("an endpoint that names its own ceiling is spaced by that, not by the opera
 			{ headers: { "cache-control": "max-age=5", "ratelimit-limit": "30;w=60" } },
 		),
 	);
-	const { watcher } = queueing([payment()], settlesAs(true));
+	const { watcher } = queueing(wire.send, [payment()], settlesAs(true));
 
-	try {
-		await tick(watcher);
-		expect(watcher.budget.ceiling.get("coinos.io")).toBe(0.5);
+	await tick(watcher);
+	expect(watcher.budget.ceiling.get("coinos.io")).toBe(0.5);
 
-		const started = Date.now();
-		await spend(watcher.budget, "coinos.io");
-		await spend(watcher.budget, "coinos.io");
+	const started = Date.now();
+	await spend(watcher.budget, "coinos.io");
+	await spend(watcher.budget, "coinos.io");
 
-		expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
-	} finally {
-		wire.restore();
-	}
+	expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
 });
 
 test("a host that names no ceiling still falls back to the operator's number", async () => {
@@ -437,15 +412,11 @@ test("a pace nobody could have meant is clamped rather than obeyed", async () =>
 	const wire = intercepting(() =>
 		Response.json({ settled: false }, { headers: { "cache-control": "max-age=999999" } }),
 	);
-	const { watcher } = queueing([payment()], settlesAs(true));
+	const { watcher } = queueing(wire.send, [payment()], settlesAs(true));
 
-	try {
-		await tick(watcher);
+	await tick(watcher);
 
-		expect(watcher.budget.pace.get("coinos.io")).toBe(3600);
-	} finally {
-		wire.restore();
-	}
+	expect(watcher.budget.pace.get("coinos.io")).toBe(3600);
 });
 
 test("a host asking to be polled without pause is given a second, which is the floor", async () => {
@@ -453,15 +424,11 @@ test("a host asking to be polled without pause is given a second, which is the f
 		const wire = intercepting(() =>
 			Response.json({ settled: false }, { headers: { "cache-control": asked } }),
 		);
-		const { watcher } = queueing([payment()], settlesAs(true));
+		const { watcher } = queueing(wire.send, [payment()], settlesAs(true));
 
-		try {
-			await tick(watcher);
+		await tick(watcher);
 
-			expect(watcher.budget.pace.get("coinos.io")).toBe(1);
-		} finally {
-			wire.restore();
-		}
+		expect(watcher.budget.pace.get("coinos.io")).toBe(1);
 	}
 });
 
@@ -494,11 +461,11 @@ test("a delivery with no retries left is reported at error level, not as one mor
 			eagerDelayMs: 5,
 			budget: paced(),
 			webhookKey: GATEWAY_KEY,
+			send: wire.send,
 		});
 
 		expect(said.filter((line) => line.includes("abandoned"))).toHaveLength(1);
 	} finally {
-		wire.restore();
 		console.error = loud;
 		console.warn = quiet;
 	}
@@ -510,37 +477,38 @@ function echoing(call: Call): Response {
 
 test("a challenge is signed with the gateway's own key, so a receiver can tell who is asking", async () => {
 	const wire = intercepting((call) => echoing(call));
-	try {
-		expect(await confirmWebhook({ url: HOOK_URL }, GATEWAY_KEY)).toBe(true);
+	expect(
+		await confirmWebhook({ send: wire.send, webhookKey: GATEWAY_KEY }, { url: HOOK_URL }),
+	).toBe(true);
 
-		const sent = wire.calls[0]!;
-		const signature = sent.headers["x-signature"] ?? "";
-		expect(signature).toMatch(/^ed25519=[0-9a-f]{128}$/);
+	const sent = wire.calls[0]!;
+	const signature = sent.headers["x-signature"] ?? "";
+	expect(signature).toMatch(/^ed25519=[0-9a-f]{128}$/);
 
-		const payload = new TextEncoder().encode(`${sent.headers["x-timestamp"]}.${sent.body}`);
-		expect(
-			await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
-		).toBe(true);
-	} finally {
-		wire.restore();
-	}
+	const payload = new TextEncoder().encode(`${sent.headers["x-timestamp"]}.${sent.body}`);
+	expect(
+		await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
+	).toBe(true);
 });
 
 test("a challenge answered wrongly leaves the webhook unconfirmed, whichever way it is wrong", async () => {
 	const quiet = console.warn;
 	console.warn = () => {};
-	const refusing = intercepting(() => new Response("no thanks", { status: 500 }));
+	const refusing = {
+		...intercepting(() => new Response("no thanks", { status: 500 })),
+		webhookKey: GATEWAY_KEY,
+	};
 	const silent = () => Response.json({});
 	const inventing = () => Response.json({ nonce: "f".repeat(64) });
 
 	try {
-		expect(await confirmWebhook({ url: HOOK_URL }, GATEWAY_KEY)).toBe(false);
-		refusing.restore();
+		expect(await confirmWebhook(refusing, { url: HOOK_URL })).toBe(false);
 
 		for (const answering of [silent, inventing]) {
 			const wire = intercepting(answering);
-			expect(await confirmWebhook({ url: HOOK_URL }, GATEWAY_KEY)).toBe(false);
-			wire.restore();
+			expect(await confirmWebhook({ ...wire, webhookKey: GATEWAY_KEY }, { url: HOOK_URL })).toBe(
+				false,
+			);
 		}
 	} finally {
 		console.warn = quiet;

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { Send } from "../core/outbound.ts";
 import { decodeInvoice, msat, ThunderBridge } from "../sdk/dist/index.js";
 import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "../sdk/dist/nwc.js";
 import { type Service, start } from "../src/index.ts";
@@ -19,7 +20,7 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 	let own: RegtestWallet;
 	let gateway: Service;
 	let closeStore: () => void;
-	let served: { reached: () => number };
+	let served: { send: Send; reached: () => number };
 
 	beforeAll(async () => {
 		ensureWrapCanFlow();
@@ -37,6 +38,7 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 				mints: true,
 				verifyChallenge: false,
 				eagerDelayMs: 3000,
+				send: served.send,
 			},
 			opened.store,
 		);
@@ -45,7 +47,6 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 	afterAll(async () => {
 		await gateway.stop();
 		closeStore();
-		vi.unstubAllGlobals();
 		await own.close();
 	});
 
@@ -72,20 +73,20 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 });
 
 function servedInProcess(answering: (request: Request) => Promise<Response>): {
+	send: Send;
 	reached: () => number;
 } {
-	const straightThrough = globalThis.fetch;
 	let reached = 0;
-
-	vi.stubGlobal("fetch", async (asked: string | URL | Request, options?: RequestInit) => {
-		const request = asked instanceof Request ? asked : new Request(asked, options);
-		if (!request.url.startsWith(new URL(MOUNT).origin)) {
-			return straightThrough(asked, options);
+	const send: Send = async (url, sent) => {
+		if (!url.startsWith(new URL(MOUNT).origin)) {
+			throw new Error(`${url} is not the rail this test mounts`);
 		}
 		reached += 1;
 
-		return answering(request);
-	});
+		return answering(
+			new Request(url, { method: sent.method, headers: sent.headers, body: sent.body }),
+		);
+	};
 
-	return { reached: () => reached };
+	return { send, reached: () => reached };
 }

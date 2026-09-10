@@ -11,6 +11,7 @@ import {
 } from "../src/bank";
 import { ThunderBridge } from "../src/client";
 import { fioStatement } from "../src/fio";
+import { throughFetch } from "../src/outbound";
 import { type FetchCall, jsonResponse } from "./harness";
 
 vi.mock("node:dns/promises", () => ({
@@ -354,7 +355,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
     const transfer = await asked();
     mounted({ secret: SECRET, statement: statementOf(credit()) });
 
-    expect((await checkSettled(transfer.verifyUrl, transfer.paymentHash)).preimage).toMatch(
+    expect((await checkSettled(throughFetch, transfer.verifyUrl, transfer.paymentHash)).preimage).toMatch(
       /^[0-9a-f]{64}$/,
     );
   });
@@ -363,7 +364,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
     const transfer = await asked();
     mounted({ secret: SECRET, statement: statementOf() });
 
-    expect(await checkSettled(transfer.verifyUrl, transfer.paymentHash)).toEqual({
+    expect(await checkSettled(throughFetch, transfer.verifyUrl, transfer.paymentHash)).toEqual({
       preimage: null,
       pace: 30,
       ceiling: null,
@@ -374,7 +375,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
     const transfer = await asked();
     mounted({ secret: "not-the-secret", statement: statementOf(credit()) });
 
-    await expect(checkSettled(transfer.verifyUrl, transfer.paymentHash)).rejects.toThrow(
+    await expect(checkSettled(throughFetch, transfer.verifyUrl, transfer.paymentHash)).rejects.toThrow(
       "answered 403",
     );
   });
@@ -386,7 +387,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
       vi.fn(async () => Response.json({ settled: true, preimage: "11".repeat(32) })),
     );
 
-    await expect(checkSettled(transfer.verifyUrl, transfer.paymentHash)).rejects.toThrow(
+    await expect(checkSettled(throughFetch, transfer.verifyUrl, transfer.paymentHash)).rejects.toThrow(
       "does not hash to",
     );
   });

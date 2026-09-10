@@ -1,12 +1,15 @@
 import { expect, test, vi } from "vitest";
 import { NoWalletAvailable, statusForWallets } from "../src/problem.ts";
 import { cannotReleaseAPreimage, quote, resolve, toLnurl } from "./lnurl.ts";
+import type { Send } from "./outbound.ts";
 
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
 
 async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
 	return [{ address: "203.0.113.1", family: 4 }];
 }
+
+const NOBODY = answering({});
 
 test("a server that answers verify without a preimage is known", () => {
 	expect(cannotReleaseAPreimage("zeuspay.com")).toBe(true);
@@ -17,9 +20,13 @@ test("a server that answers verify without a preimage is known", () => {
 	expect(cannotReleaseAPreimage("notzeuspay.com")).toBe(false);
 });
 
-async function refusedBy(addresses: string[], amountMsat = 21_000): Promise<NoWalletAvailable> {
+async function refusedBy(
+	send: Send,
+	addresses: string[],
+	amountMsat = 21_000,
+): Promise<NoWalletAvailable> {
 	try {
-		await resolve(addresses, amountMsat);
+		await resolve(send, addresses, amountMsat);
 	} catch (no: unknown) {
 		if (no instanceof NoWalletAvailable) {
 			return no;
@@ -30,14 +37,14 @@ async function refusedBy(addresses: string[], amountMsat = 21_000): Promise<NoWa
 }
 
 test("one of those is refused at resolve rather than left to expire", async () => {
-	const refusal = await refusedBy(["someone@zeuspay.com"]);
+	const refusal = await refusedBy(NOBODY, ["someone@zeuspay.com"]);
 	expect(refusal.wallets).toEqual([
 		{ address: "someone@zeuspay.com", reason: "cannot-prove-delivery" },
 	]);
 });
 
 test("each wallet carries why it was skipped, and the worst one sets the status", async () => {
-	const refusal = await refusedBy(["not-an-address", "someone@ecash.love"]);
+	const refusal = await refusedBy(NOBODY, ["not-an-address", "someone@ecash.love"]);
 	expect(refusal.wallets).toEqual([
 		{ address: "not-an-address", reason: "address-unusable" },
 		{ address: "someone@ecash.love", reason: "cannot-prove-delivery" },
@@ -54,7 +61,7 @@ test("each wallet carries why it was skipped, and the worst one sets the status"
 });
 
 test("a private host in an address is refused before anything is fetched", async () => {
-	const refusal = await refusedBy(["someone@localhost", "someone@169.254.169.254"]);
+	const refusal = await refusedBy(NOBODY, ["someone@localhost", "someone@169.254.169.254"]);
 	expect(refusal.wallets.map((wallet) => wallet.reason)).toEqual([
 		"address-unusable",
 		"address-unusable",
@@ -72,7 +79,7 @@ test("an address cannot smuggle a path of its own into the well-known URL", asyn
 		"someone@lnurl.example.com?leak=1",
 		"someone@lnurl.example.com#fragment",
 	];
-	const refusal = await refusedBy(smuggled);
+	const refusal = await refusedBy(NOBODY, smuggled);
 
 	expect(refusal.wallets).toEqual(
 		smuggled.map((address) => ({ address, reason: "address-unusable" })),
@@ -81,12 +88,11 @@ test("an address cannot smuggle a path of its own into the well-known URL", asyn
 
 test("the shapes a real lightning address takes are still read", async () => {
 	const seen: string[] = [];
-	const restore = answering(servedBy(), seen);
-	try {
-		await refusedBy(["sats.pay_1-x@coinos.io", "MixedCase@coinos.io", "someone@wallet.io:8443"]);
-	} finally {
-		restore();
-	}
+	await refusedBy(answering(servedBy(), seen), [
+		"sats.pay_1-x@coinos.io",
+		"MixedCase@coinos.io",
+		"someone@wallet.io:8443",
+	]);
 
 	expect(seen).toEqual([
 		"https://coinos.io/.well-known/lnurlp/sats.pay_1-x",
@@ -103,15 +109,11 @@ const METADATA =
 const ISSUED_INVOICE =
 	"lnbc210n1p4xuft9sp5yltzwvshnfujcwt6gvrwtxttgyp90766g6q33z4zt60k9eeqw3mspp5zyxunh4dd0mpptmq23dpqyfzu6p0gl4zzzekdczrmwjnj0jfqu7qhp5vq6e2dhqtvmm375umz70kg84peq3dvjdpdetg7yjgr2arq9ydvnqxq9z0rgqcqpnrzjqt9dfmzv3vxu93crtgvf37teerr3dx7l7a8qrttv57h2t8v9ck0gkrvumyqqh5cqqyqqqqqqqqqq3wcqjq9qxpqysgqjlcdljhwzcprcx0wz9gxdsjjjszd0fqvmxv8zxwa2u75vpqk8r8s434yl4s4qu3kzkwkhvwrkq5a9khusallkugppjpghwlsd4kffuqpakddlx";
 
-function answering(routes: Record<string, unknown>, seen: string[] = []): () => void {
-	const real = globalThis.fetch;
-	globalThis.fetch = ((target: string | URL | Request) => {
-		seen.push(String(target));
-		const body = routes[String(target)];
-		return Promise.resolve(body ? Response.json(body) : new Response("no route", { status: 404 }));
-	}) as typeof fetch;
-	return () => {
-		globalThis.fetch = real;
+function answering(routes: Record<string, unknown>, seen: string[] = []): Send {
+	return async (url) => {
+		seen.push(url);
+		const body = routes[url];
+		return body ? Response.json(body) : new Response("no route", { status: 404 });
 	};
 }
 
@@ -130,38 +132,31 @@ function servedBy(overrides: Partial<Record<string, unknown>> = {}): Record<stri
 }
 
 test("the wallets are tried in order and the first one that answers wins", async () => {
-	const restore = answering({
+	const send = answering({
 		...servedBy(),
 		[`${CALLBACK}?amount=21000`]: {
 			pr: ISSUED_INVOICE,
 			verify: PROOF_URL,
 		},
 	});
-	try {
-		const resolved = await resolve(
-			["offline@coinos.io", "charter@coinos.io", "never@coinos.io"],
-			21_000,
-		);
-		expect(resolved.address).toBe("charter@coinos.io");
-		expect(resolved.verifyUrl).toBe(PROOF_URL);
-	} finally {
-		restore();
-	}
+	const resolved = await resolve(
+		send,
+		["offline@coinos.io", "charter@coinos.io", "never@coinos.io"],
+		21_000,
+	);
+	expect(resolved.address).toBe("charter@coinos.io");
+	expect(resolved.verifyUrl).toBe(PROOF_URL);
 });
 
 test("a wallet that answers nothing is unreachable, not the payer's mistake", async () => {
-	const restore = answering({});
-	try {
-		const refusal = await refusedBy(["charter@coinos.io"]);
-		expect(refusal.wallets).toEqual([{ address: "charter@coinos.io", reason: "unreachable" }]);
-		expect(statusForWallets(refusal.wallets)).toBe(502);
-	} finally {
-		restore();
-	}
+	const send = answering({});
+	const refusal = await refusedBy(send, ["charter@coinos.io"]);
+	expect(refusal.wallets).toEqual([{ address: "charter@coinos.io", reason: "unreachable" }]);
+	expect(statusForWallets(refusal.wallets)).toBe(502);
 });
 
 test("an amount the wallet will not take is its own reason", async () => {
-	const restore = answering(
+	const send = answering(
 		servedBy({
 			[WELL_KNOWN]: {
 				tag: "payRequest",
@@ -172,55 +167,43 @@ test("an amount the wallet will not take is its own reason", async () => {
 			},
 		}),
 	);
-	try {
-		const refusal = await refusedBy(["charter@coinos.io"]);
-		expect(refusal.wallets).toEqual([
-			{ address: "charter@coinos.io", reason: "amount-not-accepted" },
-		]);
-		expect(statusForWallets(refusal.wallets)).toBe(400);
-	} finally {
-		restore();
-	}
+	const refusal = await refusedBy(send, ["charter@coinos.io"]);
+	expect(refusal.wallets).toEqual([
+		{ address: "charter@coinos.io", reason: "amount-not-accepted" },
+	]);
+	expect(statusForWallets(refusal.wallets)).toBe(400);
 });
 
 test("a quote reports the wallet's range and never asks it for an invoice", async () => {
 	const seen: string[] = [];
-	const restore = answering(
+	const send = answering(
 		{ ...servedBy(), [`${CALLBACK}?amount=21000`]: { pr: ISSUED_INVOICE } },
 		seen,
 	);
-	try {
-		const served = await quote(["charter@coinos.io"], 21_000);
+	const served = await quote(send, ["charter@coinos.io"], 21_000);
 
-		expect(served.won).toEqual({
-			address: "charter@coinos.io",
-			minMsat: 1_000,
-			maxMsat: 100_000_000,
-			metadata: METADATA,
-		});
-		expect(served.refusals).toEqual([]);
-		expect(seen).toEqual([WELL_KNOWN]);
-	} finally {
-		restore();
-	}
+	expect(served.won).toEqual({
+		address: "charter@coinos.io",
+		minMsat: 1_000,
+		maxMsat: 100_000_000,
+		metadata: METADATA,
+	});
+	expect(served.refusals).toEqual([]);
+	expect(seen).toEqual([WELL_KNOWN]);
 });
 
 test("a quote passes over the same wallets a create would, and hands back why", async () => {
-	const restore = answering(servedBy());
-	try {
-		const served = await quote(["someone@zeuspay.com", "charter@coinos.io"], 21_000);
+	const send = answering(servedBy());
+	const served = await quote(send, ["someone@zeuspay.com", "charter@coinos.io"], 21_000);
 
-		expect(served.won.address).toBe("charter@coinos.io");
-		expect(served.refusals).toEqual([
-			{ address: "someone@zeuspay.com", reason: "cannot-prove-delivery" },
-		]);
-	} finally {
-		restore();
-	}
+	expect(served.won.address).toBe("charter@coinos.io");
+	expect(served.refusals).toEqual([
+		{ address: "someone@zeuspay.com", reason: "cannot-prove-delivery" },
+	]);
 });
 
 test("a quote for an amount nobody takes refuses exactly as a create does", async () => {
-	const restore = answering(
+	const send = answering(
 		servedBy({
 			[WELL_KNOWN]: {
 				tag: "payRequest",
@@ -232,20 +215,18 @@ test("a quote for an amount nobody takes refuses exactly as a create does", asyn
 		}),
 	);
 	try {
-		await quote(["charter@coinos.io"], 21_000);
+		await quote(send, ["charter@coinos.io"], 21_000);
 		throw new Error("the quote was served when it should have refused");
 	} catch (no: unknown) {
 		if (!(no instanceof NoWalletAvailable)) {
 			throw no;
 		}
 		expect(no.wallets).toEqual([{ address: "charter@coinos.io", reason: "amount-not-accepted" }]);
-	} finally {
-		restore();
 	}
 });
 
 test("an invoice that does not match the metadata is refused, not minted", async () => {
-	const restore = answering({
+	const send = answering({
 		...servedBy({
 			[WELL_KNOWN]: {
 				tag: "payRequest",
@@ -257,13 +238,9 @@ test("an invoice that does not match the metadata is refused, not minted", async
 		}),
 		[`${CALLBACK}?amount=21000`]: { pr: ISSUED_INVOICE, verify: PROOF_URL },
 	});
-	try {
-		const refusal = await refusedBy(["charter@coinos.io"]);
-		expect(refusal.wallets).toEqual([{ address: "charter@coinos.io", reason: "invoice-refused" }]);
-		expect(statusForWallets(refusal.wallets)).toBe(422);
-	} finally {
-		restore();
-	}
+	const refusal = await refusedBy(send, ["charter@coinos.io"]);
+	expect(refusal.wallets).toEqual([{ address: "charter@coinos.io", reason: "invoice-refused" }]);
+	expect(statusForWallets(refusal.wallets)).toBe(422);
 });
 
 test("an endpoint bech32-encodes to the LNURL string LUD-01 spells out", () => {

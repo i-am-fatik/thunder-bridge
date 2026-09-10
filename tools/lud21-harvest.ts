@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { cannotReleaseAPreimage } from "../core/lnurl.ts";
-import { ask } from "../core/outbound.ts";
+import { ask, type Send } from "../core/outbound.ts";
+import { pinnedToTheAddressWeVerified } from "../src/pinned.ts";
 
 const RELAYS = [
 	"wss://relay.damus.io",
@@ -123,9 +124,9 @@ export function byDomain(addresses: string[]): Map<string, string[]> {
 	return grouped;
 }
 
-async function jsonFrom<T>(url: string): Promise<T | null> {
+async function jsonFrom<T>(send: Send, url: string): Promise<T | null> {
 	try {
-		const answer = await ask(url);
+		const answer = await ask(send, url);
 		if (!answer.ok) {
 			return null;
 		}
@@ -135,11 +136,11 @@ async function jsonFrom<T>(url: string): Promise<T | null> {
 	}
 }
 
-export async function measure(address: string): Promise<Measured> {
+export async function measure(send: Send, address: string): Promise<Measured> {
 	const at = address.indexOf("@");
 	const [user, domain] = [address.slice(0, at), address.slice(at + 1)];
 
-	const pay = await jsonFrom<PayRequest>(`https://${domain}/.well-known/lnurlp/${user}`);
+	const pay = await jsonFrom<PayRequest>(send, `https://${domain}/.well-known/lnurlp/${user}`);
 	if (pay === null || pay.tag !== "payRequest" || !pay.callback) {
 		return { address, verdict: "unreachable", note: "no payRequest" };
 	}
@@ -152,7 +153,10 @@ export async function measure(address: string): Promise<Measured> {
 	}
 
 	const separator = pay.callback.includes("?") ? "&" : "?";
-	const invoice = await jsonFrom<CallbackInvoice>(`${pay.callback}${separator}amount=${amount}`);
+	const invoice = await jsonFrom<CallbackInvoice>(
+		send,
+		`${pay.callback}${separator}amount=${amount}`,
+	);
 	if (invoice === null || !invoice.pr) {
 		return { address, verdict: "unreachable", note: "callback issued no invoice" };
 	}
@@ -160,7 +164,7 @@ export async function measure(address: string): Promise<Measured> {
 		return { address, verdict: "no-verify", note: "invoice carries no verify URL" };
 	}
 
-	const verification = await jsonFrom<Record<string, unknown>>(invoice.verify);
+	const verification = await jsonFrom<Record<string, unknown>>(send, invoice.verify);
 	if (verification === null) {
 		return { address, verdict: "unreachable", note: "verify URL answered nothing readable" };
 	}
@@ -199,25 +203,33 @@ async function inBatches<T, R>(items: T[], run: (item: T) => Promise<R>): Promis
 	return done;
 }
 
-export async function surveyDomain(domain: string, addresses: string[]): Promise<DomainRow> {
-	const thin = await Promise.all(addresses.slice(0, THIN_SAMPLE).map(measure));
+export async function surveyDomain(
+	send: Send,
+	domain: string,
+	addresses: string[],
+): Promise<DomainRow> {
+	const thin = await Promise.all(
+		addresses.slice(0, THIN_SAMPLE).map((address) => measure(send, address)),
+	);
 	const settled = verdictOf(thin);
 	if (settled !== "unsettled" || addresses.length <= THIN_SAMPLE) {
 		return { verdict: settled, denylisted: cannotReleaseAPreimage(domain), measured: thin };
 	}
 
-	const deeper = await Promise.all(addresses.slice(THIN_SAMPLE, DEEP_SAMPLE).map(measure));
+	const deeper = await Promise.all(
+		addresses.slice(THIN_SAMPLE, DEEP_SAMPLE).map((address) => measure(send, address)),
+	);
 	const measured = [...thin, ...deeper];
 	return { verdict: verdictOf(measured), denylisted: cannotReleaseAPreimage(domain), measured };
 }
 
-export async function survey(surveyedAt: string): Promise<Survey> {
+export async function survey(send: Send, surveyedAt: string): Promise<Survey> {
 	const addresses = await addressesFromNostr();
 	const grouped = [...byDomain(addresses)].sort();
 	console.warn(`${addresses.length} addresses across ${grouped.length} domains`);
 
 	const rows = await inBatches(grouped, async ([domain, sample]) => {
-		const row = await surveyDomain(domain, sample);
+		const row = await surveyDomain(send, domain, sample);
 		console.warn(`${domain} ${row.verdict}`);
 		return [domain, row] as const;
 	});
@@ -228,7 +240,7 @@ export async function survey(surveyedAt: string): Promise<Survey> {
 if (import.meta.main) {
 	const measuredAt = process.argv[2] ?? "unstamped";
 	const out = process.argv[3] ?? "docs/lud21-measured.json";
-	const done = await survey(measuredAt);
+	const done = await survey(pinnedToTheAddressWeVerified, measuredAt);
 	writeFileSync(out, `${JSON.stringify(done, null, "\t")}\n`);
 	console.warn(`wrote ${out}`);
 }

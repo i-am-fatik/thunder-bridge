@@ -1,5 +1,6 @@
 import { checkSettled } from "../../core/lnurl.js";
 import { seal, unseal } from "../../core/sealed.js";
+import { throughFetch } from "./outbound.js";
 import { answerVerifyChallenge } from "./webhook.js";
 
 const DEFAULT_POLL_EVERY_SECS = 5;
@@ -65,7 +66,7 @@ export function lightningVerifyEndpoint(
     }
 
     const wallet = JSON.parse(opened) as Relayed;
-    const asked = await checkSettled(wallet.url, wallet.hash).catch(() => null);
+    const asked = await checkSettled(throughFetch, wallet.url, wallet.hash).catch(() => null);
     if (asked === null) {
       return Response.json({ settled: false }, { status: 502 });
     }

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preimageMatchesHash } from "../../core/bolt11.js";
 import { checkSettled } from "../../core/lnurl.js";
+import { throughFetch } from "../src/outbound";
 import { bankVerifyEndpoint, type Credit } from "../src/bank";
 import { ThunderBridge } from "../src/client";
 import { NoWalletAvailableError } from "../src/errors";
@@ -312,7 +313,7 @@ describe("a leg the bank rail built, against the gateway's own settlement check"
       bookedAt: 1_780_000_000,
     });
 
-    const { preimage } = await checkSettled(told.verifyUrl, told.paymentHash);
+    const { preimage } = await checkSettled(throughFetch, told.verifyUrl, told.paymentHash);
 
     expect(preimage).toMatch(/^[0-9a-f]{64}$/);
     expect(preimageMatchesHash(String(preimage), told.paymentHash)).toBe(true);
@@ -322,7 +323,7 @@ describe("a leg the bank rail built, against the gateway's own settlement check"
     const told = await toldToTheGateway();
     paidInto();
 
-    expect((await checkSettled(told.verifyUrl, told.paymentHash)).preimage).toBeNull();
+    expect((await checkSettled(throughFetch, told.verifyUrl, told.paymentHash)).preimage).toBeNull();
   });
 
   it("does not settle on a credit for a different order", async () => {
@@ -334,6 +335,6 @@ describe("a leg the bank rail built, against the gateway's own settlement check"
       bookedAt: 1_780_000_000,
     });
 
-    expect((await checkSettled(told.verifyUrl, told.paymentHash)).preimage).toBeNull();
+    expect((await checkSettled(throughFetch, told.verifyUrl, told.paymentHash)).preimage).toBeNull();
   });
 });

@@ -12,7 +12,7 @@ import { callerOf } from "../core/caller.ts";
 import { type SigningKey, signingKeyFromSeed } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.ts";
-import { sendThrough } from "../core/outbound.ts";
+import type { Send } from "../core/outbound.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { Cluster } from "./cluster.ts";
 import { allowed, bearer, daysToSecs, positive, secret, secsToMs, whole } from "./env.ts";
@@ -134,6 +134,7 @@ export type Options = {
 	drainTimeoutMs?: number;
 	keepSealedSecs?: number;
 	maxReplay?: number;
+	send?: Send;
 };
 
 export type Service = {
@@ -153,6 +154,7 @@ type Serving = {
 	verifyHosts: Set<string> | null;
 	verifyChallenge: boolean;
 	maxReplay: number;
+	send: Send;
 };
 
 export async function start(
@@ -173,6 +175,7 @@ export async function start(
 		drainTimeoutMs = 10_000,
 		keepSealedSecs = 90 * 86_400,
 		maxReplay = 100,
+		send = pinnedToTheAddressWeVerified,
 	}: Options,
 	store: Store,
 ): Promise<Service> {
@@ -186,10 +189,12 @@ export async function start(
 		verifyHosts,
 		verifyChallenge,
 		maxReplay,
+		send,
 	};
 	const watcher: Watcher = {
 		store,
 		eagerDelayMs,
+		send,
 		budget: {
 			perSecond: pollsPerSecond,
 			perTick: workPerTick,
@@ -537,7 +542,7 @@ async function route(
 		if (!mints(serving)) {
 			return mintsNothing(serving);
 		}
-		return await quoted(request);
+		return await quoted(request, serving.send);
 	}
 	if (path === "/watched-payments" && incoming.method === "POST") {
 		return await watchOnly(request, store, serving, caller);
@@ -610,7 +615,7 @@ async function create(
 	if (store.full(caller)) {
 		return tooMany(caller, store.info().maxPending);
 	}
-	if (asked.webhook && !(await confirmWebhook(asked.webhook, serving.webhookKey))) {
+	if (asked.webhook && !(await confirmWebhook(serving, asked.webhook))) {
 		return unconfirmedWebhook(asked.webhook.url);
 	}
 
@@ -627,7 +632,7 @@ async function create(
 	}
 
 	try {
-		const payment = await mint(asked, store, caller);
+		const payment = await mint(asked, store, serving.send, caller);
 		if (key) {
 			store.fulfill(key, payment.id);
 		}
@@ -649,8 +654,13 @@ async function create(
 	}
 }
 
-async function mint(asked: CreateRequest, store: Store, caller: string | null): Promise<Payment> {
-	const resolved = await resolve(asked.addresses, asked.amountMsat);
+async function mint(
+	asked: CreateRequest,
+	store: Store,
+	send: Send,
+	caller: string | null,
+): Promise<Payment> {
+	const resolved = await resolve(send, asked.addresses, asked.amountMsat);
 
 	return store.insert({
 		lnAddress: resolved.address,
@@ -745,7 +755,6 @@ async function watchOnly(
 	serving: Serving,
 	caller: string | null,
 ): Promise<Response> {
-	const { webhookKey } = serving;
 	let asked: WatchRequest;
 	try {
 		asked = readWatchRequest(await request.json());
@@ -776,13 +785,13 @@ async function watchOnly(
 	if (serving.verifyHosts && !serving.verifyHosts.has(hostOf(asked.verifyUrl))) {
 		return refusedVerifyHost(asked.verifyUrl);
 	}
-	if (!(await speaksVerify(asked.verifyUrl))) {
+	if (!(await speaksVerify(serving.send, asked.verifyUrl))) {
 		return unconfirmedVerify(asked.verifyUrl);
 	}
-	if (serving.verifyChallenge && !(await confirmVerify(asked.verifyUrl, webhookKey))) {
+	if (serving.verifyChallenge && !(await confirmVerify(serving, asked.verifyUrl))) {
 		return unconsentedVerify(asked.verifyUrl);
 	}
-	if (asked.webhook && !(await confirmWebhook(asked.webhook, webhookKey))) {
+	if (asked.webhook && !(await confirmWebhook(serving, asked.webhook))) {
 		return unconfirmedWebhook(asked.webhook.url);
 	}
 
@@ -806,7 +815,7 @@ async function watchOnly(
 	return json(paymentToWire(watched), 201);
 }
 
-async function quoted(request: Request): Promise<Response> {
+async function quoted(request: Request, send: Send): Promise<Response> {
 	let asked: QuoteRequest;
 	try {
 		asked = readQuoteRequest(await request.json());
@@ -815,7 +824,7 @@ async function quoted(request: Request): Promise<Response> {
 	}
 
 	try {
-		const served = await quote(asked.addresses, asked.amountMsat);
+		const served = await quote(send, asked.addresses, asked.amountMsat);
 
 		return json(quoteToWire(served.won, asked.amountMsat, served.refusals));
 	} catch (error: unknown) {
@@ -1047,8 +1056,6 @@ function unhandled(error: unknown): Response {
 }
 
 if (import.meta.main) {
-	sendThrough(pinnedToTheAddressWeVerified);
-
 	const path = process.env["LEDGER"] ?? "./data/ledger.db";
 	mkdirSync(dirname(path), { recursive: true });
 

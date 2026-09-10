@@ -1,5 +1,5 @@
 import { decodeInvoice, preimageMatchesHash } from "./bolt11.ts";
-import { ask, BODY_LIMIT_BYTES } from "./outbound.ts";
+import { ask, BODY_LIMIT_BYTES, type Send } from "./outbound.ts";
 import { NoWalletAvailable, type WalletFailure, WalletRefused } from "./refusal.ts";
 import { sha256Hex } from "./sha256.ts";
 import { publicHttps } from "./url.ts";
@@ -63,17 +63,25 @@ const MAX_PACE_SECS = 3600;
 const MIN_PER_SECOND = 0.01;
 const MAX_PER_SECOND = 100;
 
-export async function resolve(addresses: string[], amountMsat: number): Promise<Resolved> {
+export async function resolve(
+	send: Send,
+	addresses: string[],
+	amountMsat: number,
+): Promise<Resolved> {
 	const served = await firstThatServes(addresses, (address, deadline) =>
-		resolveAddress(address, amountMsat, deadline),
+		resolveAddress(send, address, amountMsat, deadline),
 	);
 
 	return served.won;
 }
 
-export async function quote(addresses: string[], amountMsat: number): Promise<Served<Quote>> {
+export async function quote(
+	send: Send,
+	addresses: string[],
+	amountMsat: number,
+): Promise<Served<Quote>> {
 	const served = await firstThatServes(addresses, (address, deadline) =>
-		probe(address, amountMsat, deadline),
+		probe(send, address, amountMsat, deadline),
 	);
 	const { address, pay } = served.won;
 
@@ -112,13 +120,22 @@ async function firstThatServes<T>(
 	throw new NoWalletAvailable(refusals);
 }
 
-async function probe(address: string, amountMsat: number, deadline: AbortSignal): Promise<Probed> {
+async function probe(
+	send: Send,
+	address: string,
+	amountMsat: number,
+	deadline: AbortSignal,
+): Promise<Probed> {
 	const [user, domain] = splitAddress(address);
 	if (cannotReleaseAPreimage(domain)) {
 		throw new WalletRefused("cannot-prove-delivery", `${address} never releases a preimage`);
 	}
 
-	const pay = await answered<PayRequest>(`https://${domain}/.well-known/lnurlp/${user}`, deadline);
+	const pay = await answered<PayRequest>(
+		send,
+		`https://${domain}/.well-known/lnurlp/${user}`,
+		deadline,
+	);
 	if (pay.tag !== "payRequest" || !pay.callback) {
 		throw new WalletRefused("unreachable", `${address} answered with no payRequest`);
 	}
@@ -133,13 +150,18 @@ async function probe(address: string, amountMsat: number, deadline: AbortSignal)
 }
 
 async function resolveAddress(
+	send: Send,
 	address: string,
 	amountMsat: number,
 	deadline: AbortSignal,
 ): Promise<Resolved> {
-	const { pay } = await probe(address, amountMsat, deadline);
+	const { pay } = await probe(send, address, amountMsat, deadline);
 
-	const invoice = await answered<CallbackInvoice>(withAmount(pay.callback, amountMsat), deadline);
+	const invoice = await answered<CallbackInvoice>(
+		send,
+		withAmount(pay.callback, amountMsat),
+		deadline,
+	);
 	if (!invoice.pr) {
 		throw new WalletRefused("unreachable", `${address} returned no invoice`);
 	}
@@ -173,9 +195,9 @@ async function resolveAddress(
 	};
 }
 
-async function answered<T>(url: string, deadline: AbortSignal): Promise<T> {
+async function answered<T>(send: Send, url: string, deadline: AbortSignal): Promise<T> {
 	try {
-		return await fetchJson<T>(url, deadline);
+		return await fetchJson<T>(send, url, deadline);
 	} catch (cause: unknown) {
 		throw new WalletRefused("unreachable", String(cause));
 	}
@@ -190,8 +212,12 @@ function decodeIssued(address: string, bolt11: string): Issued {
 	return { paymentHash, descriptionHash, amountMsat, expiresAt };
 }
 
-export async function checkSettled(verifyUrl: string, paymentHash: string): Promise<Settlement> {
-	const answer = await answeredJson<Verification>(verifyUrl);
+export async function checkSettled(
+	send: Send,
+	verifyUrl: string,
+	paymentHash: string,
+): Promise<Settlement> {
+	const answer = await answeredJson<Verification>(send, verifyUrl);
 	const asked = {
 		pace: paceAskedFor(answer.headers),
 		ceiling: ceilingAskedFor(answer.headers),
@@ -206,9 +232,9 @@ export async function checkSettled(verifyUrl: string, paymentHash: string): Prom
 	return { preimage: answer.said.preimage, ...asked };
 }
 
-export async function speaksVerify(url: string): Promise<boolean> {
+export async function speaksVerify(send: Send, url: string): Promise<boolean> {
 	try {
-		return typeof (await answeredJson<Verification>(url)).said.settled === "boolean";
+		return typeof (await answeredJson<Verification>(send, url)).said.settled === "boolean";
 	} catch {
 		return false;
 	}
@@ -354,15 +380,16 @@ function isNothingButAHost(domain: string): boolean {
 	}
 }
 
-async function fetchJson<T>(url: string, deadline?: AbortSignal): Promise<T> {
-	return (await answeredJson<T>(url, deadline)).said;
+async function fetchJson<T>(send: Send, url: string, deadline?: AbortSignal): Promise<T> {
+	return (await answeredJson<T>(send, url, deadline)).said;
 }
 
 async function answeredJson<T>(
+	send: Send,
 	url: string,
 	deadline?: AbortSignal,
 ): Promise<{ said: T; headers: Headers }> {
-	const answer = await ask(url, { headers: { accept: "application/json" }, deadline });
+	const answer = await ask(send, url, { headers: { accept: "application/json" }, deadline });
 	if (!answer.ok) {
 		throw new Error(`${url} answered ${answer.status}`);
 	}

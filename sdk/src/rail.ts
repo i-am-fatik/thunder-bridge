@@ -4,6 +4,7 @@ import { type Amount, amountNow, type Msat, msat } from "./amount.js";
 import { type BankTransfer, type BankTransferParams, bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
+import { throughFetch } from "./outbound.js";
 import { medianOf, msatFor, type Ticker } from "./price.js";
 import { toLightningUri } from "./qr.js";
 import { relayedVerifyUrl } from "./relay.js";
@@ -239,7 +240,7 @@ export function blindLightningRail(gateway: ThunderBridge, config: BlindLightnin
 export async function invoiceFrom(paidTo: string | string[], amount: Amount): Promise<Resolved> {
   const addresses = typeof paidTo === "string" ? [paidTo] : paidTo;
   try {
-    return await resolve(addresses, await amountNow(amount));
+    return await resolve(throughFetch, addresses, await amountNow(amount));
   } catch (refused: unknown) {
     if (refused instanceof NoWalletAvailable) {
       throw new NoWalletAvailableError({ title: refused.message }, refused.wallets);

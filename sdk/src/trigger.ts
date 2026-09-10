@@ -6,6 +6,7 @@ import type { Amount } from "./amount.js";
 import { amountNow, msat } from "./amount.js";
 import type { ThunderBridge } from "./client.js";
 import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
+import { throughFetch } from "./outbound.js";
 import { relayedVerifyUrl } from "./relay.js";
 
 const NONCE_BYTES = 16;
@@ -272,7 +273,7 @@ async function mintBlind(
   address: string,
   amountMsat: number,
 ): Promise<{ bolt11: string; verifyUrl: string }> {
-  const resolved = await resolve([address], amountMsat);
+  const resolved = await resolve(throughFetch, [address], amountMsat);
   const minted: Minted = { ...resolved, amountMsat, lnAddress: resolved.address };
   const locked = config.sealed;
   const relay = config.relayThrough;

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkSettled } from "../../core/lnurl.js";
+import { throughFetch } from "../src/outbound";
 import { lightningVerifyEndpoint, relayedVerifyUrl } from "../src/relay";
 
 vi.mock("node:dns/promises", () => ({
@@ -117,6 +118,6 @@ describe("lightningVerifyEndpoint", () => {
       ),
     );
 
-    expect(await checkSettled(url, HASH)).toEqual({ preimage: PREIMAGE, pace: 5, ceiling: null });
+    expect(await checkSettled(throughFetch, url, HASH)).toEqual({ preimage: PREIMAGE, pace: 5, ceiling: null });
   });
 });

@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 
+import type { Send } from "../core/outbound.ts";
 import {
 	byDomain,
 	lud16Of,
@@ -63,16 +64,10 @@ const WELL_KNOWN = "https://wallet.example/.well-known/lnurlp/someone";
 const CALLBACK = "https://wallet.example/callback";
 const VERIFY = "https://wallet.example/verify/abc";
 
-function answering(routes: Record<string, unknown>): () => void {
-	const real = globalThis.fetch;
-	globalThis.fetch = ((target: string | URL | Request) => {
-		const body = routes[String(target)];
-		return Promise.resolve(
-			body === undefined ? new Response("no route", { status: 404 }) : Response.json(body),
-		);
-	}) as typeof fetch;
-	return () => {
-		globalThis.fetch = real;
+function answering(routes: Record<string, unknown>): Send {
+	return async (url) => {
+		const body = routes[url];
+		return body === undefined ? new Response("no route", { status: 404 }) : Response.json(body);
 	};
 }
 
@@ -91,64 +86,39 @@ function servedBy(overrides: Record<string, unknown> = {}): Record<string, unkno
 }
 
 test("a wallet answering settled and preimage is usable", async () => {
-	const restore = answering(servedBy());
-	try {
-		const measured = await measure("someone@wallet.example");
-		expect(measured.verdict).toBe("usable");
-	} finally {
-		restore();
-	}
+	const send = answering(servedBy());
+	const measured = await measure(send, "someone@wallet.example");
+	expect(measured.verdict).toBe("usable");
 });
 
 test("a verify answering without a preimage key is what the denylist is for", async () => {
-	const restore = answering(servedBy({ [VERIFY]: { status: "OK", settled: false, pr: "lnbc1" } }));
-	try {
-		const measured = await measure("someone@wallet.example");
-		expect(measured.verdict).toBe("verify-without-preimage");
-		expect(measured.note).toContain("pr");
-	} finally {
-		restore();
-	}
+	const send = answering(servedBy({ [VERIFY]: { status: "OK", settled: false, pr: "lnbc1" } }));
+	const measured = await measure(send, "someone@wallet.example");
+	expect(measured.verdict).toBe("verify-without-preimage");
+	expect(measured.note).toContain("pr");
 });
 
 test("a settled that is not a boolean proves nothing either", async () => {
-	const restore = answering(
+	const send = answering(
 		servedBy({ [VERIFY]: { status: "OK", settled: "false", preimage: null } }),
 	);
-	try {
-		expect((await measure("someone@wallet.example")).verdict).toBe("verify-without-preimage");
-	} finally {
-		restore();
-	}
+	expect((await measure(send, "someone@wallet.example")).verdict).toBe("verify-without-preimage");
 });
 
 test("an invoice carrying no verify URL is the wallet this service cannot serve", async () => {
-	const restore = answering(servedBy({ [`${CALLBACK}?amount=1000`]: { pr: "lnbc1" } }));
-	try {
-		expect((await measure("someone@wallet.example")).verdict).toBe("no-verify");
-	} finally {
-		restore();
-	}
+	const send = answering(servedBy({ [`${CALLBACK}?amount=1000`]: { pr: "lnbc1" } }));
+	expect((await measure(send, "someone@wallet.example")).verdict).toBe("no-verify");
 });
 
 test("a broken account reads as unreachable rather than as a wallet without verify", async () => {
-	const restore = answering(servedBy({ [`${CALLBACK}?amount=1000`]: undefined }));
-	try {
-		expect((await measure("someone@wallet.example")).verdict).toBe("unreachable");
-	} finally {
-		restore();
-	}
+	const send = answering(servedBy({ [`${CALLBACK}?amount=1000`]: undefined }));
+	expect((await measure(send, "someone@wallet.example")).verdict).toBe("unreachable");
 
-	const withoutProfile = answering({});
-	try {
-		expect((await measure("someone@wallet.example")).verdict).toBe("unreachable");
-	} finally {
-		withoutProfile();
-	}
+	expect((await measure(answering({}), "someone@wallet.example")).verdict).toBe("unreachable");
 });
 
 test("an amount no wallet on the domain would take is its own answer", async () => {
-	const restore = answering(
+	const send = answering(
 		servedBy({
 			[WELL_KNOWN]: {
 				tag: "payRequest",
@@ -158,18 +128,14 @@ test("an amount no wallet on the domain would take is its own answer", async () 
 			},
 		}),
 	);
-	try {
-		const measured = await measure("someone@wallet.example");
-		expect(measured.verdict).toBe("amount-refused");
-		expect(measured.note).toContain("500");
-	} finally {
-		restore();
-	}
+	const measured = await measure(send, "someone@wallet.example");
+	expect(measured.verdict).toBe("amount-refused");
+	expect(measured.note).toContain("500");
 });
 
 test("a callback that already carries a query keeps it", async () => {
 	const withQuery = "https://wallet.example/callback?id=7";
-	const restore = answering({
+	const send = answering({
 		[WELL_KNOWN]: {
 			tag: "payRequest",
 			callback: withQuery,
@@ -179,9 +145,5 @@ test("a callback that already carries a query keeps it", async () => {
 		[`${withQuery}&amount=1000`]: { pr: "lnbc1", verify: VERIFY },
 		[VERIFY]: { status: "OK", settled: false, preimage: null },
 	});
-	try {
-		expect((await measure("someone@wallet.example")).verdict).toBe("usable");
-	} finally {
-		restore();
-	}
+	expect((await measure(send, "someone@wallet.example")).verdict).toBe("usable");
 });

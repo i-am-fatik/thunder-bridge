@@ -3,7 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { bytesToHex } from "../core/bytes.ts";
 import type { SigningKey } from "../core/ed25519.ts";
 import { checkSettled } from "../core/lnurl.ts";
-import { ask } from "../core/outbound.ts";
+import { ask, type Send } from "../core/outbound.ts";
 import * as log from "./log.ts";
 import type { Delivery, Payment, Webhook } from "./payment.ts";
 import type { Store } from "./store.ts";
@@ -26,11 +26,17 @@ export type Budget = {
 	ceiling: Map<string, number>;
 };
 
+export type Outbound = {
+	send: Send;
+	webhookKey: SigningKey;
+};
+
 export type Watcher = {
 	store: Store;
 	eagerDelayMs: number;
 	budget: Budget;
 	webhookKey: SigningKey;
+	send: Send;
 };
 
 export async function tick(watcher: Watcher): Promise<void> {
@@ -52,7 +58,7 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 	const host = hostOf(payment.verifyUrl);
 	await spend(watcher.budget, host);
 
-	const settlement = await checkSettled(payment.verifyUrl, payment.paymentHash).catch(
+	const settlement = await checkSettled(watcher.send, payment.verifyUrl, payment.paymentHash).catch(
 		(error: unknown) => {
 			log.warn(`verify poll for ${payment.id} failed: ${String(error)}`);
 			return null;
@@ -95,7 +101,7 @@ async function deliverDue(watcher: Watcher): Promise<void> {
 }
 
 async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {
-	if (!(await notify(owed, watcher.webhookKey))) {
+	if (!(await notify(watcher, owed))) {
 		if (watcher.store.undelivered(owed) === "abandoned") {
 			log.error(`webhook for ${owed.id} abandoned, its payment ran out of time to retry in`);
 		}
@@ -106,11 +112,11 @@ async function deliver(watcher: Watcher, owed: Delivery): Promise<void> {
 	watcher.store.delivered(owed);
 }
 
-async function notify(owed: Delivery, gatewayKey: SigningKey): Promise<boolean> {
+async function notify(outbound: Outbound, owed: Delivery): Promise<boolean> {
 	try {
-		const answer = await ask(owed.url, {
+		const answer = await ask(outbound.send, owed.url, {
 			method: "POST",
-			headers: await signedHeaders(owed.body, gatewayKey),
+			headers: await signedHeaders(owed.body, outbound.webhookKey),
 			body: owed.body,
 		});
 		if (!answer.ok) {
@@ -123,22 +129,22 @@ async function notify(owed: Delivery, gatewayKey: SigningKey): Promise<boolean> 
 	}
 }
 
-export async function confirmWebhook(hook: Webhook, gatewayKey: SigningKey): Promise<boolean> {
-	return await consents(hook.url, CHALLENGE, gatewayKey);
+export async function confirmWebhook(outbound: Outbound, hook: Webhook): Promise<boolean> {
+	return await consents(outbound, hook.url, CHALLENGE);
 }
 
-export async function confirmVerify(url: string, gatewayKey: SigningKey): Promise<boolean> {
-	return await consents(url, VERIFY_CHALLENGE, gatewayKey);
+export async function confirmVerify(outbound: Outbound, url: string): Promise<boolean> {
+	return await consents(outbound, url, VERIFY_CHALLENGE);
 }
 
-async function consents(url: string, type: string, gatewayKey: SigningKey): Promise<boolean> {
+async function consents(outbound: Outbound, url: string, type: string): Promise<boolean> {
 	const nonce = bytesToHex(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
 	const body = JSON.stringify({ type, nonce });
 
 	try {
-		const answer = await ask(url, {
+		const answer = await ask(outbound.send, url, {
 			method: "POST",
-			headers: await signedHeaders(body, gatewayKey),
+			headers: await signedHeaders(body, outbound.webhookKey),
 			body,
 		});
 		if (!answer.ok) {
