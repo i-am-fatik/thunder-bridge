@@ -68,7 +68,7 @@ const OPEN = {
 	"access-control-allow-headers": "content-type, authorization",
 };
 const PING_INTERVAL_MS = 30_000;
-const TICK_INTERVAL_MS = 1_000;
+const LONGEST_SLEEP_MS = 60_000;
 const SWEEP_INTERVAL_MS = 60_000;
 const EXPIRED_GRACE_SECS = 3600;
 const CLAIM_LEASE_SECS = RESOLVE_TIMEOUT_MS / 1000 + 10;
@@ -206,9 +206,14 @@ export async function start(
 	};
 
 	let draining = false;
-	let firedAt = Date.now();
+	let ticking = false;
+	let tickDueAt = Date.now();
 	const vitals = (): Vitals =>
-		draining ? "draining" : Date.now() - firedAt > tickStallMs ? "stalled" : "serving";
+		draining
+			? "draining"
+			: !ticking && Date.now() - tickDueAt > tickStallMs
+				? "stalled"
+				: "serving";
 
 	const followers = new Map<WebSocket, Follower>();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
@@ -323,20 +328,32 @@ export async function start(
 		}
 	}, SWEEP_INTERVAL_MS);
 
-	let ticking = false;
 	let inFlight: Promise<void> = Promise.resolve();
-	const ticker = setInterval(() => {
-		firedAt = Date.now();
-		if (ticking) {
-			return;
-		}
+	let ticker: ReturnType<typeof setTimeout> | undefined;
+
+	const runTick = () => {
 		ticking = true;
 		inFlight = tick(watcher)
 			.catch((error: unknown) => log.warn(`tick failed: ${String(error)}`))
 			.finally(() => {
 				ticking = false;
+				armTicker();
 			});
-	}, TICK_INTERVAL_MS);
+	};
+
+	const armTicker = () => {
+		if (ticking || draining) {
+			return;
+		}
+		const due = store.nextDueAt();
+		const ceiling = Date.now() + LONGEST_SLEEP_MS;
+		tickDueAt = due === null ? ceiling : Math.min(ceiling, due * 1000);
+		clearTimeout(ticker);
+		ticker = setTimeout(runTick, Math.max(0, tickDueAt - Date.now()));
+	};
+
+	store.onScheduled = armTicker;
+	armTicker();
 
 	const bound = server.address();
 	const at = typeof bound === "string" ? bound : (bound as AddressInfo).port;
@@ -350,7 +367,7 @@ export async function start(
 			}
 			draining = true;
 			clearInterval(keepalive);
-			clearInterval(ticker);
+			clearTimeout(ticker);
 			clearInterval(sweeper);
 			await Promise.race([inFlight, sleep(drainTimeoutMs, undefined, { ref: false })]);
 			for (const socket of followers.keys()) {

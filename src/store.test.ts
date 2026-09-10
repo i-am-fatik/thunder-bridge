@@ -99,6 +99,35 @@ test("a lease taken for no time at all hands the same work straight back", () =>
 	}
 });
 
+test("a worklist with nothing on it is due at no moment, so the watcher has nothing to wake for", () => {
+	const { store, stop } = openStore();
+	try {
+		expect(store.nextDueAt()).toBeNull();
+
+		const one = store.insert(payment(0));
+		expect(store.nextDueAt()).toBe(unixNow());
+
+		store.polled(one.id, null);
+		expect(store.nextDueAt()).toBeNull();
+	} finally {
+		stop();
+	}
+});
+
+test("the watcher sleeps until the sooner of a poll and a webhook, not until whichever it looked at", () => {
+	const { store, stop } = openStore();
+	try {
+		const polling = store.insert(payment(0));
+		store.polled(polling.id, unixNow() + 600);
+		expect(store.nextDueAt()).toBe(unixNow() + 600);
+
+		store.paid(store.insert(payment(1)).id, preimage(1));
+		expect(store.nextDueAt()).toBe(0);
+	} finally {
+		stop();
+	}
+});
+
 test("a payment parked with no due time is never handed out again", () => {
 	const { store, stop } = openStore();
 	try {

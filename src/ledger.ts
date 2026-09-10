@@ -228,6 +228,7 @@ type Statements = {
 	forget: StatementSync;
 	claim: StatementSync;
 	polled: StatementSync;
+	nextDue: StatementSync;
 	justExpired: StatementSync;
 	announce: StatementSync;
 	prune: StatementSync;
@@ -323,6 +324,13 @@ export class Ledger {
 				"UPDATE schedule SET dueAt = ? WHERE id IN (SELECT id FROM schedule WHERE dueAt <= ? ORDER BY dueAt LIMIT ?) RETURNING id",
 			),
 			polled: this.db.prepare("UPDATE schedule SET dueAt = ? WHERE id = ?"),
+			nextDue: this.db.prepare(
+				`SELECT min(dueAt) AS dueAt FROM (
+					SELECT min(dueAt) AS dueAt FROM schedule WHERE dueAt IS NOT NULL
+					UNION ALL
+					SELECT min(dueAt) AS dueAt FROM outbox WHERE dueAt IS NOT NULL
+				)`,
+			),
 			justExpired: this.db.prepare(
 				"SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0",
 			),
@@ -579,6 +587,10 @@ export class Ledger {
 
 	polled(id: string, dueAt: number | null): void {
 		this.statements.polled.run(dueAt, id);
+	}
+
+	nextDueAt(): number | null {
+		return (this.statements.nextDue.get() as { dueAt: number | null }).dueAt;
 	}
 
 	settlement(id: string): PublicPayment | null {

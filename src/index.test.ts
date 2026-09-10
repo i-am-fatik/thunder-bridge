@@ -830,7 +830,7 @@ test("an instance told to hold nothing takes no new work and keeps what it has",
 	expect(refused.headers.get("ratelimit-limit")).toBe("0");
 
 	expect((await readAs(app, mine.id, null)).status).toBe(200);
-	expect(app.store.duePolls(10, 0).map((one) => one.id)).toEqual([mine.id]);
+	expect(app.store.info().pending).toBe(1);
 
 	app.stop();
 });
@@ -1516,6 +1516,18 @@ test("a draining instance turns readiness down and waits for the tick in flight"
 		expect(draining.status).toBe(503);
 		expect(((await draining.json()) as Problem)["title"]).toBe("Service Unavailable");
 		await stopping;
+	} finally {
+		app.stop();
+	}
+});
+
+test("an idle instance sleeps instead of ticking, and stays live for as long as it sleeps", async () => {
+	const app = await runningWith({ tickStallMs: 100 });
+	try {
+		expect(app.store.nextDueAt()).toBeNull();
+		await new Promise((done) => setTimeout(done, 250));
+
+		expect((await fetch(`http://127.0.0.1:${app.service.at}/health`)).status).toBe(200);
 	} finally {
 		app.stop();
 	}

@@ -32,6 +32,8 @@ export class Store {
 
 	onChange: (payment: Payment) => void = () => {};
 
+	onScheduled: () => void = () => {};
+
 	private readonly ledger: Ledger;
 	private readonly key: Uint8Array;
 	private readonly maxPending: number;
@@ -49,6 +51,7 @@ export class Store {
 				for (const settled of this.ledger.absorb(facts)) {
 					this.onChange(asPayment(settled));
 				}
+				this.onScheduled();
 			},
 			onConverged: () => {
 				this.convergedAt = Math.floor(Date.now() / 1000);
@@ -84,6 +87,7 @@ export class Store {
 
 		const taken = this.ledger.accept({ ...unsaved, id });
 		this.spread(taken.facts);
+		this.onScheduled();
 
 		return taken.payment;
 	}
@@ -126,6 +130,7 @@ export class Store {
 		const { settled, facts } = this.ledger.settle(pending, preimage);
 		announce(this.gossip, { facts, more: false });
 		this.onChange(asPayment(settled));
+		this.onScheduled();
 
 		return { payment: asPayment(settled, pending), won: true };
 	}
@@ -148,6 +153,10 @@ export class Store {
 
 	polled(id: string, dueAt: number | null): void {
 		this.ledger.polled(id, dueAt);
+	}
+
+	nextDueAt(): number | null {
+		return this.ledger.nextDueAt();
 	}
 
 	dueDeliveries(limit: number, leaseSecs: number): Delivery[] {
@@ -175,7 +184,10 @@ export class Store {
 	}
 
 	sweep(graceSecs: number, keepSealedSecs: number): Payment[] {
-		return this.ledger.sweep(graceSecs, keepSealedSecs);
+		const expired = this.ledger.sweep(graceSecs, keepSealedSecs);
+		this.onScheduled();
+
+		return expired;
 	}
 
 	kept(id: string): Kept | null {
