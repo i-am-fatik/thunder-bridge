@@ -243,5 +243,7 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   durability actually depends on, for whoever runs one of these for somebody else.
 - [sdk/](sdk) - the JavaScript client, which proves an invoice before the payer
   sees it.
+- [docs/recipes.md](docs/recipes.md) - one runnable program per use case, generated from
+  `examples/` and compiled against the published package.
 
 MIT.

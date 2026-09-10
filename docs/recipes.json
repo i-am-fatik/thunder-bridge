@@ -1,0 +1,70 @@
+{
+	"reference": "api.md",
+	"recipes": [
+		{
+			"slug": "tip-jar",
+			"title": "Tip jar on a static page",
+			"intent": "Take a tip with no backend of your own and no wallet of your own",
+			"rail": "rails.lightning",
+			"shows": [
+				"one call mints the invoice, proves it against the recipient's own domain and draws the QR",
+				"the QR is an SVG string, so any container that takes innerHTML can hold it",
+				"paid asks the gateway and prove asks the recipient's own server, and only the second is evidence",
+				"who is paid, how much and which gateway all have a default, so the whole jar is one call"
+			],
+			"source": "import { type Charge, sats, ThunderBridge } from \"thunder-bridge\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport async function tipJar(\n  into: { innerHTML: string },\n  charge: Charge = { paidTo: [\"iamfatik@blink.sv\"], amount: sats(21) },\n  via = DEMO_GATEWAY,\n): Promise<string | null> {\n  const gateway = new ThunderBridge(via);\n\n  const asked = await gateway.requestPayment(charge);\n\n  into.innerHTML = asked.qr;\n\n  await asked.paid();\n\n  return await asked.prove();\n}\n",
+			"calls": [
+				{
+					"name": "Charge",
+					"line": 1,
+					"anchor": "thunder-bridge-interface-charge"
+				},
+				{
+					"name": "sats",
+					"line": 1,
+					"anchor": "thunder-bridge-function-sats"
+				},
+				{
+					"name": "ThunderBridge",
+					"line": 1,
+					"anchor": "thunder-bridge-class-thunderbridge"
+				},
+				{
+					"name": "Charge",
+					"line": 7,
+					"anchor": "thunder-bridge-interface-charge"
+				},
+				{
+					"name": "sats",
+					"line": 7,
+					"anchor": "thunder-bridge-function-sats"
+				},
+				{
+					"name": "ThunderBridge",
+					"line": 10,
+					"anchor": "thunder-bridge-class-thunderbridge"
+				},
+				{
+					"name": "ThunderBridge.requestPayment",
+					"line": 12,
+					"anchor": "thunder-bridge-class-thunderbridge-requestpayment"
+				},
+				{
+					"name": "PaymentRequest.qr",
+					"line": 14,
+					"anchor": "thunder-bridge-interface-paymentrequest"
+				},
+				{
+					"name": "PaymentRequest.paid",
+					"line": 16,
+					"anchor": "thunder-bridge-interface-paymentrequest"
+				},
+				{
+					"name": "PaymentRequest.prove",
+					"line": 18,
+					"anchor": "thunder-bridge-interface-paymentrequest"
+				}
+			]
+		}
+	]
+}

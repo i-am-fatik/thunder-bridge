@@ -14,7 +14,14 @@
 			"src/**/*.ts",
 			"tools/**/*.ts",
 			"sdk/src/**/*.ts",
-			"sdk/test/**/*.ts"
+			"sdk/test/**/*.ts",
+			"examples/*/*.ts"
 		]
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["examples/*/*.ts"],
+			"formatter": { "indentStyle": "space", "indentWidth": 2 }
+		}
+	]
 }

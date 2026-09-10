@@ -445,6 +445,8 @@ somewhere other than the delivery.
   and their failure codes, what settlement means, making the gateway poll nobody but
   you, the NWC rail, wrapped invoices, and webhooks in full
 - [docs/api.md](../docs/api.md) - every export, generated from the code
+- [docs/recipes.md](../docs/recipes.md) - one runnable program per use case, every name in
+  it linked to its own entry in the reference
 - [the gateway](../README.md) - one level up in this repository
 
 ## Development

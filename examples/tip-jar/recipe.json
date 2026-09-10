@@ -1,0 +1,11 @@
+{
+  "title": "Tip jar on a static page",
+  "intent": "Take a tip with no backend of your own and no wallet of your own",
+  "rail": "rails.lightning",
+  "shows": [
+    "one call mints the invoice, proves it against the recipient's own domain and draws the QR",
+    "the QR is an SVG string, so any container that takes innerHTML can hold it",
+    "paid asks the gateway and prove asks the recipient's own server, and only the second is evidence",
+    "who is paid, how much and which gateway all have a default, so the whole jar is one call"
+  ]
+}

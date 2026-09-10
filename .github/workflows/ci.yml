@@ -42,10 +42,15 @@ jobs:
         run: node tools/readme-check.ts .
       - name: a reference nobody regenerated, or an export with no tsdoc to generate it from
         run: node tools/api-reference.ts --check .
-      - name: a readme example that no longer compiles against the client it documents
+      - name: a recipe that stopped compiling, or a manifest nobody regenerated
+        run: node tools/recipes.ts --check .
+      - name: a readme example or a recipe that no longer compiles against the client it documents
         run: |
           fences=$(mktemp -d)
           node tools/readme-check.ts . --fences "$fences"
+          for recipe in examples/*/; do
+            cp "$recipe/main.ts" "$fences/src/$(basename "$recipe").ts"
+          done
           (cd sdk && npm pack --pack-destination "$fences" >/dev/null)
           cd "$fences"
           printf '{"type":"module","private":true}' > package.json
