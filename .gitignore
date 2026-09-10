@@ -7,3 +7,5 @@ data/
 dev/volumes/
 wrap-lab.ledger.json
 wrap-lab.ledger.json.writing
+
+docs/demo/bundle.js

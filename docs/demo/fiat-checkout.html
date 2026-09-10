@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A price named in dollars, paid in bitcoin - running</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="label">thunder-bridge &middot; examples/fiat-checkout/main.ts &middot; live</div>
+    <h1>A price named in dollars, paid in bitcoin</h1>
+    <p class="intent">Charge 0.21 USD without ever converting it yourself. The code below is the recipe verbatim, and the
+    highlighted values are its own defaults, editable here and remembered by your browser.</p>
+    <p class="intent"><a href="tip-jar.html">tip-jar</a> &middot; fiat-checkout &middot; <a href="pay-me.html">pay-me</a></p>
+  </header>
+
+  <div class="cols">
+
+    <div class="card">
+      <h2><span>examples/fiat-checkout/main.ts</span></h2>
+      <div class="code">
+<div class="row" id="L1"><span class="ln">1</span><span class="src">import { type <a href="../api.md#thunder-bridge-interface-charge" title="Charge">Charge</a>, <a href="../api.md#thunder-bridge-function-fiat" title="fiat">fiat</a>, <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a> } from "thunder-bridge";</span></div>
+<div class="row" id="L2"><span class="ln">2</span><span class="src">import { <a href="../api.md#thunder-bridge-price-function-coinbase" title="coinbase">coinbase</a>, <a href="../api.md#thunder-bridge-price-function-kraken" title="kraken">kraken</a>, <a href="../api.md#thunder-bridge-price-function-medianof" title="medianOf">medianOf</a> } from "thunder-bridge/price";</span></div>
+<div class="row" id="L3"><span class="ln">3</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L4"><span class="ln">4</span><span class="src">export const DEMO_GATEWAY = "<span class="edit" data-key="gateway" data-kind="url" contenteditable="plaintext-only" spellcheck="false">https://public.thunder-bridge.agora.gripe</span>";</span></div>
+<div class="row" id="L5"><span class="ln">5</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L6"><span class="ln">6</span><span class="src">export async function checkout(</span></div>
+<div class="row" id="L7"><span class="ln">7</span><span class="src">  into: { innerHTML: string },</span></div>
+<div class="row" id="L8"><span class="ln">8</span><span class="src">  charge: <a href="../api.md#thunder-bridge-interface-charge" title="Charge">Charge</a> = {</span></div>
+<div class="row" id="L9"><span class="ln">9</span><span class="src">    paidTo: ["iamfatik@blink.sv"],</span></div>
+<div class="row" id="L10"><span class="ln">10</span><span class="src">    amount: <a href="../api.md#thunder-bridge-function-fiat" title="fiat">fiat</a>("0.21", "USD", {</span></div>
+<div class="row" id="L11"><span class="ln">11</span><span class="src">      rate: <a href="../api.md#thunder-bridge-price-function-medianof" title="medianOf">medianOf</a>([<a href="../api.md#thunder-bridge-price-function-coinbase" title="coinbase">coinbase</a>(), <a href="../api.md#thunder-bridge-price-function-kraken" title="kraken">kraken</a>()], { maxSpreadBps: 50 }),</span></div>
+<div class="row" id="L12"><span class="ln">12</span><span class="src">      spreadBps: 100,</span></div>
+<div class="row" id="L13"><span class="ln">13</span><span class="src">    }),</span></div>
+<div class="row" id="L14"><span class="ln">14</span><span class="src">  },</span></div>
+<div class="row" id="L15"><span class="ln">15</span><span class="src">  via = DEMO_GATEWAY,</span></div>
+<div class="row" id="L16"><span class="ln">16</span><span class="src">): Promise&lt;string | null&gt; {</span></div>
+<div class="row" id="L17"><span class="ln">17</span><span class="src">  const gateway = new <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a>(via);</span></div>
+<div class="row" id="L18"><span class="ln">18</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L19"><span class="ln">19</span><span class="src">  const asked = await gateway.<a href="../api.md#thunder-bridge-class-thunderbridge-requestpayment" title="ThunderBridge.requestPayment">requestPayment</a>(charge);</span></div>
+<div class="row" id="L20"><span class="ln">20</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L21"><span class="ln">21</span><span class="src">  into.innerHTML = asked.<a href="../api.md#thunder-bridge-interface-paymentrequest" title="PaymentRequest.qr">qr</a>;</span></div>
+<div class="row" id="L22"><span class="ln">22</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L23"><span class="ln">23</span><span class="src">  await asked.<a href="../api.md#thunder-bridge-interface-paymentrequest" title="PaymentRequest.paid">paid</a>();</span></div>
+<div class="row" id="L24"><span class="ln">24</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L25"><span class="ln">25</span><span class="src">  return await asked.<a href="../api.md#thunder-bridge-interface-paymentrequest" title="PaymentRequest.prove">prove</a>();</span></div>
+<div class="row" id="L26"><span class="ln">26</span><span class="src">}</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Run it</h2>
+        <div class="body">
+          <div class="controls">
+            <button id="run">Mint a real invoice</button>
+            <button id="reset" class="ghost">Back to the defaults</button>
+          </div>
+          <p class="warn">This mints a <b>real invoice</b> against the address in the code, on the gateway in the code. Nobody has to pay it, it expires on its own.</p>
+
+          <ul class="steps">
+<li data-step="mint" data-line="19"><span class="dot"></span><span class="what">mint the invoice and prove where it came from</span><span class="at">line 19</span></li>
+<li data-step="qr" data-line="21"><span class="dot"></span><span class="what">draw the QR</span><span class="at">line 21</span></li>
+<li data-step="wait" data-line="23"><span class="dot"></span><span class="what">wait for the money</span><span class="at">line 23</span></li>
+<li data-step="prove" data-line="25"><span class="dot"></span><span class="what">ask the recipient's own server</span><span class="at">line 25</span></li>
+          </ul>
+
+          <div id="qrcard"><div id="qr"></div><div class="bolt" id="bolt"></div><div class="ident" id="ident"></div></div>
+          <div class="verdict" id="verdict"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1.75rem">
+        <h2>What actually went over the wire</h2>
+        <div class="wire" id="wire"><span class="empty">Nothing yet. Every request and socket frame
+        the recipe makes will appear here as it happens.</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    Generated from <code>docs/recipes.json</code> by <code>tools/demo.ts</code>. Every linked name was
+    found by the compiler. The running code is the recipe itself, bundled against the built package.
+  </footer>
+
+</div>
+
+<script type="application/json" id="recipe">{"slug":"fiat-checkout","call":"checkout","defaults":{"gateway":"https://public.thunder-bridge.agora.gripe"}}</script>
+<script type="module" src="page.js"></script>
+</body>
+</html>

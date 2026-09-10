@@ -44,6 +44,8 @@ jobs:
         run: node tools/api-reference.ts --check .
       - name: a recipe that stopped compiling, or a manifest nobody regenerated
         run: node tools/recipes.ts --check .
+      - name: a demo page nobody regenerated after the recipe moved
+        run: node tools/demo.ts --check .
       - name: a readme example or a recipe that no longer compiles against the client it documents
         run: |
           fences=$(mktemp -d)
