@@ -1,4 +1,11 @@
-import { checkout, invoiceToSvg, lnurlEndpointToSvg, sats, tipJar } from "./bundle.js";
+import {
+  checkout,
+  invoiceToSvg,
+  lnurlEndpointToSvg,
+  sats,
+  tipJar,
+  watchAPlace,
+} from "./bundle.js";
 
 const RECIPE = JSON.parse(document.getElementById("recipe").textContent);
 const KEY = `thunder-bridge:${RECIPE.slug}`;
@@ -13,6 +20,7 @@ async function asJson(url) {
 }
 
 async function askTheEndpoint(into) {
+  await fetch(`/paid-to?to=${encodeURIComponent(typed().paidTo)}`, { method: "POST" });
   const offered = await asJson("/lnurlp/tips");
   stepAt("ask", "done");
   stepAt("callback", "running");
@@ -216,7 +224,23 @@ try {
 } catch {}
 paint();
 
+async function followThisPlace() {
+  const arrived = document.getElementById("arrived");
+  const { watchSecret } = await (await fetch("/watch-secret")).json();
+
+  watchAPlace(watchSecret, (settled) => {
+    arrived.querySelector(".empty")?.remove();
+    const row = document.createElement("div");
+    row.innerHTML =
+      `<span class="verb">paid</span><span class="code2 ok">${settled.amountMsat / 1000}</span>` +
+      `<span class="where">satoshi, preimage ${String(settled.preimage).slice(0, 16)}...</span>`;
+    arrived.append(row);
+    arrived.scrollTop = arrived.scrollHeight;
+  });
+}
+
 if (RECIPE.call === "payMe") {
+  followThisPlace();
   qr.innerHTML = lnurlEndpointToSvg(`${location.origin}/lnurlp/tips`);
   qrCard.classList.add("on");
   bolt.textContent =

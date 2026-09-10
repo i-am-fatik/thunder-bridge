@@ -6,6 +6,7 @@
     "the endpoint is a fetch handler, so it mounts on anything that speaks Request and Response",
     "a range instead of one amount is what makes a wallet offer a field to type in",
     "the QR carries your own url, so the addresses behind it can change without reprinting it",
-    "the secret signs the callback, so nobody else can make the endpoint mint on your wallets"
+    "the secret signs the callback, so nobody else can make the endpoint mint on your wallets",
+    "the watch secret is a second, weaker key, and watch-a-place is what reads it"
   ]
 }

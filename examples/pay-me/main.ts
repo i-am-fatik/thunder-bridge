@@ -7,6 +7,8 @@ export function payMe(
   into: { innerHTML: string },
   endpoint: string,
   secret: string,
+  watchSecret: string,
+  paidTo: string | string[] = ["iamfatik@blink.sv"],
   via = DEMO_GATEWAY,
 ): Handler {
   const gateway = new ThunderBridge(via);
@@ -14,8 +16,9 @@ export function payMe(
   into.innerHTML = lnurlEndpointToSvg(endpoint);
 
   return gateway.serve.lnurlPay({
-    paidTo: ["iamfatik@blink.sv"],
+    paidTo,
     amount: { least: sats(21), most: sats(210_000) },
     secret,
+    watchSecret,
   });
 }

@@ -5,6 +5,7 @@ import { DEMO_GATEWAY, payMe } from "./main.ts";
 
 const ENDPOINT = "https://shop.example.org/lnurlp/tips";
 const SECRET = "a-long-lived-server-side-secret";
+const WATCH_SECRET = "a-second-weaker-key-that-only-reads";
 const LN_ADDRESS = "iamfatik@blink.sv";
 
 function quoting(): Routes {
@@ -31,7 +32,7 @@ test("the endpoint answers a payRequest, and the range is what the payer gets to
   stubFetch(quoting());
   const into = { innerHTML: "" };
 
-  const handler = payMe(into, ENDPOINT, SECRET);
+  const handler = payMe(into, ENDPOINT, SECRET, WATCH_SECRET);
   const answer = await handler(new Request(ENDPOINT));
   const served = (await answer.json()) as Record<string, unknown>;
 
@@ -45,7 +46,7 @@ test("the endpoint answers a payRequest, and the range is what the payer gets to
 test("the QR is drawn for your own url, not for the address behind it", () => {
   const into = { innerHTML: "" };
 
-  payMe(into, ENDPOINT, SECRET);
+  payMe(into, ENDPOINT, SECRET, WATCH_SECRET);
 
   expect(into.innerHTML).toContain("<svg");
   expect(into.innerHTML).not.toContain(LN_ADDRESS);

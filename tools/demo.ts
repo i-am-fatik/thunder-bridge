@@ -54,7 +54,7 @@ export const RUNNABLE: Runnable[] = [
 			["callback", "Range"],
 			["invoice", "PaymentRequest"],
 		],
-		editable: [],
+		editable: [{ key: "paidTo", kind: "address", finds: /(?<=")[^"]+@[^"]+(?=")/ }],
 	},
 ];
 
@@ -132,7 +132,12 @@ export function sourceOf(
 	return { rows, defaults };
 }
 
-export function pageFor(recipe: Recipe, runnable: Runnable, others: Runnable[]): string {
+export function pageFor(
+	recipe: Recipe,
+	runnable: Runnable,
+	others: Runnable[],
+	alongside: Recipe | null,
+): string {
 	const { rows, defaults } = sourceOf(recipe, runnable.editable);
 	const nav = others
 		.map((one) =>
@@ -194,7 +199,19 @@ ${steps}
         </div>
       </div>
 
-      <div class="card" style="margin-top: 1.75rem">
+${
+	runnable.slug === "pay-me"
+		? `      <div class="card" style="margin-top: 1.75rem">
+        <h2><span>examples/watch-a-place/main.ts</span><em>following, since this page opened</em></h2>
+        <div class="code">
+${alongside === null ? "" : sourceOf(alongside, []).rows}
+        </div>
+        <div class="wire" id="arrived"><span class="empty">Nothing yet. Pay one of these invoices and
+        it lands here, because the endpoint carries a watch secret and this page follows it.</span></div>
+      </div>
+`
+		: ""
+}      <div class="card" style="margin-top: 1.75rem">
         <h2>What actually went over the wire</h2>
         <div class="wire" id="wire"><span class="empty">Nothing yet. Every request and socket frame
         the recipe makes will appear here as it happens.</span></div>
@@ -231,7 +248,10 @@ export function demoIn(root: string): { at: string; body: string }[] {
 			throw new Error(`${runnable.slug} is runnable but no such recipe exists`);
 		}
 
-		return { at: `docs/demo/${runnable.slug}.html`, body: pageFor(recipe, runnable, RUNNABLE) };
+		return {
+			at: `docs/demo/${runnable.slug}.html`,
+			body: pageFor(recipe, runnable, RUNNABLE, known.get("watch-a-place") ?? null),
+		};
 	});
 }
 

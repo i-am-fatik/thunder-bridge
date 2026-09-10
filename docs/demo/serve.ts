@@ -4,12 +4,19 @@ import { createServer } from "node:http";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { Handler } from "thunder-bridge";
+
 import { payMe } from "../../examples/pay-me/main.ts";
 
 const PORT = Number(process.env["PORT"] ?? 8788);
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const ORIGIN = `http://localhost:${PORT}`;
 const ENDPOINT = "/lnurlp/tips";
+const WATCHING = "/watch-secret";
+const WATCH_SECRET = process.env["WATCH_SECRET"] ?? randomUUID();
+const SECRET = process.env["PAYME_SECRET"] ?? randomUUID();
+const PAID_TO = "/paid-to";
+let paidTo = process.env["PAID_TO"] ?? "iamfatik@blink.sv";
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -17,11 +24,9 @@ const TYPES: Record<string, string> = {
   ".json": "application/json; charset=utf-8",
 };
 
-const answering = payMe(
-  { innerHTML: "" },
-  `${ORIGIN}${ENDPOINT}`,
-  process.env["PAYME_SECRET"] ?? randomUUID(),
-);
+function answering(): Handler {
+  return payMe({ innerHTML: "" }, `${ORIGIN}${ENDPOINT}`, SECRET, WATCH_SECRET, paidTo);
+}
 
 async function fileAt(pathname: string): Promise<Response> {
   const asked = join(HERE, pathname === "/" ? "tip-jar.html" : pathname.slice(1));
@@ -39,12 +44,6 @@ async function fileAt(pathname: string): Promise<Response> {
 }
 
 createServer(async (incoming, outgoing) => {
-  if (incoming.method !== "GET" && incoming.method !== "HEAD") {
-    outgoing.writeHead(405).end();
-
-    return;
-  }
-
   const url = URL.parse(incoming.url ?? "/", ORIGIN);
   if (url === null) {
     outgoing.writeHead(400).end();
@@ -52,8 +51,25 @@ createServer(async (incoming, outgoing) => {
     return;
   }
 
+  if (incoming.method === "POST" && url.pathname === PAID_TO) {
+    paidTo = url.searchParams.get("to") ?? paidTo;
+    outgoing.writeHead(204).end();
+
+    return;
+  }
+
+  if (incoming.method !== "GET" && incoming.method !== "HEAD") {
+    outgoing.writeHead(405).end();
+
+    return;
+  }
+
   const answer =
-    url.pathname === ENDPOINT ? await answering(new Request(url)) : await fileAt(url.pathname);
+    url.pathname === ENDPOINT
+      ? await answering()(new Request(url))
+      : url.pathname === WATCHING
+        ? Response.json({ watchSecret: WATCH_SECRET })
+        : await fileAt(url.pathname);
 
   outgoing.writeHead(answer.status, Object.fromEntries(answer.headers));
   outgoing.end(Buffer.from(await answer.arrayBuffer()));

@@ -11,6 +11,7 @@ recipe below was found by the TypeScript compiler and links to its own entry in
 | [A lightning address of your own](#pay-me) | `rails.lightning` | Print one QR that never expires and lets the payer choose what to give |
 | [Pick a wait back up after a reload](#resume-a-wait) | `rails.lightning` | Carry on waiting for an invoice you already minted, holding nothing but its id |
 | [Tip jar on a static page](#tip-jar) | `rails.lightning` | Take a tip with no backend of your own and no wallet of your own |
+| [Watch every payment made to one place](#watch-a-place) | `rails.lightning` | See the money arrive at an endpoint nobody is standing in front of |
 
 ## <a id="fiat-checkout"></a>A price named in dollars, paid in bitcoin
 
@@ -61,6 +62,8 @@ export function payMe(
   into: { innerHTML: string },
   endpoint: string,
   secret: string,
+  watchSecret: string,
+  paidTo: string | string[] = ["iamfatik@blink.sv"],
   via = DEMO_GATEWAY,
 ): <a href="api.md#thunder-bridge-type-handler">Handler</a> {
   const gateway = new <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a>(via);
@@ -68,9 +71,10 @@ export function payMe(
   into.innerHTML = <a href="api.md#thunder-bridge-qr-function-lnurlendpointtosvg">lnurlEndpointToSvg</a>(endpoint);
 
   return gateway.<a href="api.md#thunder-bridge-class-thunderbridge-serve">serve</a>.<a href="api.md#thunder-bridge-class-serve-lnurlpay">lnurlPay</a>({
-    paidTo: ["iamfatik@blink.sv"],
+    paidTo,
     amount: { least: <a href="api.md#thunder-bridge-function-sats">sats</a>(21), most: sats(210_000) },
     secret,
+    watchSecret,
   });
 }</code></pre>
 
@@ -78,6 +82,7 @@ export function payMe(
 - a range instead of one amount is what makes a wallet offer a field to type in
 - the QR carries your own url, so the addresses behind it can change without reprinting it
 - the secret signs the callback, so nobody else can make the endpoint mint on your wallets
+- the watch secret is a second, weaker key, and watch-a-place is what reads it
 
 ## <a id="resume-a-wait"></a>Pick a wait back up after a reload
 
@@ -140,3 +145,24 @@ export async function tipJar(
 - the QR is an SVG string, so any container that takes innerHTML can hold it
 - paid asks the gateway and prove asks the recipient's own server, and only the second is evidence
 - who is paid, how much and which gateway all have a default, so the whole jar is one call
+
+## <a id="watch-a-place"></a>Watch every payment made to one place
+
+See the money arrive at an endpoint nobody is standing in front of. It lives in `examples/watch-a-place/main.ts`, and what it claims is asserted in `examples/watch-a-place/main.test.ts`.
+
+<pre><code>import { type <a href="api.md#thunder-bridge-type-payment">Payment</a>, <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a> } from "thunder-bridge";
+
+export const DEMO_GATEWAY = "https://public.thunder-bridge.agora.gripe";
+
+export function watchAPlace(
+  watchSecret: string,
+  arrived: (settled: <a href="api.md#thunder-bridge-type-payment">Payment</a>) =&gt; void,
+  via = DEMO_GATEWAY,
+): () =&gt; void {
+  return new <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a>(via).<a href="api.md#thunder-bridge-class-thunderbridge-follow">follow</a>(watchSecret, { onPayment: arrived });
+}</code></pre>
+
+- the watch secret is the only handle, and it never travels in a QR
+- the recent settlements replay on connect, then it runs live
+- it reconnects on its own, and the function it returns is how you stop
+- watching is a different program from serving, so it holds no secret that mints

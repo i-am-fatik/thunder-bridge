@@ -1,0 +1,11 @@
+{
+  "title": "Watch every payment made to one place",
+  "intent": "See the money arrive at an endpoint nobody is standing in front of",
+  "rail": "rails.lightning",
+  "shows": [
+    "the watch secret is the only handle, and it never travels in a QR",
+    "the recent settlements replay on connect, then it runs live",
+    "it reconnects on its own, and the function it returns is how you stop",
+    "watching is a different program from serving, so it holds no secret that mints"
+  ]
+}
