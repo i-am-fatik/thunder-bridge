@@ -108,12 +108,17 @@
 				"the secret signs the callback, so nobody else can make the endpoint mint on your wallets",
 				"the watch secret is a second, weaker key, and watch-a-place is what reads it"
 			],
-			"source": "import { type Handler, sats, ThunderBridge } from \"thunder-bridge\";\nimport { lnurlEndpointToSvg } from \"thunder-bridge/qr\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport function payMe(\n  into: { innerHTML: string },\n  endpoint: string,\n  secret: string,\n  watchSecret: string,\n  paidTo: string | string[] = [\"iamfatik@blink.sv\"],\n  via = DEMO_GATEWAY,\n): Handler {\n  const gateway = new ThunderBridge(via);\n\n  into.innerHTML = lnurlEndpointToSvg(endpoint);\n\n  return gateway.serve.lnurlPay({\n    paidTo,\n    amount: { least: sats(21), most: sats(210_000) },\n    secret,\n    watchSecret,\n  });\n}\n",
+			"source": "import { type Handler, type Range, sats, ThunderBridge } from \"thunder-bridge\";\nimport { lnurlEndpointToSvg } from \"thunder-bridge/qr\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport function payMe(\n  into: { innerHTML: string },\n  endpoint: string,\n  secret: string,\n  watchSecret: string,\n  paidTo: string | string[] = [\"iamfatik@blink.sv\"],\n  range: Range = { least: sats(21), most: sats(210_000) },\n  via = DEMO_GATEWAY,\n): Handler {\n  const gateway = new ThunderBridge(via);\n\n  into.innerHTML = lnurlEndpointToSvg(endpoint);\n\n  return gateway.serve.lnurlPay({ paidTo, amount: range, secret, watchSecret });\n}\n",
 			"calls": [
 				{
 					"name": "Handler",
 					"line": 1,
 					"anchor": "thunder-bridge-type-handler"
+				},
+				{
+					"name": "Range",
+					"line": 1,
+					"anchor": "thunder-bridge-interface-range"
 				},
 				{
 					"name": "sats",
@@ -131,34 +136,39 @@
 					"anchor": "thunder-bridge-qr-function-lnurlendpointtosvg"
 				},
 				{
+					"name": "Range",
+					"line": 12,
+					"anchor": "thunder-bridge-interface-range"
+				},
+				{
+					"name": "sats",
+					"line": 12,
+					"anchor": "thunder-bridge-function-sats"
+				},
+				{
 					"name": "Handler",
-					"line": 13,
+					"line": 14,
 					"anchor": "thunder-bridge-type-handler"
 				},
 				{
 					"name": "ThunderBridge",
-					"line": 14,
+					"line": 15,
 					"anchor": "thunder-bridge-class-thunderbridge"
 				},
 				{
 					"name": "lnurlEndpointToSvg",
-					"line": 16,
+					"line": 17,
 					"anchor": "thunder-bridge-qr-function-lnurlendpointtosvg"
 				},
 				{
 					"name": "Serve.lnurlPay",
-					"line": 18,
+					"line": 19,
 					"anchor": "thunder-bridge-class-serve-lnurlpay"
 				},
 				{
 					"name": "ThunderBridge.serve",
-					"line": 18,
+					"line": 19,
 					"anchor": "thunder-bridge-class-thunderbridge-serve"
-				},
-				{
-					"name": "sats",
-					"line": 20,
-					"anchor": "thunder-bridge-function-sats"
 				}
 			]
 		},

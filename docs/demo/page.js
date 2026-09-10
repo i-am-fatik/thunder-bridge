@@ -1,7 +1,11 @@
 import {
   checkout,
+  coinbase,
+  fiat,
   invoiceToSvg,
+  kraken,
   lnurlEndpointToSvg,
+  medianOf,
   sats,
   tipJar,
   watchAPlace,
@@ -9,6 +13,7 @@ import {
 
 const RECIPE = JSON.parse(document.getElementById("recipe").textContent);
 const KEY = `thunder-bridge:${RECIPE.slug}`;
+const whole = (value) => Number(value.replace(/_/g, ""));
 async function asJson(url) {
   const answer = await fetch(url);
   const body = await answer.json();
@@ -19,18 +24,27 @@ async function asJson(url) {
   return body;
 }
 
-async function askTheEndpoint(into) {
-  await fetch(`/paid-to?to=${encodeURIComponent(typed().paidTo)}`, { method: "POST" });
+async function askTheEndpoint(values) {
+  const asked = new URLSearchParams({
+    to: values.paidTo,
+    least: String(whole(values.least)),
+    most: String(whole(values.most)),
+    via: values.gateway,
+  });
+  await fetch(`/paid-to?${asked}`, { method: "POST" });
   const offered = await asJson("/lnurlp/tips");
   stepAt("ask", "done");
   stepAt("callback", "running");
 
   const minted = await asJson(`${offered.callback}&amount=${offered.minSendable}`);
   stepAt("callback", "done");
-  into.innerHTML = invoiceToSvg(minted.pr);
-  bolt.textContent = "the invoice the callback minted, for exactly what you asked, so no wallet offers a field over it";
+  stepAt("invoice", "running");
+  mintedQr.innerHTML = invoiceToSvg(minted.pr);
+  mintedBolt.textContent = `a real invoice for ${offered.minSendable / 1000} satoshi, the least the range allows. Pay it and it lands below`;
+  mintedCard.classList.add("on");
+  stepAt("invoice", "done");
 
-  return minted.pr;
+  return { bolt11: minted.pr, least: offered.minSendable / 1000, most: offered.maxSendable / 1000 };
 }
 
 const SETTLED = (preimage) =>
@@ -41,23 +55,36 @@ const SETTLED = (preimage) =>
 const RUNS = {
   tipJar: {
     run: (into, values) =>
-      tipJar(into, { paidTo: values.paidTo, amount: sats(Number(values.sats)) }, values.gateway),
+      tipJar(into, { paidTo: values.paidTo, amount: sats(whole(values.sats)) }, values.gateway),
     said: SETTLED,
   },
   checkout: {
-    run: (into, values) => checkout(into, undefined, values.gateway),
+    run: (into, values) =>
+      checkout(
+        into,
+        {
+          paidTo: values.paidTo,
+          amount: fiat(values.price, values.currency, {
+            rate: medianOf([coinbase(), kraken()], { maxSpreadBps: whole(values.maxSpreadBps) }),
+            spreadBps: whole(values.spreadBps),
+          }),
+        },
+        values.gateway,
+      ),
     said: SETTLED,
   },
   payMe: {
-    run: (into) => askTheEndpoint(into),
-    said: (bolt11) =>
-      `Your own endpoint minted <code>${bolt11.slice(0, 34)}...</code>. Scan it with a wallet and the money goes to the address behind the endpoint, not to the endpoint.`,
+    run: (_into, values) => askTheEndpoint(values),
+    said: ({ bolt11, least, most }) =>
+      `Your endpoint offered ${least} to ${most} satoshi and its callback minted <code>${bolt11.slice(0, 34)}...</code> for the least. Pay it with any wallet and the tile below fills.`,
   },
 };
 const PLAUSIBLE = {
-  number: (value) => /^[1-9][0-9]*$/.test(value),
+  number: (value) => /^[1-9](?:[0-9_]*[0-9])?$/.test(value),
   url: (value) => /^https?:\/\/[^\s/]+/.test(value),
   address: (value) => /^[^\s@]+@[^\s@.]+\.[^\s@]+$/.test(value),
+  decimal: (value) => /^\d+(?:\.\d{1,2})?$/.test(value),
+  currency: (value) => /^[A-Z]{3}$/.test(value),
 };
 
 const fields = [...document.querySelectorAll(".edit")];
@@ -70,6 +97,9 @@ const qr = document.getElementById("qr");
 const ident = document.getElementById("ident");
 const verdict = document.getElementById("verdict");
 const bolt = document.getElementById("bolt");
+const mintedCard = document.getElementById("minted");
+const mintedQr = document.getElementById("mintedqr");
+const mintedBolt = document.getElementById("mintedbolt");
 
 const NOTHING_YET = wire.innerHTML;
 const realFetch = window.fetch.bind(window);
@@ -84,6 +114,13 @@ function paint() {
   const values = typed();
   for (const one of fields) {
     one.classList.toggle("wrong", !PLAUSIBLE[one.dataset.kind](values[one.dataset.key]));
+  }
+  if (RECIPE.call === "payMe") {
+    const most = fields.find((one) => one.dataset.key === "most");
+    if (whole(values.most) < whole(values.least)) {
+      most.classList.add("wrong");
+    }
+    bolt.textContent = `bech32 of ${location.origin}/lnurlp/tips, the way LUD-01 asks. A wallet scanning it is offered ${whole(values.least)} to ${whole(values.most)} satoshi`;
   }
   runButton.disabled = running || fields.some((one) => one.classList.contains("wrong"));
 }
@@ -125,15 +162,22 @@ function stepAt(key, state) {
 
 function clearRun() {
   wire.innerHTML = NOTHING_YET;
-  qrCard.classList.remove("on");
-  qr.replaceChildren();
   ident.replaceChildren();
-  bolt.replaceChildren();
   verdict.className = "verdict";
   verdict.replaceChildren();
   for (const one of steps) {
     one.classList.remove("running", "done");
   }
+  if (RECIPE.call === "payMe") {
+    mintedCard.classList.remove("on");
+    mintedQr.replaceChildren();
+    mintedBolt.replaceChildren();
+
+    return;
+  }
+  qrCard.classList.remove("on");
+  qr.replaceChildren();
+  bolt.replaceChildren();
 }
 
 function whyItFailed(refused) {
@@ -183,17 +227,10 @@ window.WebSocket = class extends RealSocket {
 };
 
 new MutationObserver(() => {
-  if (qr.innerHTML.trim() === "") {
+  if (qr.innerHTML.trim() === "" || RECIPE.call === "payMe") {
     return;
   }
   qrCard.classList.add("on");
-  if (RECIPE.call === "payMe") {
-    if (bolt.textContent.startsWith("the invoice")) {
-      stepAt("invoice", "done");
-    }
-
-    return;
-  }
   stepAt("mint", "done");
   stepAt("qr", "done");
   stepAt("wait", "running");
@@ -245,8 +282,6 @@ if (RECIPE.call === "payMe") {
   followThisPlace();
   qr.innerHTML = lnurlEndpointToSvg(`${location.origin}/lnurlp/tips`);
   qrCard.classList.add("on");
-  bolt.textContent =
-    "your address, bech32 encoded the way LUD-01 asks, and a wallet scanning this offers a field because the range has two ends";
 }
 
 runButton.addEventListener("click", async () => {

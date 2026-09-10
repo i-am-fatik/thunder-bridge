@@ -22,10 +22,10 @@
     <div class="card">
       <h2><span>examples/pay-me/main.ts</span></h2>
       <div class="code">
-<div class="row" id="L1"><span class="ln">1</span><span class="src">import { type <a href="../api.md#thunder-bridge-type-handler" title="Handler">Handler</a>, <a href="../api.md#thunder-bridge-function-sats" title="sats">sats</a>, <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a> } from "thunder-bridge";</span></div>
+<div class="row" id="L1"><span class="ln">1</span><span class="src">import { type <a href="../api.md#thunder-bridge-type-handler" title="Handler">Handler</a>, type <a href="../api.md#thunder-bridge-interface-range" title="Range">Range</a>, <a href="../api.md#thunder-bridge-function-sats" title="sats">sats</a>, <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a> } from "thunder-bridge";</span></div>
 <div class="row" id="L2"><span class="ln">2</span><span class="src">import { <a href="../api.md#thunder-bridge-qr-function-lnurlendpointtosvg" title="lnurlEndpointToSvg">lnurlEndpointToSvg</a> } from "thunder-bridge/qr";</span></div>
 <div class="row" id="L3"><span class="ln">3</span><span class="src">&nbsp;</span></div>
-<div class="row" id="L4"><span class="ln">4</span><span class="src">export const DEMO_GATEWAY = "https://public.thunder-bridge.agora.gripe";</span></div>
+<div class="row" id="L4"><span class="ln">4</span><span class="src">export const DEMO_GATEWAY = "<span class="edit" data-key="gateway" data-kind="url" contenteditable="plaintext-only" spellcheck="false">https://public.thunder-bridge.agora.gripe</span>";</span></div>
 <div class="row" id="L5"><span class="ln">5</span><span class="src">&nbsp;</span></div>
 <div class="row" id="L6"><span class="ln">6</span><span class="src">export function payMe(</span></div>
 <div class="row" id="L7"><span class="ln">7</span><span class="src">  into: { innerHTML: string },</span></div>
@@ -33,19 +33,15 @@
 <div class="row" id="L9"><span class="ln">9</span><span class="src">  secret: string,</span></div>
 <div class="row" id="L10"><span class="ln">10</span><span class="src">  watchSecret: string,</span></div>
 <div class="row" id="L11"><span class="ln">11</span><span class="src">  paidTo: string | string[] = ["<span class="edit" data-key="paidTo" data-kind="address" contenteditable="plaintext-only" spellcheck="false">iamfatik@blink.sv</span>"],</span></div>
-<div class="row" id="L12"><span class="ln">12</span><span class="src">  via = DEMO_GATEWAY,</span></div>
-<div class="row" id="L13"><span class="ln">13</span><span class="src">): <a href="../api.md#thunder-bridge-type-handler" title="Handler">Handler</a> {</span></div>
-<div class="row" id="L14"><span class="ln">14</span><span class="src">  const gateway = new <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a>(via);</span></div>
-<div class="row" id="L15"><span class="ln">15</span><span class="src">&nbsp;</span></div>
-<div class="row" id="L16"><span class="ln">16</span><span class="src">  into.innerHTML = <a href="../api.md#thunder-bridge-qr-function-lnurlendpointtosvg" title="lnurlEndpointToSvg">lnurlEndpointToSvg</a>(endpoint);</span></div>
-<div class="row" id="L17"><span class="ln">17</span><span class="src">&nbsp;</span></div>
-<div class="row" id="L18"><span class="ln">18</span><span class="src">  return gateway.<a href="../api.md#thunder-bridge-class-thunderbridge-serve" title="ThunderBridge.serve">serve</a>.<a href="../api.md#thunder-bridge-class-serve-lnurlpay" title="Serve.lnurlPay">lnurlPay</a>({</span></div>
-<div class="row" id="L19"><span class="ln">19</span><span class="src">    paidTo,</span></div>
-<div class="row" id="L20"><span class="ln">20</span><span class="src">    amount: { least: <a href="../api.md#thunder-bridge-function-sats" title="sats">sats</a>(21), most: sats(210_000) },</span></div>
-<div class="row" id="L21"><span class="ln">21</span><span class="src">    secret,</span></div>
-<div class="row" id="L22"><span class="ln">22</span><span class="src">    watchSecret,</span></div>
-<div class="row" id="L23"><span class="ln">23</span><span class="src">  });</span></div>
-<div class="row" id="L24"><span class="ln">24</span><span class="src">}</span></div>
+<div class="row" id="L12"><span class="ln">12</span><span class="src">  range: <a href="../api.md#thunder-bridge-interface-range" title="Range">Range</a> = { least: <a href="../api.md#thunder-bridge-function-sats" title="sats">sats</a>(<span class="edit" data-key="least" data-kind="number" contenteditable="plaintext-only" spellcheck="false">21</span>), most: sats(<span class="edit" data-key="most" data-kind="number" contenteditable="plaintext-only" spellcheck="false">210_000</span>) },</span></div>
+<div class="row" id="L13"><span class="ln">13</span><span class="src">  via = DEMO_GATEWAY,</span></div>
+<div class="row" id="L14"><span class="ln">14</span><span class="src">): <a href="../api.md#thunder-bridge-type-handler" title="Handler">Handler</a> {</span></div>
+<div class="row" id="L15"><span class="ln">15</span><span class="src">  const gateway = new <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a>(via);</span></div>
+<div class="row" id="L16"><span class="ln">16</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L17"><span class="ln">17</span><span class="src">  into.innerHTML = <a href="../api.md#thunder-bridge-qr-function-lnurlendpointtosvg" title="lnurlEndpointToSvg">lnurlEndpointToSvg</a>(endpoint);</span></div>
+<div class="row" id="L18"><span class="ln">18</span><span class="src">&nbsp;</span></div>
+<div class="row" id="L19"><span class="ln">19</span><span class="src">  return gateway.<a href="../api.md#thunder-bridge-class-thunderbridge-serve" title="ThunderBridge.serve">serve</a>.<a href="../api.md#thunder-bridge-class-serve-lnurlpay" title="Serve.lnurlPay">lnurlPay</a>({ paidTo, amount: range, secret, watchSecret });</span></div>
+<div class="row" id="L20"><span class="ln">20</span><span class="src">}</span></div>
       </div>
     </div>
 
@@ -54,24 +50,25 @@
         <h2>Run it</h2>
         <div class="body">
           <div class="controls">
-            <button id="run">Mint a real invoice</button>
+            <button id="run">Ask it the way a wallet would</button>
             <button id="reset" class="ghost">Back to the defaults</button>
           </div>
-          <p class="warn">This asks the endpoint <b>this very server mounts</b>, then asks its callback to mint. The QR at the end is a real invoice, scannable by any wallet.</p>
+          <p class="warn">The QR never changes, what it answers does. Scan it with a wallet, or press the button to ask it the way a wallet would and get a <b>real invoice</b> back for the least.</p>
 
           <ul class="steps">
-<li data-step="ask" data-line="1"><span class="dot"></span><span class="what">read the payRequest this page's own server answers</span><span class="at">line 1</span></li>
-<li data-step="callback" data-line="0"><span class="dot"></span><span class="what">ask the callback for the least the range allows</span><span class="at">line 0</span></li>
-<li data-step="invoice" data-line="0"><span class="dot"></span><span class="what">draw the invoice it minted, which any wallet can scan</span><span class="at">line 0</span></li>
+<li data-step="ask" data-line="19"><span class="dot"></span><span class="what">read the payRequest this page's own server answers</span><span class="at">line 19</span></li>
+<li data-step="callback" data-line="12"><span class="dot"></span><span class="what">ask the callback for the least the range allows</span><span class="at">line 12</span></li>
+<li data-step="invoice" data-line="0"><span class="dot"></span><span class="what">get a real invoice back, the one a wallet would pay</span><span class="at">wallet side</span></li>
           </ul>
 
           <div id="qrcard"><div id="qr"></div><div class="bolt" id="bolt"></div><div class="ident" id="ident"></div></div>
+          <div id="minted"><div id="mintedqr"></div><div class="bolt" id="mintedbolt"></div></div>
           <div class="verdict" id="verdict"></div>
         </div>
       </div>
 
       <div class="card" style="margin-top: 1.75rem">
-        <h2><span>examples/watch-a-place/main.ts</span><em>following, since this page opened</em></h2>
+        <h2><span>examples/watch-a-place/main.ts</span><em>following, recent settlements replay first and then it runs live</em></h2>
         <div class="code">
 <div class="row" id="L1"><span class="ln">1</span><span class="src">import { type <a href="../api.md#thunder-bridge-type-payment" title="Payment">Payment</a>, <a href="../api.md#thunder-bridge-class-thunderbridge" title="ThunderBridge">ThunderBridge</a> } from "thunder-bridge";</span></div>
 <div class="row" id="L2"><span class="ln">2</span><span class="src">&nbsp;</span></div>
@@ -107,7 +104,7 @@
 
 </div>
 
-<script type="application/json" id="recipe">{"slug":"pay-me","call":"payMe","defaults":{"paidTo":"iamfatik@blink.sv"}}</script>
+<script type="application/json" id="recipe">{"slug":"pay-me","call":"payMe","defaults":{"gateway":"https://public.thunder-bridge.agora.gripe","paidTo":"iamfatik@blink.sv","least":"21","most":"210_000"}}</script>
 <script type="module" src="page.js"></script>
 </body>
 </html>

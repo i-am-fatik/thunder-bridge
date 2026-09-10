@@ -53,7 +53,7 @@ export async function checkout(
 
 Print one QR that never expires and lets the payer choose what to give. It lives in `examples/pay-me/main.ts`, and what it claims is asserted in `examples/pay-me/main.test.ts`.
 
-<pre><code>import { type <a href="api.md#thunder-bridge-type-handler">Handler</a>, <a href="api.md#thunder-bridge-function-sats">sats</a>, <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a> } from "thunder-bridge";
+<pre><code>import { type <a href="api.md#thunder-bridge-type-handler">Handler</a>, type <a href="api.md#thunder-bridge-interface-range">Range</a>, <a href="api.md#thunder-bridge-function-sats">sats</a>, <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a> } from "thunder-bridge";
 import { <a href="api.md#thunder-bridge-qr-function-lnurlendpointtosvg">lnurlEndpointToSvg</a> } from "thunder-bridge/qr";
 
 export const DEMO_GATEWAY = "https://public.thunder-bridge.agora.gripe";
@@ -64,18 +64,14 @@ export function payMe(
   secret: string,
   watchSecret: string,
   paidTo: string | string[] = ["iamfatik@blink.sv"],
+  range: <a href="api.md#thunder-bridge-interface-range">Range</a> = { least: <a href="api.md#thunder-bridge-function-sats">sats</a>(21), most: sats(210_000) },
   via = DEMO_GATEWAY,
 ): <a href="api.md#thunder-bridge-type-handler">Handler</a> {
   const gateway = new <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a>(via);
 
   into.innerHTML = <a href="api.md#thunder-bridge-qr-function-lnurlendpointtosvg">lnurlEndpointToSvg</a>(endpoint);
 
-  return gateway.<a href="api.md#thunder-bridge-class-thunderbridge-serve">serve</a>.<a href="api.md#thunder-bridge-class-serve-lnurlpay">lnurlPay</a>({
-    paidTo,
-    amount: { least: <a href="api.md#thunder-bridge-function-sats">sats</a>(21), most: sats(210_000) },
-    secret,
-    watchSecret,
-  });
+  return gateway.<a href="api.md#thunder-bridge-class-thunderbridge-serve">serve</a>.<a href="api.md#thunder-bridge-class-serve-lnurlpay">lnurlPay</a>({ paidTo, amount: range, secret, watchSecret });
 }</code></pre>
 
 - the endpoint is a fetch handler, so it mounts on anything that speaks Request and Response

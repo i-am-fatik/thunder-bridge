@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Handler } from "thunder-bridge";
+import { type Handler, type Range, sats } from "thunder-bridge";
 
 import { payMe } from "../../examples/pay-me/main.ts";
 
@@ -17,6 +17,8 @@ const WATCH_SECRET = process.env["WATCH_SECRET"] ?? randomUUID();
 const SECRET = process.env["PAYME_SECRET"] ?? randomUUID();
 const PAID_TO = "/paid-to";
 let paidTo = process.env["PAID_TO"] ?? "iamfatik@blink.sv";
+let range: Range | undefined;
+let via: string | undefined;
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -25,7 +27,17 @@ const TYPES: Record<string, string> = {
 };
 
 function answering(): Handler {
-  return payMe({ innerHTML: "" }, `${ORIGIN}${ENDPOINT}`, SECRET, WATCH_SECRET, paidTo);
+  return payMe({ innerHTML: "" }, `${ORIGIN}${ENDPOINT}`, SECRET, WATCH_SECRET, paidTo, range, via);
+}
+
+function rangeAsked(asked: URLSearchParams): Range | null {
+  const least = Number(asked.get("least"));
+  const most = Number(asked.get("most"));
+  if (!Number.isInteger(least) || !Number.isInteger(most) || least < 1 || most < least) {
+    return null;
+  }
+
+  return { least: sats(least), most: sats(most) };
 }
 
 async function fileAt(pathname: string): Promise<Response> {
@@ -53,6 +65,8 @@ createServer(async (incoming, outgoing) => {
 
   if (incoming.method === "POST" && url.pathname === PAID_TO) {
     paidTo = url.searchParams.get("to") ?? paidTo;
+    range = rangeAsked(url.searchParams) ?? range;
+    via = url.searchParams.get("via") ?? via;
     outgoing.writeHead(204).end();
 
     return;

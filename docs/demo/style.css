@@ -71,10 +71,10 @@
   .warn { font-size: 0.85rem; color: var(--ink-soft); margin: 0.9rem 0 0; }
   .warn b { color: var(--ink); font-weight: 500; }
 
-  #qrcard { margin-top: 1.15rem; display: none; }
-  #qrcard.on { display: block; }
-  #qr { background: #fff; border-radius: 5px; padding: 0.9rem; display: flex; justify-content: center; }
-  #qr svg { width: 100%; max-width: 15rem; height: auto; display: block; }
+  #qrcard, #minted { margin-top: 1.15rem; display: none; }
+  #qrcard.on, #minted.on { display: block; }
+  #qr, #mintedqr { background: #fff; border-radius: 5px; padding: 0.9rem; display: flex; justify-content: center; }
+  #qr svg, #mintedqr svg { width: 100%; max-width: 15rem; height: auto; display: block; }
   .bolt { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-faint); word-break: break-all; margin-top: 0.7rem; line-height: 1.5; }
   .ident { font-size: 0.82rem; color: var(--ink-soft); margin-top: 0.7rem; line-height: 1.6; }
   .ident code { font-family: var(--mono); font-size: 0.68rem; word-break: break-all; color: var(--ink); }

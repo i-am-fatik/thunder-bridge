@@ -30,10 +30,10 @@
 <div class="row" id="L6"><span class="ln">6</span><span class="src">export async function checkout(</span></div>
 <div class="row" id="L7"><span class="ln">7</span><span class="src">  into: { innerHTML: string },</span></div>
 <div class="row" id="L8"><span class="ln">8</span><span class="src">  charge: <a href="../api.md#thunder-bridge-interface-charge" title="Charge">Charge</a> = {</span></div>
-<div class="row" id="L9"><span class="ln">9</span><span class="src">    paidTo: ["iamfatik@blink.sv"],</span></div>
-<div class="row" id="L10"><span class="ln">10</span><span class="src">    amount: <a href="../api.md#thunder-bridge-function-fiat" title="fiat">fiat</a>("0.21", "USD", {</span></div>
-<div class="row" id="L11"><span class="ln">11</span><span class="src">      rate: <a href="../api.md#thunder-bridge-price-function-medianof" title="medianOf">medianOf</a>([<a href="../api.md#thunder-bridge-price-function-coinbase" title="coinbase">coinbase</a>(), <a href="../api.md#thunder-bridge-price-function-kraken" title="kraken">kraken</a>()], { maxSpreadBps: 50 }),</span></div>
-<div class="row" id="L12"><span class="ln">12</span><span class="src">      spreadBps: 100,</span></div>
+<div class="row" id="L9"><span class="ln">9</span><span class="src">    paidTo: ["<span class="edit" data-key="paidTo" data-kind="address" contenteditable="plaintext-only" spellcheck="false">iamfatik@blink.sv</span>"],</span></div>
+<div class="row" id="L10"><span class="ln">10</span><span class="src">    amount: <a href="../api.md#thunder-bridge-function-fiat" title="fiat">fiat</a>("<span class="edit" data-key="price" data-kind="decimal" contenteditable="plaintext-only" spellcheck="false">0.21</span>", "<span class="edit" data-key="currency" data-kind="currency" contenteditable="plaintext-only" spellcheck="false">USD</span>", {</span></div>
+<div class="row" id="L11"><span class="ln">11</span><span class="src">      rate: <a href="../api.md#thunder-bridge-price-function-medianof" title="medianOf">medianOf</a>([<a href="../api.md#thunder-bridge-price-function-coinbase" title="coinbase">coinbase</a>(), <a href="../api.md#thunder-bridge-price-function-kraken" title="kraken">kraken</a>()], { maxSpreadBps: <span class="edit" data-key="maxSpreadBps" data-kind="number" contenteditable="plaintext-only" spellcheck="false">50</span> }),</span></div>
+<div class="row" id="L12"><span class="ln">12</span><span class="src">      spreadBps: <span class="edit" data-key="spreadBps" data-kind="number" contenteditable="plaintext-only" spellcheck="false">100</span>,</span></div>
 <div class="row" id="L13"><span class="ln">13</span><span class="src">    }),</span></div>
 <div class="row" id="L14"><span class="ln">14</span><span class="src">  },</span></div>
 <div class="row" id="L15"><span class="ln">15</span><span class="src">  via = DEMO_GATEWAY,</span></div>
@@ -69,6 +69,7 @@
           </ul>
 
           <div id="qrcard"><div id="qr"></div><div class="bolt" id="bolt"></div><div class="ident" id="ident"></div></div>
+
           <div class="verdict" id="verdict"></div>
         </div>
       </div>
@@ -89,7 +90,7 @@
 
 </div>
 
-<script type="application/json" id="recipe">{"slug":"fiat-checkout","call":"checkout","defaults":{"gateway":"https://public.thunder-bridge.agora.gripe"}}</script>
+<script type="application/json" id="recipe">{"slug":"fiat-checkout","call":"checkout","defaults":{"gateway":"https://public.thunder-bridge.agora.gripe","paidTo":"iamfatik@blink.sv","price":"0.21","currency":"USD","maxSpreadBps":"50","spreadBps":"100"}}</script>
 <script type="module" src="page.js"></script>
 </body>
 </html>

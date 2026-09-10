@@ -6,14 +6,15 @@ import { type Call, type Recipe, recipesIn } from "./recipes.ts";
 
 export interface Editable {
 	key: string;
-	kind: "url" | "address" | "number";
+	kind: "url" | "address" | "number" | "decimal" | "currency";
 	finds: RegExp;
 }
 
 export interface Runnable {
 	slug: string;
 	call: string;
-	steps: [string, string][];
+	action: string;
+	steps: [string, string | RegExp | null][];
 	editable: Editable[];
 }
 
@@ -23,6 +24,7 @@ export const RUNNABLE: Runnable[] = [
 	{
 		slug: "tip-jar",
 		call: "tipJar",
+		action: "Mint a real invoice",
 		steps: [
 			["mint", "ThunderBridge.requestPayment"],
 			["qr", "PaymentRequest.qr"],
@@ -38,23 +40,41 @@ export const RUNNABLE: Runnable[] = [
 	{
 		slug: "fiat-checkout",
 		call: "checkout",
+		action: "Mint a real invoice",
 		steps: [
 			["mint", "ThunderBridge.requestPayment"],
 			["qr", "PaymentRequest.qr"],
 			["wait", "PaymentRequest.paid"],
 			["prove", "PaymentRequest.prove"],
 		],
-		editable: [{ key: "gateway", kind: "url", finds: GATEWAY }],
+		editable: [
+			{ key: "gateway", kind: "url", finds: GATEWAY },
+			{ key: "paidTo", kind: "address", finds: /(?<=")[^"]+@[^"]+(?=")/ },
+			{ key: "price", kind: "decimal", finds: /(?<=\(")\d+(?:\.\d+)?(?=", ")/ },
+			{ key: "currency", kind: "currency", finds: /(?<=")[A-Z]{3}(?=", \{)/ },
+			{ key: "maxSpreadBps", kind: "number", finds: /(?<=maxSpreadBps: )\d+/ },
+			{ key: "spreadBps", kind: "number", finds: /(?<=spreadBps: )\d+/ },
+		],
 	},
 	{
 		slug: "pay-me",
 		call: "payMe",
+		action: "Ask it the way a wallet would",
 		steps: [
-			["ask", "ThunderBridge"],
-			["callback", "Range"],
-			["invoice", "PaymentRequest"],
+			["ask", /lnurlPay\(/],
+			["callback", /least:/],
+			["invoice", null],
 		],
-		editable: [{ key: "paidTo", kind: "address", finds: /(?<=")[^"]+@[^"]+(?=")/ }],
+		editable: [
+			{ key: "gateway", kind: "url", finds: GATEWAY },
+			{ key: "paidTo", kind: "address", finds: /(?<=")[^"]+@[^"]+(?=")/ },
+			{ key: "least", kind: "number", finds: /(?<=least: (?:<a[^>]*>)?sats(?:<\/a>)?\()\d+(?=\))/ },
+			{
+				key: "most",
+				kind: "number",
+				finds: /(?<=most: (?:<a[^>]*>)?sats(?:<\/a>)?\()[\d_]+(?=\))/,
+			},
+		],
 	},
 ];
 
@@ -65,7 +85,7 @@ const WHAT: Record<string, string> = {
 	prove: "ask the recipient's own server",
 	ask: "read the payRequest this page's own server answers",
 	callback: "ask the callback for the least the range allows",
-	invoice: "draw the invoice it minted, which any wallet can scan",
+	invoice: "get a real invoice back, the one a wallet would pay",
 };
 
 function escaped(text: string): string {
@@ -79,8 +99,15 @@ function editable(key: string, kind: string, value: string): string {
 	);
 }
 
-function lineOf(recipe: Recipe, name: string): number {
-	return recipe.calls.find((call) => call.name === name)?.line ?? 0;
+function lineOf(recipe: Recipe, by: string | RegExp | null): number {
+	if (by === null) {
+		return 0;
+	}
+	if (by instanceof RegExp) {
+		return recipe.source.split("\n").findIndex((line) => by.test(line)) + 1;
+	}
+
+	return recipe.calls.find((call) => call.name === by)?.line ?? 0;
 }
 
 export function sourceOf(
@@ -145,11 +172,15 @@ export function pageFor(
 		)
 		.join(" &middot; ");
 	const steps = runnable.steps
-		.map(
-			([key, name]) =>
-				`<li data-step="${key}" data-line="${lineOf(recipe, name)}"><span class="dot"></span>` +
-				`<span class="what">${WHAT[key]}</span><span class="at">line ${lineOf(recipe, name)}</span></li>`,
-		)
+		.map(([key, by]) => {
+			const line = lineOf(recipe, by);
+
+			return (
+				`<li data-step="${key}" data-line="${line}"><span class="dot"></span>` +
+				`<span class="what">${WHAT[key]}</span>` +
+				`<span class="at">${line === 0 ? "wallet side" : `line ${line}`}</span></li>`
+			);
+		})
 		.join("\n");
 
 	return `<!doctype html>
@@ -185,16 +216,17 @@ ${rows}
         <h2>Run it</h2>
         <div class="body">
           <div class="controls">
-            <button id="run">Mint a real invoice</button>
+            <button id="run">${runnable.action}</button>
             <button id="reset" class="ghost">Back to the defaults</button>
           </div>
-          <p class="warn">${runnable.slug === "pay-me" ? "This asks the endpoint <b>this very server mounts</b>, then asks its callback to mint. The QR at the end is a real invoice, scannable by any wallet." : "This mints a <b>real invoice</b> against the address in the code, on the gateway in the code. Nobody has to pay it, it expires on its own."}</p>
+          <p class="warn">${runnable.slug === "pay-me" ? "The QR never changes, what it answers does. Scan it with a wallet, or press the button to ask it the way a wallet would and get a <b>real invoice</b> back for the least." : "This mints a <b>real invoice</b> against the address in the code, on the gateway in the code. Nobody has to pay it, it expires on its own."}</p>
 
           <ul class="steps">
 ${steps}
           </ul>
 
           <div id="qrcard"><div id="qr"></div><div class="bolt" id="bolt"></div><div class="ident" id="ident"></div></div>
+${runnable.slug === "pay-me" ? `          <div id="minted"><div id="mintedqr"></div><div class="bolt" id="mintedbolt"></div></div>` : ""}
           <div class="verdict" id="verdict"></div>
         </div>
       </div>
@@ -202,7 +234,7 @@ ${steps}
 ${
 	runnable.slug === "pay-me"
 		? `      <div class="card" style="margin-top: 1.75rem">
-        <h2><span>examples/watch-a-place/main.ts</span><em>following, since this page opened</em></h2>
+        <h2><span>examples/watch-a-place/main.ts</span><em>following, recent settlements replay first and then it runs live</em></h2>
         <div class="code">
 ${alongside === null ? "" : sourceOf(alongside, []).rows}
         </div>
