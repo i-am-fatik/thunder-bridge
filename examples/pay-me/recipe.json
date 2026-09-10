@@ -1,0 +1,11 @@
+{
+  "title": "A lightning address of your own",
+  "intent": "Print one QR that never expires and lets the payer choose what to give",
+  "rail": "rails.lightning",
+  "shows": [
+    "the endpoint is a fetch handler, so it mounts on anything that speaks Request and Response",
+    "a range instead of one amount is what makes a wallet offer a field to type in",
+    "the QR carries your own url, so the addresses behind it can change without reprinting it",
+    "the secret signs the callback, so nobody else can make the endpoint mint on your wallets"
+  ]
+}

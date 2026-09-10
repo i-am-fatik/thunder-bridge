@@ -97,6 +97,71 @@
 			]
 		},
 		{
+			"slug": "pay-me",
+			"title": "A lightning address of your own",
+			"intent": "Print one QR that never expires and lets the payer choose what to give",
+			"rail": "rails.lightning",
+			"shows": [
+				"the endpoint is a fetch handler, so it mounts on anything that speaks Request and Response",
+				"a range instead of one amount is what makes a wallet offer a field to type in",
+				"the QR carries your own url, so the addresses behind it can change without reprinting it",
+				"the secret signs the callback, so nobody else can make the endpoint mint on your wallets"
+			],
+			"source": "import { type Handler, sats, ThunderBridge } from \"thunder-bridge\";\nimport { lnurlEndpointToSvg } from \"thunder-bridge/qr\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport function payMe(\n  into: { innerHTML: string },\n  endpoint: string,\n  secret: string,\n  via = DEMO_GATEWAY,\n): Handler {\n  const gateway = new ThunderBridge(via);\n\n  into.innerHTML = lnurlEndpointToSvg(endpoint);\n\n  return gateway.serve.lnurlPay({\n    paidTo: [\"iamfatik@blink.sv\"],\n    amount: { least: sats(21), most: sats(210_000) },\n    secret,\n  });\n}\n",
+			"calls": [
+				{
+					"name": "Handler",
+					"line": 1,
+					"anchor": "thunder-bridge-type-handler"
+				},
+				{
+					"name": "sats",
+					"line": 1,
+					"anchor": "thunder-bridge-function-sats"
+				},
+				{
+					"name": "ThunderBridge",
+					"line": 1,
+					"anchor": "thunder-bridge-class-thunderbridge"
+				},
+				{
+					"name": "lnurlEndpointToSvg",
+					"line": 2,
+					"anchor": "thunder-bridge-qr-function-lnurlendpointtosvg"
+				},
+				{
+					"name": "Handler",
+					"line": 11,
+					"anchor": "thunder-bridge-type-handler"
+				},
+				{
+					"name": "ThunderBridge",
+					"line": 12,
+					"anchor": "thunder-bridge-class-thunderbridge"
+				},
+				{
+					"name": "lnurlEndpointToSvg",
+					"line": 14,
+					"anchor": "thunder-bridge-qr-function-lnurlendpointtosvg"
+				},
+				{
+					"name": "Serve.lnurlPay",
+					"line": 16,
+					"anchor": "thunder-bridge-class-serve-lnurlpay"
+				},
+				{
+					"name": "ThunderBridge.serve",
+					"line": 16,
+					"anchor": "thunder-bridge-class-thunderbridge-serve"
+				},
+				{
+					"name": "sats",
+					"line": 18,
+					"anchor": "thunder-bridge-function-sats"
+				}
+			]
+		},
+		{
 			"slug": "resume-a-wait",
 			"title": "Pick a wait back up after a reload",
 			"intent": "Carry on waiting for an invoice you already minted, holding nothing but its id",

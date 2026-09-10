@@ -8,6 +8,7 @@ recipe below was found by the TypeScript compiler and links to its own entry in
 | Recipe | Rail | What it is for |
 |---|---|---|
 | [A price named in dollars, paid in bitcoin](#fiat-checkout) | `rails.lightning` | Charge 0.21 USD without ever converting it yourself |
+| [A lightning address of your own](#pay-me) | `rails.lightning` | Print one QR that never expires and lets the payer choose what to give |
 | [Pick a wait back up after a reload](#resume-a-wait) | `rails.lightning` | Carry on waiting for an invoice you already minted, holding nothing but its id |
 | [Tip jar on a static page](#tip-jar) | `rails.lightning` | Take a tip with no backend of your own and no wallet of your own |
 
@@ -46,6 +47,37 @@ export async function checkout(
 - the rate is the median of the venues you name, refused when they disagree by more than you allow
 - the spread over the rate is yours to set, because a lightning invoice lives an hour
 - everything after the price is the tip jar unchanged, so pricing in fiat costs the flow nothing
+
+## <a id="pay-me"></a>A lightning address of your own
+
+Print one QR that never expires and lets the payer choose what to give. It lives in `examples/pay-me/main.ts`, and what it claims is asserted in `examples/pay-me/main.test.ts`.
+
+<pre><code>import { type <a href="api.md#thunder-bridge-type-handler">Handler</a>, <a href="api.md#thunder-bridge-function-sats">sats</a>, <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a> } from "thunder-bridge";
+import { <a href="api.md#thunder-bridge-qr-function-lnurlendpointtosvg">lnurlEndpointToSvg</a> } from "thunder-bridge/qr";
+
+export const DEMO_GATEWAY = "https://public.thunder-bridge.agora.gripe";
+
+export function payMe(
+  into: { innerHTML: string },
+  endpoint: string,
+  secret: string,
+  via = DEMO_GATEWAY,
+): <a href="api.md#thunder-bridge-type-handler">Handler</a> {
+  const gateway = new <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a>(via);
+
+  into.innerHTML = <a href="api.md#thunder-bridge-qr-function-lnurlendpointtosvg">lnurlEndpointToSvg</a>(endpoint);
+
+  return gateway.<a href="api.md#thunder-bridge-class-thunderbridge-serve">serve</a>.<a href="api.md#thunder-bridge-class-serve-lnurlpay">lnurlPay</a>({
+    paidTo: ["iamfatik@blink.sv"],
+    amount: { least: <a href="api.md#thunder-bridge-function-sats">sats</a>(21), most: sats(210_000) },
+    secret,
+  });
+}</code></pre>
+
+- the endpoint is a fetch handler, so it mounts on anything that speaks Request and Response
+- a range instead of one amount is what makes a wallet offer a field to type in
+- the QR carries your own url, so the addresses behind it can change without reprinting it
+- the secret signs the callback, so nobody else can make the endpoint mint on your wallets
 
 ## <a id="resume-a-wait"></a>Pick a wait back up after a reload
 
