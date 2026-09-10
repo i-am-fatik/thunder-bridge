@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 
-import { DOORS, referenceOf, undocumentedIn } from "./api-reference.ts";
+import { referenceOf, undocumentedIn } from "./api-reference.ts";
+import { DOORS } from "./doors.ts";
 
 const { reference, missing } = referenceOf(".");
 

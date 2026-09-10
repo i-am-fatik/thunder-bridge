@@ -3,6 +3,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json vitest.config.ts ./
+COPY tools/doors.ts ./tools/doors.ts
 RUN npm ci
 COPY core ./core
 COPY src ./src

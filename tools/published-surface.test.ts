@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 
-import { DOORS, surfaceOf } from "./api-reference.ts";
+import { surfaceOf } from "./api-reference.ts";
+import { DOORS } from "./doors.ts";
 
 const BACKTICKED = /`([A-Za-z_$][\w$]*)`/g;
 const PROSE = ["sdk/README.md", "docs/api.md"];
