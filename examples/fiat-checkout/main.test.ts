@@ -11,7 +11,7 @@ const CALLBACK = "https://blink.sv/lnurlp/iamfatik/callback";
 const VERIFY_URL = "https://blink.sv/lnurlp/iamfatik/verify/7f3a";
 const COINBASE = "https://api.coinbase.com/v2/prices/BTC-USD/spot";
 const KRAKEN = "https://api.kraken.com/0/public/Ticker?pair=XBTUSD";
-const AT_TWENTY_ONE_CENTS = 212_100;
+const AT_TWENTY_ONE_CENTS = 213_000;
 const METADATA = JSON.stringify([["text/plain", "a coffee for fatik"]]);
 const PREIMAGE = "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
 const PAYMENT_HASH = createHash("sha256").update(Buffer.from(PREIMAGE, "hex")).digest("hex");

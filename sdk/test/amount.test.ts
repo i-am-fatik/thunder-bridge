@@ -58,6 +58,13 @@ describe("fiat", () => {
     await expect(amountNow(fiat("0.01", "USD", { rate }))).resolves.toBe(10_000);
   });
 
+  it("rounds up to a whole satoshi, because a wallet refuses a fraction of one", async () => {
+    const rate = async () => AT_100K_USD;
+
+    await expect(amountNow(fiat("0.21", "USD", { rate, spreadBps: 100 }))).resolves.toBe(213_000);
+    await expect(amountNow(fiat("0.21", "USD", { rate }))).resolves.toBe(210_000);
+  });
+
   it("rounds a number to the currency's own minor unit", async () => {
     const rate = async () => AT_100K_USD;
 

@@ -73,7 +73,12 @@ export function msat(exact: number): Msat {
  *
  * Every conversion asks the rate afresh, so two calls a second apart can
  * differ. That is the honest behaviour for a fiat price, and the reason an
- * amount is a function rather than a number
+ * amount is a function rather than a number.
+ *
+ * The answer is rounded up to a whole satoshi, because a wallet issues an
+ * invoice in satoshi and refuses a fraction of one. Up rather than down, so the
+ * rounding is never the shop's loss. `msatFor` is the raw conversion, for a rail
+ * that has no invoice to round for
  */
 export function fiat(
   major: number | string,
@@ -83,8 +88,11 @@ export function fiat(
   const amountMinor = minorFrom(major, currency);
   const rate = options?.rate ?? medianOf();
 
-  return async () =>
-    msat(msatFor(amountMinor, await rate(currency), { spreadBps: options?.spreadBps }));
+  return async () => {
+    const wanted = msatFor(amountMinor, await rate(currency), { spreadBps: options?.spreadBps });
+
+    return sats(Math.ceil(wanted / MSAT_PER_SAT));
+  };
 }
 
 /**

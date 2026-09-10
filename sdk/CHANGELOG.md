@@ -873,6 +873,11 @@ intended outcome: a silent behavioural swap under a familiar name would be worse
   a bare CSS colour name. Every branch of the pattern is anchored at both ends,
   so a value cannot carry extra markup out of the `fill` attribute; anything else
   throws.
+- **A fiat price is rounded up to a whole satoshi.** `fiat("0.21", "USD")` used to hand
+  back whatever millisatoshi the rate came to, and a wallet asked for a fraction of a
+  satoshi answers `amount must be a whole sat amount` and issues nothing, so the gateway
+  had no invoice to watch. Rounding up rather than down means the rounding is never the
+  shop's loss. `msatFor` is unchanged and still returns the raw conversion.
 - **`new ThunderBridge(url)` refuses a url that is not http or https**, naming the
   value it was handed. It used to take anything and fail at the first request with
   whatever the runtime said, which in a browser is a bare `Failed to fetch` pointing

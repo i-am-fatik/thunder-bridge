@@ -313,7 +313,12 @@ otherwise moves the wrong amount.
 
 Every conversion asks the rate afresh, so two calls a second apart can
 differ. That is the honest behaviour for a fiat price, and the reason an
-amount is a function rather than a number
+amount is a function rather than a number.
+
+The answer is rounded up to a whole satoshi, because a wallet issues an
+invoice in satoshi and refuses a fraction of one. Up rather than down, so the
+rounding is never the shop's loss. `msatFor` is the raw conversion, for a rail
+that has no invoice to round for
 
 ### <a id="thunder-bridge-interface-fiatoptions"></a>FiatOptions
 
