@@ -94,7 +94,10 @@
   .wire .ok { color: var(--signal); }
   .wire .no { color: var(--bad); }
   .wire .where { color: var(--ink-soft); word-break: break-all; }
-  #arrived .where { grid-column: 2 / -1; }
+  #arrived .arrival { display: grid; grid-template-columns: auto 1fr; column-gap: 0.75rem; align-items: baseline; padding: 0.55rem 0.8rem; margin: 0.4rem 0; background: var(--signal-wash); border-left: 3px solid var(--signal); border-bottom: none; border-radius: 4px; }
+  #arrived .paid { font-family: var(--sans); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--signal); }
+  #arrived .amount { font-family: var(--sans); font-size: 1.2rem; font-weight: 600; color: var(--ink); }
+  #arrived .proof { grid-column: 2; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-soft); word-break: break-all; }
   .wire .empty { display: block; color: var(--ink-faint); font-family: var(--serif); font-size: 0.86rem; }
   footer { margin-top: 2.5rem; border-top: 1px solid var(--rule); padding-top: 1.25rem; font-family: var(--sans); font-size: 0.78rem; color: var(--ink-faint); }
 

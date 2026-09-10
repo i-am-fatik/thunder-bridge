@@ -231,9 +231,11 @@ async function followThisPlace() {
   watchAPlace(watchSecret, (settled) => {
     arrived.querySelector(".empty")?.remove();
     const row = document.createElement("div");
+    row.className = "arrival";
     row.innerHTML =
-      `<span class="verb ok">paid</span>` +
-      `<span class="where">${settled.amountMsat / 1000} satoshi, preimage ${String(settled.preimage).slice(0, 16)}...</span>`;
+      `<span class="paid">paid</span>` +
+      `<strong class="amount">${settled.amountMsat / 1000} satoshi</strong>` +
+      `<span class="proof">preimage ${String(settled.preimage).slice(0, 16)}...</span>`;
     arrived.append(row);
     arrived.scrollTop = arrived.scrollHeight;
   });
