@@ -119,6 +119,8 @@ type Follower = { id: string | null; trigger: string | null; answered: boolean }
 
 export type Options = {
 	port: number;
+	host?: string;
+	socket?: string;
 	eagerDelayMs: number;
 	pollsPerSecond: number;
 	workPerTick: number;
@@ -135,7 +137,7 @@ export type Options = {
 };
 
 export type Service = {
-	port: number;
+	at: number | string;
 	stop: () => Promise<void>;
 };
 
@@ -265,7 +267,13 @@ export async function start(options: Options, store: Store): Promise<Service> {
 	};
 	store.onChange = publish;
 
-	await new Promise<void>((listening) => server.listen(options.port, "0.0.0.0", listening));
+	await new Promise<void>((listening) => {
+		if (options.socket === undefined) {
+			server.listen(options.port, options.host ?? "0.0.0.0", listening);
+		} else {
+			server.listen(options.socket, listening);
+		}
+	});
 
 	const keepalive = setInterval(() => {
 		for (const [socket, follower] of followers) {
@@ -299,11 +307,12 @@ export async function start(options: Options, store: Store): Promise<Service> {
 			});
 	}, TICK_INTERVAL_MS);
 
-	const { port } = server.address() as AddressInfo;
-	log.info(`listening on :${port}, polling ${watcher.budget.perSecond} payments a second`);
+	const bound = server.address();
+	const at = typeof bound === "string" ? bound : (bound as AddressInfo).port;
+	log.info(`listening on ${at}, polling ${watcher.budget.perSecond} payments a second`);
 
 	return {
-		port,
+		at,
 		stop: async () => {
 			if (draining) {
 				return;
@@ -1035,6 +1044,8 @@ if (import.meta.main) {
 	const service = await start(
 		{
 			port: whole("PORT", 3000),
+			host: process.env["HOST"] ?? "0.0.0.0",
+			socket: process.env["SOCKET"],
 			eagerDelayMs: positive("POLL_INTERVAL_SECS", 5) * 1000,
 			workPerTick: positive("WORK_PER_TICK", 50),
 			verifyHosts: allowed("VERIFY_HOSTS"),

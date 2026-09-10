@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { mkdtempSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { connect } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { expect, test, vi } from "vitest";
 
@@ -54,6 +57,39 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			keepSealedSecs: 90 * 86_400,
 			maxReplay: 100,
 			token,
+			key: CLUSTER_KEY,
+		},
+		opened.store,
+	);
+
+	return {
+		service,
+		store: opened.store,
+		stop: () => {
+			service.stop();
+			opened.stop();
+		},
+	};
+}
+
+async function runningOn(where: { host?: string; socket?: string }): Promise<App> {
+	const opened = openStore();
+	const service = await start(
+		{
+			port: 0,
+			...where,
+			eagerDelayMs: 3000,
+			pollsPerSecond: 5,
+			workPerTick: 50,
+			verifyHosts: null,
+			verifyChallenge: true,
+			clientKeys: null,
+			mints: true,
+			tickStallMs: 30_000,
+			drainTimeoutMs: 10_000,
+			keepSealedSecs: 90 * 86_400,
+			maxReplay: 100,
+			token: null,
 			key: CLUSTER_KEY,
 		},
 		opened.store,
@@ -134,7 +170,7 @@ test("a follower is sent the current state and then every update", async () => {
 	const payment = app.store.insert(pendingPayment());
 
 	const socket = new WebSocket(
-		`ws://127.0.0.1:${app.service.port}/ws/incoming-payments/${payment.id}`,
+		`ws://127.0.0.1:${app.service.at}/ws/incoming-payments/${payment.id}`,
 	);
 	await new Promise((ready) => socket.addEventListener("open", ready, { once: true }));
 
@@ -156,7 +192,7 @@ test("a follower is sent the current state and then every update", async () => {
 test("a browser on any origin may preflight and then read a payment", async () => {
 	const app = await running();
 	const payment = app.store.insert(pendingPayment());
-	const base = `http://127.0.0.1:${app.service.port}`;
+	const base = `http://127.0.0.1:${app.service.at}`;
 
 	const preflight = await fetch(`${base}/incoming-payments`, {
 		method: "OPTIONS",
@@ -289,7 +325,7 @@ function hookAnswering(nonceShift = ""): () => void {
 }
 
 function postQuote(app: App, body: unknown): Promise<Response> {
-	return fetch(`http://127.0.0.1:${app.service.port}/quotes`, {
+	return fetch(`http://127.0.0.1:${app.service.at}/quotes`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify(body),
@@ -354,7 +390,7 @@ test("a quote nobody serves refuses with the wallet reasons a create would give"
 const TOKEN = "only-my-app-holds-this";
 
 function withToken(app: App, path: string, token = TOKEN): Promise<Response> {
-	return fetch(`http://127.0.0.1:${app.service.port}${path}`, {
+	return fetch(`http://127.0.0.1:${app.service.at}${path}`, {
 		headers: { authorization: `Bearer ${token}` },
 	});
 }
@@ -363,7 +399,7 @@ test("with no token set the gateway stays open to everyone, as a public one must
 	const app = await running();
 	const payment = app.store.insert(pendingPayment());
 
-	const read = await fetch(`http://127.0.0.1:${app.service.port}/incoming-payments/${payment.id}`);
+	const read = await fetch(`http://127.0.0.1:${app.service.at}/incoming-payments/${payment.id}`);
 	expect(read.status).toBe(200);
 
 	app.stop();
@@ -372,7 +408,7 @@ test("with no token set the gateway stays open to everyone, as a public one must
 test("with a token set every call needs it, and health stays open for the platform", async () => {
 	const app = await running(TOKEN);
 	const payment = app.store.insert(pendingPayment());
-	const base = `http://127.0.0.1:${app.service.port}`;
+	const base = `http://127.0.0.1:${app.service.at}`;
 
 	expect((await fetch(`${base}/incoming-payments/${payment.id}`)).status).toBe(401);
 	expect((await fetch(`${base}/quotes`, { method: "POST", body: "{}" })).status).toBe(401);
@@ -386,7 +422,7 @@ test("with a token set every call needs it, and health stays open for the platfo
 test("a browser may still preflight a private gateway, and is told to send the header", async () => {
 	const app = await running(TOKEN);
 
-	const preflight = await fetch(`http://127.0.0.1:${app.service.port}/incoming-payments`, {
+	const preflight = await fetch(`http://127.0.0.1:${app.service.at}/incoming-payments`, {
 		method: "OPTIONS",
 		headers: { origin: "https://someone.example", "access-control-request-method": "POST" },
 	});
@@ -399,7 +435,7 @@ test("a browser may still preflight a private gateway, and is told to send the h
 
 test("listing exists only on a private gateway, and a public one does not admit to having it", async () => {
 	const open = await running();
-	expect((await fetch(`http://127.0.0.1:${open.service.port}/incoming-payments`)).status).toBe(404);
+	expect((await fetch(`http://127.0.0.1:${open.service.at}/incoming-payments`)).status).toBe(404);
 	open.stop();
 
 	const closed = await running(TOKEN);
@@ -416,10 +452,10 @@ test("listing exists only on a private gateway, and a public one does not admit 
 
 test("a host header that is not a host refuses the upgrade instead of killing the process", async () => {
 	const app = await running();
-	const base = `http://127.0.0.1:${app.service.port}`;
+	const base = `http://127.0.0.1:${app.service.at}`;
 
 	const killed = await new Promise<string>((resolve) => {
-		const probe = connect(app.service.port, "127.0.0.1", () => {
+		const probe = connect(Number(app.service.at), "127.0.0.1", () => {
 			probe.write(
 				"GET /ws/triggers/anything HTTP/1.1\r\nHost: ]\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
 					"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
@@ -472,7 +508,7 @@ function postTicket(app: App, body: unknown, token?: string): Promise<Response> 
 		headers["authorization"] = `Bearer ${token}`;
 	}
 
-	return fetch(`http://127.0.0.1:${app.service.port}/ws-tickets`, {
+	return fetch(`http://127.0.0.1:${app.service.at}/ws-tickets`, {
 		method: "POST",
 		headers,
 		body: JSON.stringify(body),
@@ -489,7 +525,7 @@ function signedByNobody(ticket: string): string {
 }
 
 async function openedWith(app: App, ticket: string): Promise<WebSocket> {
-	const socket = new WebSocket(`ws://127.0.0.1:${app.service.port}/ws/tickets/${ticket}`);
+	const socket = new WebSocket(`ws://127.0.0.1:${app.service.at}/ws/tickets/${ticket}`);
 	await new Promise((settled) => {
 		socket.addEventListener("open", settled, { once: true });
 		socket.addEventListener("error", settled, { once: true });
@@ -576,7 +612,7 @@ function handshake(app: App, path: string, token?: string): Promise<number> {
 	}
 
 	return new Promise((answered) => {
-		const asked = httpRequest({ host: "127.0.0.1", port: app.service.port, path, headers });
+		const asked = httpRequest({ host: "127.0.0.1", port: app.service.at, path, headers });
 		asked.on("upgrade", (accepted, socket) => {
 			socket.destroy();
 			answered(accepted.statusCode ?? 0);
@@ -710,7 +746,7 @@ async function postWatch(app: App, body: unknown, secret: string | null = null):
 
 	const sent = JSON.stringify(body);
 	try {
-		return await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
+		return await fetch(`http://127.0.0.1:${app.service.at}/watched-payments`, {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -735,7 +771,7 @@ async function speaking(
 async function readAs(app: App, id: string, secret: string | null): Promise<Response> {
 	const path = `/incoming-payments/${id}`;
 
-	return await fetch(`http://127.0.0.1:${app.service.port}${path}`, {
+	return await fetch(`http://127.0.0.1:${app.service.at}${path}`, {
 		headers: secret === null ? {} : await speaking(secret, "GET", path, ""),
 	});
 }
@@ -800,7 +836,7 @@ async function runningWith(overrides: Partial<Options> & { maxPending?: number }
 
 test("an instance mints nothing unless it was turned on, and says how to proceed", async () => {
 	const app = await runningWith({ mints: false });
-	const port = app.service.port;
+	const port = app.service.at;
 
 	const minted = await fetch(`http://127.0.0.1:${port}/incoming-payments`, {
 		method: "POST",
@@ -868,7 +904,7 @@ test("an instance keeping a list of client keys serves nobody else, on any route
 
 	const quoted = await postQuote(app, { ln_addresses: ["charter@coinos.io"], amount: MSAT_21K });
 	expect(quoted.status).toBe(403);
-	expect((await fetch(`http://127.0.0.1:${app.service.port}/health`)).status).toBe(200);
+	expect((await fetch(`http://127.0.0.1:${app.service.at}/health`)).status).toBe(200);
 
 	app.stop();
 });
@@ -937,7 +973,7 @@ test("a ticket is not minted for a payment that belongs to somebody else", async
 
 	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
 	const asked = JSON.stringify({ payment_id: created["id"] });
-	const port = app.service.port;
+	const port = app.service.at;
 
 	const theirs = await fetch(`http://127.0.0.1:${port}/ws-tickets`, {
 		method: "POST",
@@ -1134,7 +1170,7 @@ test("a verify URL that answers nothing like LUD-21 is refused, so nobody else g
 	}) as typeof fetch;
 
 	try {
-		const refused = await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
+		const refused = await fetch(`http://127.0.0.1:${app.service.at}/watched-payments`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ ...WATCHABLE, payment_hash: PAYMENT_HASH }),
@@ -1172,7 +1208,7 @@ test("a wallet cannot be pointed at, because it never agreed to be polled", asyn
 	const restore = verifySpeakingButSilentOnTheChallenge(seen);
 
 	try {
-		const refused = await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
+		const refused = await fetch(`http://127.0.0.1:${app.service.at}/watched-payments`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ ...WATCHABLE, payment_hash: PAYMENT_HASH }),
@@ -1194,7 +1230,7 @@ test("an instance whose callers are all known can be told to stop asking", async
 	const restore = verifySpeakingButSilentOnTheChallenge(seen);
 
 	try {
-		const watched = await fetch(`http://127.0.0.1:${app.service.port}/watched-payments`, {
+		const watched = await fetch(`http://127.0.0.1:${app.service.at}/watched-payments`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ ...WATCHABLE, payment_hash: PAYMENT_HASH }),
@@ -1366,7 +1402,7 @@ function triggerOf(secret: string): string {
 }
 
 async function watching(app: App, secret: string): Promise<WebSocket> {
-	const socket = new WebSocket(`ws://127.0.0.1:${app.service.port}/ws/triggers/${secret}`);
+	const socket = new WebSocket(`ws://127.0.0.1:${app.service.at}/ws/triggers/${secret}`);
 	await new Promise((ready) => socket.addEventListener("open", ready, { once: true }));
 
 	return socket;
@@ -1435,7 +1471,7 @@ test("a payment never discloses the trigger it belongs to", async () => {
 	const app = await running();
 	const payment = app.store.insert(pendingPayment({ trigger: triggerOf(SECRET) }));
 
-	const read = await fetch(`http://127.0.0.1:${app.service.port}/incoming-payments/${payment.id}`);
+	const read = await fetch(`http://127.0.0.1:${app.service.at}/incoming-payments/${payment.id}`);
 	const body = await read.text();
 
 	expect(body).not.toContain(triggerOf(SECRET));
@@ -1459,13 +1495,13 @@ type Problem = Record<string, unknown>;
 
 test("readiness says only that it is ready until a bearer proves the instance is yours", async () => {
 	const shared = await running();
-	const bare = await fetch(`http://127.0.0.1:${shared.service.port}/ready`);
+	const bare = await fetch(`http://127.0.0.1:${shared.service.at}/ready`);
 	expect(bare.status).toBe(200);
 	expect(await bare.json()).toEqual({ status: "ready" });
 	shared.stop();
 
 	const mine = await running("secret-token");
-	const told = await fetch(`http://127.0.0.1:${mine.service.port}/ready`, {
+	const told = await fetch(`http://127.0.0.1:${mine.service.at}/ready`, {
 		headers: { authorization: "Bearer secret-token" },
 	});
 	expect(await told.json()).toMatchObject({
@@ -1488,14 +1524,14 @@ test("readiness says only that it is ready until a bearer proves the instance is
 test("the key a merchant needs to check a webhook they handed no secret for is public", async () => {
 	const app = await running("only-mine");
 	try {
-		const answer = await fetch(`http://127.0.0.1:${app.service.port}/webhook-key`);
+		const answer = await fetch(`http://127.0.0.1:${app.service.at}/webhook-key`);
 		expect(answer.status).toBe(200);
 
 		const body = (await answer.json()) as { algorithm: string; public_key: string };
 		expect(body.algorithm).toBe("ed25519");
 		expect(body.public_key).toMatch(/^[0-9a-f]{64}$/);
 
-		const again = await fetch(`http://127.0.0.1:${app.service.port}/webhook-key`);
+		const again = await fetch(`http://127.0.0.1:${app.service.at}/webhook-key`);
 		expect(((await again.json()) as { public_key: string }).public_key).toBe(body.public_key);
 	} finally {
 		app.stop();
@@ -1505,10 +1541,10 @@ test("the key a merchant needs to check a webhook they handed no secret for is p
 test("a blank token leaves the gateway public, not private and open to everyone", async () => {
 	const blank = await running("");
 	try {
-		const ready = await fetch(`http://127.0.0.1:${blank.service.port}/ready`);
+		const ready = await fetch(`http://127.0.0.1:${blank.service.at}/ready`);
 		expect(await ready.json()).toEqual({ status: "ready" });
 
-		const inventory = await fetch(`http://127.0.0.1:${blank.service.port}/incoming-payments`);
+		const inventory = await fetch(`http://127.0.0.1:${blank.service.at}/incoming-payments`);
 		expect(inventory.status).toBe(404);
 	} finally {
 		blank.stop();
@@ -1531,7 +1567,7 @@ test("a draining instance turns readiness down and waits for the tick in flight"
 		await until(() => asked > 0, "the watcher to reach the wallet");
 
 		const stopping = app.service.stop();
-		const draining = await real(`http://127.0.0.1:${app.service.port}/ready`);
+		const draining = await real(`http://127.0.0.1:${app.service.at}/ready`);
 		expect(draining.status).toBe(503);
 		expect(((await draining.json()) as Problem)["title"]).toBe("Service Unavailable");
 		await stopping;
@@ -1550,7 +1586,7 @@ test("a body larger than this gateway reads is refused before anything parses it
 	expect(declared.contentType).toContain("application/problem+json");
 	expect(declared.problem["type"]).toBe(INVALID_REQUEST);
 
-	const streamed = await fetch(`http://127.0.0.1:${app.service.port}/incoming-payments`, {
+	const streamed = await fetch(`http://127.0.0.1:${app.service.at}/incoming-payments`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: new ReadableStream({
@@ -1572,7 +1608,7 @@ function post(app: App, body: unknown, key?: string): Promise<Response> {
 		headers["idempotency-key"] = key;
 	}
 
-	return fetch(`http://127.0.0.1:${app.service.port}/incoming-payments`, {
+	return fetch(`http://127.0.0.1:${app.service.at}/incoming-payments`, {
 		method: "POST",
 		headers,
 		body: typeof body === "string" ? body : JSON.stringify(body),
@@ -1654,7 +1690,7 @@ test("a refusal never carries a URL, an upstream status or an internal message",
 	}
 
 	app.store.close();
-	const gone = await fetch(`http://127.0.0.1:${app.service.port}/incoming-payments/anything`);
+	const gone = await fetch(`http://127.0.0.1:${app.service.at}/incoming-payments/anything`);
 	expect(gone.status).toBe(500);
 	expect(await gone.text()).not.toContain("database");
 
@@ -1664,7 +1700,7 @@ test("a refusal never carries a URL, an upstream status or an internal message",
 test("an unknown payment closes the socket instead of hanging", async () => {
 	const app = await running();
 	const socket = new WebSocket(
-		`ws://127.0.0.1:${app.service.port}/ws/incoming-payments/${crypto.randomUUID()}`,
+		`ws://127.0.0.1:${app.service.at}/ws/incoming-payments/${crypto.randomUUID()}`,
 	);
 
 	await new Promise((closed) => socket.addEventListener("close", closed, { once: true }));
@@ -1699,9 +1735,7 @@ test("a watcher asks how much to replay and gets that many of the newest, oldest
 		app.store.paid(one.id, preimages[nth]!);
 	});
 
-	const shallow = new WebSocket(
-		`ws://127.0.0.1:${app.service.port}/ws/triggers/${SECRET}?replay=2`,
-	);
+	const shallow = new WebSocket(`ws://127.0.0.1:${app.service.at}/ws/triggers/${SECRET}?replay=2`);
 	await new Promise((ready) => shallow.addEventListener("open", ready, { once: true }));
 	const replayed = collecting(shallow);
 	await settled();
@@ -1742,3 +1776,33 @@ test("what a minter asked to keep is still on the socket after the hour, and no 
 	overlay.close();
 	app.stop();
 });
+
+test("it answers on a unix socket, so a long running process needs no port at all", async () => {
+	const socket = join(mkdtempSync(join(tmpdir(), "thunder-socket-")), "gateway.sock");
+	const app = await runningOn({ socket });
+
+	expect(app.service.at).toBe(socket);
+	expect(await statusOverSocket(socket, "/health")).toBe(200);
+
+	await app.stop();
+});
+
+test("it binds only the interface it was given, so a local gateway stays local", async () => {
+	const app = await runningOn({ host: "127.0.0.1" });
+
+	expect(typeof app.service.at).toBe("number");
+	expect((await fetch(`http://127.0.0.1:${app.service.at}/health`)).status).toBe(200);
+
+	await app.stop();
+});
+
+function statusOverSocket(socketPath: string, path: string): Promise<number> {
+	return new Promise((answered) => {
+		const asked = httpRequest({ socketPath, path });
+		asked.on("response", (answer) => {
+			answer.resume();
+			answered(answer.statusCode ?? 0);
+		});
+		asked.end();
+	});
+}

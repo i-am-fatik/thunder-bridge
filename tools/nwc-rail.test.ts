@@ -59,7 +59,7 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 	});
 
 	it("mints on the real wallet and hands the gateway a verify url of ours", async () => {
-		const rail = nwcRail(new ThunderBridge(`http://127.0.0.1:${gateway.port}`), {
+		const rail = nwcRail(new ThunderBridge(`http://127.0.0.1:${gateway.at}`), {
 			connection: nwcConnection(own.uri),
 			amount: () => msat(OWN_AMOUNT_MSAT),
 			verifyThrough: { endpoint: MOUNT, secret: SEALING_SECRET },

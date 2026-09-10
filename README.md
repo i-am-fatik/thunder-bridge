@@ -127,6 +127,8 @@ standard's camelCase, and there is no authorization server.
 | `CLIENT_KEYS` | none | comma-separated client public keys this instance serves, and it serves nobody else. Unset serves everybody |
 | `KEEP_SEALED_DAYS` | `90` | how long a sealed blob outlives the payment it belonged to, after which it goes too |
 | `PORT` | `3000` | listen port, Railway sets this for you |
+| `HOST` | `0.0.0.0` | interface to bind. `127.0.0.1` keeps the gateway off the network, for a reverse proxy on the same host |
+| `SOCKET` | none | listen on this unix socket instead, which ignores `PORT` and `HOST` and opens no TCP port at all, so the file's permissions are the only way in |
 | `LEDGER` | `./data/ledger.db` | the SQLite file, everything lives here |
 | `GATEWAY_TOKEN` | none | bearer required on every route except `/health`, `/ready`, `/openapi.yaml`, `/docs` and `/webhook-key`. Blank counts as none, so a variable someone emptied leaves the gateway public rather than private and open to everyone |
 | `POLL_INTERVAL_SECS` | `5` | how often a payment under five minutes old polls `verify`, used only where the endpoint names no pace of its own with `Cache-Control: max-age` |
