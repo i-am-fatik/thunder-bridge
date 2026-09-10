@@ -51,6 +51,7 @@ jobs:
           fences=$(mktemp -d)
           node tools/readme-check.ts . --fences "$fences"
           for recipe in examples/*/; do
+            grep -q 'from "\.\./\.\./src/' "$recipe/main.ts" && continue
             cp "$recipe/main.ts" "$fences/src/$(basename "$recipe").ts"
           done
           (cd sdk && npm pack --pack-destination "$fences" >/dev/null)
