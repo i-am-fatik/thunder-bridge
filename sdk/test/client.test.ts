@@ -2010,3 +2010,16 @@ describe("a client that names itself", () => {
     expect(headersOf(calls[0]).get("x-client-key")).toBeNull();
   });
 });
+
+describe("the gateway url", () => {
+  it("is refused when it is not one, rather than failing at the first fetch", () => {
+    for (const nonsense of ["", "public.thunder-bridge.agora.gripe", "wss://gateway.example.net"]) {
+      expect(() => new ThunderBridge(nonsense)).toThrow("is not an http or https gateway url");
+    }
+  });
+
+  it("takes http, so a gateway on your own machine still works", () => {
+    expect(() => new ThunderBridge("http://localhost:8080")).not.toThrow();
+    expect(() => new ThunderBridge("https://gateway.example.net/api/")).not.toThrow();
+  });
+});

@@ -873,6 +873,11 @@ intended outcome: a silent behavioural swap under a familiar name would be worse
   a bare CSS colour name. Every branch of the pattern is anchored at both ends,
   so a value cannot carry extra markup out of the `fill` attribute; anything else
   throws.
+- **`new ThunderBridge(url)` refuses a url that is not http or https**, naming the
+  value it was handed. It used to take anything and fail at the first request with
+  whatever the runtime said, which in a browser is a bare `Failed to fetch` pointing
+  at no line in particular. A gateway that cannot be a gateway is a mistake in the
+  caller's configuration, and now the caller meets it where they wrote it.
 
 ### Migration
 

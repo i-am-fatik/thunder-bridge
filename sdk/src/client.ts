@@ -172,6 +172,15 @@ export interface FollowOptions {
   tickets?: boolean;
 }
 
+function gatewayAt(baseUrl: string): string {
+  const at = URL.canParse(baseUrl) ? new URL(baseUrl) : null;
+  if (at === null || (at.protocol !== "http:" && at.protocol !== "https:")) {
+    throw new Error(`${baseUrl} is not an http or https gateway url`);
+  }
+
+  return baseUrl.replace(/\/+$/, "");
+}
+
 /** Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself */
 export class ThunderBridge {
   private readonly baseUrl: string;
@@ -189,7 +198,7 @@ export class ThunderBridge {
   readonly rails: Rails;
 
   constructor(baseUrl: string, options?: ThunderBridgeOptions) {
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.baseUrl = gatewayAt(baseUrl);
     this.verify = options?.verify ?? true;
     this.token = options?.token ?? null;
     this.secret = options?.secret ?? null;
