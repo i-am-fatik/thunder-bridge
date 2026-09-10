@@ -226,7 +226,6 @@ ${steps}
           </ul>
 
           <div id="qrcard"><div id="qr"></div><div class="bolt" id="bolt"></div><div class="ident" id="ident"></div></div>
-${runnable.slug === "pay-me" ? `          <details id="minted"><summary id="mintedbolt"></summary><div id="mintedqr"></div></details>` : ""}
           <div class="verdict" id="verdict"></div>
         </div>
       </div>

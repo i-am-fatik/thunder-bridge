@@ -40,9 +40,9 @@ async function askTheEndpoint(values) {
   const minted = await asJson(`${offered.callback}&amount=${offered.minSendable}`);
   stepAt("callback", "done");
   stepAt("invoice", "running");
-  mintedQr.innerHTML = invoiceToSvg(minted.pr);
-  mintedBolt.textContent = `the invoice it minted, ${grouped(offered.minSendable / 1000)} sat. Open to scan and pay it`;
-  mintedCard.classList.add("on");
+  qr.innerHTML = invoiceToSvg(minted.pr);
+  qr.dataset.invoice = "1";
+  bolt.textContent = `the invoice it minted, ${grouped(offered.minSendable / 1000)} sat. Scan it to pay`;
   stepAt("invoice", "done");
 
   return { bolt11: minted.pr, least: offered.minSendable / 1000, most: offered.maxSendable / 1000 };
@@ -98,9 +98,6 @@ const qr = document.getElementById("qr");
 const ident = document.getElementById("ident");
 const verdict = document.getElementById("verdict");
 const bolt = document.getElementById("bolt");
-const mintedCard = document.getElementById("minted");
-const mintedQr = document.getElementById("mintedqr");
-const mintedBolt = document.getElementById("mintedbolt");
 
 const NOTHING_YET = wire.innerHTML;
 const realFetch = window.fetch.bind(window);
@@ -121,7 +118,9 @@ function paint() {
     if (whole(values.most) < whole(values.least)) {
       most.classList.add("wrong");
     }
-    bolt.textContent = `${location.origin}/lnurlp/tips as LNURL, offering ${grouped(whole(values.least))} to ${grouped(whole(values.most))} sat`;
+    if (qr.dataset.invoice === undefined) {
+      bolt.textContent = `the LNURL QR the recipe draws, offering ${grouped(whole(values.least))} to ${grouped(whole(values.most))} sat. It points at localhost, so no wallet reaches it from here`;
+    }
   }
   runButton.disabled = running || fields.some((one) => one.classList.contains("wrong"));
 }
@@ -170,10 +169,9 @@ function clearRun() {
     one.classList.remove("running", "done");
   }
   if (RECIPE.call === "payMe") {
-    mintedCard.classList.remove("on");
-    mintedCard.open = false;
-    mintedQr.replaceChildren();
-    mintedBolt.replaceChildren();
+    qr.innerHTML = lnurlEndpointToSvg(`${location.origin}/lnurlp/tips`);
+    delete qr.dataset.invoice;
+    paint();
 
     return;
   }
