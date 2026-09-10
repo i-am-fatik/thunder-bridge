@@ -211,6 +211,30 @@ export async function start(
 		void respond(incoming, store, serving, vitals()).then((answer) => reply(answer, outgoing));
 	});
 
+	const openWhatTheTicketAllows = async (
+		ticket: string,
+		incoming: IncomingMessage,
+		socket: Duplex,
+		head: Buffer,
+	): Promise<void> => {
+		const permits = await readTicket(key, ticket, unixNow()).catch(() => null);
+		if (socket.destroyed) {
+			return;
+		}
+		if (permits === null) {
+			refuseUpgrade(socket);
+			return;
+		}
+
+		upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
+			if (permits.kind === "trigger") {
+				subscribe(accepted, permits.trigger, store, followers, permits.replay);
+			} else {
+				follow(accepted, permits.paymentId, store, followers);
+			}
+		});
+	};
+
 	server.on("upgrade", (incoming, socket, head) => {
 		if (draining) {
 			refuseUpgrade(socket, "503 Service Unavailable");
@@ -220,24 +244,7 @@ export async function start(
 		const path = pathOf(incoming);
 		const ticketed = TICKETED.exec(path);
 		if (ticketed) {
-			void readTicket(key, ticketed[1]!, unixNow())
-				.then((permits) => {
-					if (socket.destroyed) {
-						return;
-					}
-					if (permits === null) {
-						refuseUpgrade(socket);
-						return;
-					}
-					upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
-						if (permits.kind === "trigger") {
-							subscribe(accepted, permits.trigger, store, followers, permits.replay);
-						} else {
-							follow(accepted, permits.paymentId, store, followers);
-						}
-					});
-				})
-				.catch(() => refuseUpgrade(socket));
+			void openWhatTheTicketAllows(ticketed[1]!, incoming, socket, head);
 			return;
 		}
 
