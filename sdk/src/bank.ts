@@ -165,10 +165,11 @@ export async function bankTransfer(
   params: BankTransferParams,
 ): Promise<BankTransfer> {
   const currency = params.currency ?? DEFAULT_CURRENCY;
-  refuseUnusable(params, currency);
+  const iban = accountOf(params.iban);
+  refuseUnusable(params, iban, currency);
   await refuseAnOpenGateway(gateway, params);
-  const spd = shortPaymentDescriptor(params, currency);
-  const subject = subjectOf(params.iban, params.amountMinor, currency, params.reference);
+  const spd = shortPaymentDescriptor(params, iban, currency);
+  const subject = subjectOf(iban, params.amountMinor, currency, params.reference);
 
   const verifyUrl = await answeredAt(params, subject);
 
@@ -204,7 +205,7 @@ export function bankVerifyEndpoint(
   config: BankVerifyConfig,
 ): (request: Request) => Promise<Response> {
   refuseAWeakSecret(config.secret);
-  const answersFor = config.iban.replace(/\s+/g, "").toUpperCase();
+  const answersFor = accountOf(config.iban);
   if (!IBAN.test(answersFor)) {
     throw new Error(`${config.iban} is not an IBAN, so this endpoint answers for no account`);
   }
@@ -306,7 +307,7 @@ export function bankAgent(config: BankAgentConfig): () => void {
       return await creditedPreimage({
         secret: config.secret,
         asked: {
-          iban: order.iban.replace(/\s+/g, "").toUpperCase(),
+          iban: accountOf(order.iban),
           reference: order.reference,
           amountMinor: order.amountMinor,
           currency,
@@ -368,16 +369,20 @@ function pays(credit: Credit, asked: Asked): boolean {
 }
 
 function subjectOf(iban: string, amountMinor: number, currency: string, reference: string): string {
-  return `${iban.toUpperCase()}|${amountMinor}|${currency.toUpperCase()}|${reference}`;
+  return `${iban}|${amountMinor}|${currency.toUpperCase()}|${reference}`;
 }
 
 function hashOf(preimage: string): string {
   return bytesToHex(sha256(hexToBytes(preimage)));
 }
 
-function shortPaymentDescriptor(params: BankTransferParams, currency: string): string {
+function shortPaymentDescriptor(
+  params: BankTransferParams,
+  iban: string,
+  currency: string,
+): string {
   const fields = [
-    `ACC:${params.iban}`,
+    `ACC:${iban}`,
     `AM:${major(params.amountMinor, currency)}`,
     `CC:${currency.toUpperCase()}`,
     `MSG:${params.reference}`,
@@ -409,12 +414,12 @@ async function refuseAnOpenGateway(
   );
 }
 
-function refuseUnusable(params: BankTransferParams, currency: string): void {
+function refuseUnusable(params: BankTransferParams, iban: string, currency: string): void {
   refuseAWeakSecret(params.secret);
   if (params.answerBy !== "agent" && params.verifyUrl === undefined) {
     throw new Error("a transfer the gateway polls needs the verify url it is polled at");
   }
-  if (!IBAN.test(params.iban)) {
+  if (!IBAN.test(iban)) {
     throw new Error(`${params.iban} is not an IBAN`);
   }
   if (!Number.isInteger(params.amountMinor) || params.amountMinor <= 0) {
@@ -429,6 +434,10 @@ function refuseUnusable(params: BankTransferParams, currency: string): void {
   if (params.variableSymbol && !/^[0-9]{1,10}$/.test(params.variableSymbol)) {
     throw new Error("a variable symbol is up to ten digits");
   }
+}
+
+function accountOf(iban: string): string {
+  return iban.replace(/\s+/g, "").toUpperCase();
 }
 
 function unixNow(): number {

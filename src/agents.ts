@@ -30,11 +30,6 @@ export function attend(socket: WebSocket, caller: string, agents: Agents): void 
 	socket.on("error", leave);
 }
 
-/** Whether anybody is there to answer for this caller */
-export function attending(caller: string | null, agents: Agents): boolean {
-	return caller !== null && (agents.get(caller)?.size ?? 0) > 0;
-}
-
 /**
  * Put one payment to whichever of a caller's sockets answers first, as the poll
  * would have put it to a URL. Null when nobody is holding one open, which leaves
@@ -75,10 +70,7 @@ export async function askAnAgent(
 	if (answer === null) {
 		return null;
 	}
-	if (answer.preimage === null) {
-		return { preimage: null, pace: null, ceiling: null };
-	}
-	if (!preimageMatchesHash(answer.preimage, paymentHash)) {
+	if (answer.preimage !== null && !preimageMatchesHash(answer.preimage, paymentHash)) {
 		throw new Error(`the agent answered a preimage that does not hash to ${paymentHash}`);
 	}
 

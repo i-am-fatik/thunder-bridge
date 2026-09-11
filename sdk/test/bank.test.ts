@@ -113,6 +113,14 @@ describe("bankTransfer", () => {
     expect(transfer.spd).toBe(`SPD*1.0*ACC:${IBAN}*AM:480.55*CC:CZK*MSG:${REFERENCE}`);
   });
 
+  it("takes an account however it was spelled and draws one clean QR from it", async () => {
+    const spaced = await asked({ iban: "cz65 0800 0000 1920 0014 5399" });
+    const plain = await asked();
+
+    expect(spaced.spd).toBe(plain.spd);
+    expect(spaced.paymentHash).toBe(plain.paymentHash);
+  });
+
   it("carries the variable symbol only when one was asked for", async () => {
     const transfer = await asked({ variableSymbol: "1234567890" });
 

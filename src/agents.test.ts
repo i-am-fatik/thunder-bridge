@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "vitest";
 
-import { type Agents, askAnAgent, attend, attending } from "./agents.ts";
+import { type Agents, askAnAgent, attend } from "./agents.ts";
 
 type Heard = (said?: unknown) => void;
 
@@ -51,12 +51,11 @@ function opened(): { agents: Agents; socket: FakeSocket } {
 	return { agents, socket };
 }
 
-test("a caller with a socket open is there to answer", () => {
+test("a caller with a socket open is there to answer, and nobody else is", () => {
 	const { agents } = opened();
 
-	expect(attending(CALLER, agents)).toBe(true);
-	expect(attending(OTHER_CALLER, agents)).toBe(false);
-	expect(attending(null, agents)).toBe(false);
+	expect(agents.get(CALLER)?.size).toBe(1);
+	expect(agents.has(OTHER_CALLER)).toBe(false);
 });
 
 test("a caller answers from as many devices as it has open", () => {
@@ -72,10 +71,10 @@ test("a socket that closes stops answering, and the last one out takes the calle
 	attend(second as never, CALLER, agents);
 
 	socket.fire("close");
-	expect(attending(CALLER, agents)).toBe(true);
+	expect(agents.has(CALLER)).toBe(true);
 
 	second.fire("close");
-	expect(attending(CALLER, agents)).toBe(false);
+	expect(agents.has(CALLER)).toBe(false);
 	expect(agents.has(CALLER)).toBe(false);
 });
 
@@ -84,7 +83,7 @@ test("a socket that errors leaves as surely as one that closes", () => {
 
 	socket.fire("error");
 
-	expect(attending(CALLER, agents)).toBe(false);
+	expect(agents.has(CALLER)).toBe(false);
 });
 
 test("one caller leaving says nothing about another", () => {
@@ -93,8 +92,8 @@ test("one caller leaving says nothing about another", () => {
 
 	socket.fire("close");
 
-	expect(attending(CALLER, agents)).toBe(false);
-	expect(attending(OTHER_CALLER, agents)).toBe(true);
+	expect(agents.has(CALLER)).toBe(false);
+	expect(agents.has(OTHER_CALLER)).toBe(true);
 });
 
 const PREIMAGE = "1".repeat(64);
