@@ -7,6 +7,7 @@ export type { Amount, FiatOptions, Msat } from "./amount.js";
 export { fiat, msat, sats } from "./amount.js";
 export type { BankVerifyConfig } from "./bank.js";
 export type {
+  AttendOptions,
   CreateOptions,
   FollowOptions,
   ThunderBridgeOptions,

@@ -172,6 +172,43 @@ export interface FollowOptions {
   tickets?: boolean;
 }
 
+/** How this caller holds a socket open and what it answers on it */
+export interface AttendOptions {
+  /**
+   * What this caller answers when the gateway asks about one of its payments.
+   * The preimage when the money is there, null while it is not, and the gateway
+   * checks the preimage against the hash either way
+   */
+  answer: (paymentHash: string) => Promise<string | null> | string | null;
+
+  /** Called when a connection drops or a frame is refused, the socket keeps going */
+  onError?: (error: unknown) => void;
+
+  /** Reconnect after a drop, defaults to true */
+  reconnect?: boolean;
+
+  /** The first wait after a drop, doubling and jittered, defaults to 3000 */
+  reconnectDelayMs?: number;
+}
+
+function askFromWire(raw: string): { ask: string; paymentHash: string } | null {
+  let said: unknown;
+  try {
+    said = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof said !== "object" || said === null) {
+    return null;
+  }
+
+  const fields = said as Record<string, unknown>;
+  const ask = fields["ask"];
+  const paymentHash = fields["payment_hash"];
+
+  return typeof ask === "string" && typeof paymentHash === "string" ? { ask, paymentHash } : null;
+}
+
 function gatewayAt(baseUrl: string): string {
   const at = URL.canParse(baseUrl) ? new URL(baseUrl) : null;
   if (at === null || (at.protocol !== "http:" && at.protocol !== "https:")) {
@@ -612,6 +649,79 @@ export class ThunderBridge {
   }
 
   /**
+   * Hold a socket open and answer what the gateway asks about this caller's own
+   * payments, so a watch addressed to this caller settles without anybody
+   * hosting a URL. Reconnects on its own until the returned function is called
+   */
+  attend(options: AttendOptions): () => void {
+    const base = this.baseUrl.replace(/^http/, "ws");
+    const firstDelay = options.reconnectDelayMs ?? RECONNECT_DELAY_MS;
+
+    let socket: WebSocket | null = null;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
+    let attempt = 0;
+
+    const again = () => {
+      if (stopped || options.reconnect === false) {
+        return;
+      }
+      retry = setTimeout(() => void connect(), backoffMs(firstDelay, attempt));
+    };
+
+    const answered = async (opened: WebSocket, raw: string): Promise<void> => {
+      const asked = askFromWire(raw);
+      if (asked === null) {
+        return;
+      }
+
+      const preimage = await options.answer(asked.paymentHash);
+      opened.send(
+        JSON.stringify(
+          preimage === null
+            ? { ask: asked.ask, settled: false }
+            : { ask: asked.ask, settled: true, preimage },
+        ),
+      );
+    };
+
+    const connect = async () => {
+      attempt += 1;
+      let url: string;
+      try {
+        url = `${base}/ws/tickets/${await this.wsTicket({ agent: true })}`;
+      } catch (refused: unknown) {
+        options.onError?.(refused);
+        again();
+        return;
+      }
+      if (stopped) {
+        return;
+      }
+
+      const opened = new WebSocket(url);
+      socket = opened;
+      opened.onopen = () => {
+        attempt = 1;
+      };
+      opened.onmessage = (event: MessageEvent) => {
+        void answered(opened, String(event.data)).catch((refused: unknown) =>
+          options.onError?.(refused),
+        );
+      };
+      opened.onerror = () => options.onError?.(new Error(`could not attend ${base}`));
+      opened.onclose = again;
+    };
+    void connect();
+
+    return () => {
+      stopped = true;
+      clearTimeout(retry);
+      socket?.close();
+    };
+  }
+
+  /**
    * Follow every payment made to one trigger, replayed from the recent ones on
    * connect and then live, reconnecting on its own until the returned function
    * is called. A trigger has no terminal state, so this never resolves
@@ -697,12 +807,14 @@ export class ThunderBridge {
     return asked === true || this.token !== null;
   }
 
-  private async wsTicket(body: Record<string, string | number | undefined>): Promise<string> {
+  private async wsTicket(
+    body: Record<string, string | number | boolean | undefined>,
+  ): Promise<string> {
     return encodeURIComponent((await this.mintedTicket(body)).ticket);
   }
 
   private async mintedTicket(
-    body: Record<string, string | number | undefined>,
+    body: Record<string, string | number | boolean | undefined>,
   ): Promise<SocketTicket> {
     const sent = JSON.stringify(body);
     const response = await fetch(`${this.baseUrl}/ws-tickets`, {

@@ -1,4 +1,5 @@
 import { bytesToHex, hexToBytes } from "../../core/bytes.js";
+import { callerKey } from "../../core/caller.js";
 import { hmacHex } from "../../core/hmac.js";
 import { refuseAWeakSecret, sealStable, unseal } from "../../core/sealed.js";
 import { sha256 } from "../../core/sha256.js";
@@ -51,8 +52,18 @@ export interface BankTransferParams {
   /** The account the money goes to, as an IBAN */
   iban: string;
 
-  /** Where `bankVerifyEndpoint` is mounted, a public https URL with no query of its own */
-  verifyUrl: string;
+  /**
+   * Where `bankVerifyEndpoint` is mounted, a public https URL with no query of
+   * its own. Not needed when `answerBy` is "agent", because then nothing is polled
+   */
+  verifyUrl?: string;
+
+  /**
+   * How the gateway gets its answer. "poll" hands it a URL it fetches, which
+   * needs a public host. "agent" hands it this caller's name instead, and the
+   * socket `bankAgent` holds open answers for it, which needs no host at all
+   */
+  answerBy?: "poll" | "agent";
 
   /** When the offer dies, in unix seconds. Money in a bank moves on banking days, so give it days */
   expiresAt: number;
@@ -159,9 +170,7 @@ export async function bankTransfer(
   const spd = shortPaymentDescriptor(params, currency);
   const subject = subjectOf(params.iban, params.amountMinor, currency, params.reference);
 
-  const polling = new URL(params.verifyUrl);
-  polling.searchParams.set("q", await sealStable(params.secret, subject));
-  const verifyUrl = polling.toString();
+  const verifyUrl = await answeredAt(params, subject);
 
   const watched = await gateway.watch({
     paymentHash: hashOf(await hmacHex(params.secret, `preimage|${subject}`)),
@@ -221,17 +230,112 @@ export function bankVerifyEndpoint(
       return Response.json({ settled: false }, { status: 403 });
     }
 
-    const since = unixNow() - (config.lookBackSecs ?? DEFAULT_LOOK_BACK_SECS);
-    const landed = (await config.statement(since)).some((credit) => pays(credit, asked));
-    if (!landed) {
-      return Response.json({ settled: false }, { headers: paced });
-    }
+    const preimage = await creditedPreimage({
+      secret: config.secret,
+      asked,
+      statement: config.statement,
+      lookBackSecs: config.lookBackSecs,
+    });
 
-    return Response.json(
-      { settled: true, preimage: await hmacHex(config.secret, `preimage|${subject}`) },
-      { headers: paced },
-    );
+    return preimage === null
+      ? Response.json({ settled: false }, { headers: paced })
+      : Response.json({ settled: true, preimage }, { headers: paced });
   };
+}
+
+async function answeredAt(params: BankTransferParams, subject: string): Promise<string> {
+  if (params.answerBy === "agent") {
+    return `agent:${(await callerKey(params.secret)).publicKeyHex}`;
+  }
+
+  const polling = new URL(params.verifyUrl ?? "");
+  polling.searchParams.set("q", await sealStable(params.secret, subject));
+
+  return polling.toString();
+}
+
+/** One order this caller is waiting on, and the account it is waiting on it in */
+export interface BankOrder {
+  iban: string;
+  reference: string;
+  amountMinor: number;
+  currency?: string;
+  statement: Statement;
+}
+
+/** What a caller needs to answer for its own transfers over a socket */
+export interface BankAgentConfig {
+  /** The gateway holding the watches this caller raised */
+  gateway: ThunderBridge;
+
+  /** The same secret `bankTransfer` was given, never leaving this device */
+  secret: string;
+
+  /** What the payment the gateway is asking about was asking for, or null when it is none of ours */
+  orders: (paymentHash: string) => Promise<BankOrder | null> | BankOrder | null;
+
+  /** How far back a credit still counts, seven days by default */
+  lookBackSecs?: number;
+
+  /** Called when a connection drops or a frame is refused, the socket keeps going */
+  onError?: (error: unknown) => void;
+}
+
+/**
+ * Answer the gateway over a socket this device opens, so a transfer addressed to
+ * this caller settles from a till behind NAT, a browser tab or a phone. The
+ * preimage is derived here from the secret, so the gateway is told only that one
+ * exists and can check it against the hash it already holds.
+ *
+ * Call the returned function to stop attending. Whatever is still open is asked
+ * again on the gateway's own schedule, so leaving and coming back loses nothing
+ */
+export function bankAgent(config: BankAgentConfig): () => void {
+  refuseAWeakSecret(config.secret);
+
+  return config.gateway.attend({
+    onError: config.onError,
+    answer: async (paymentHash) => {
+      const order = await config.orders(paymentHash);
+      if (order === null) {
+        return null;
+      }
+
+      const currency = order.currency ?? DEFAULT_CURRENCY;
+
+      return await creditedPreimage({
+        secret: config.secret,
+        asked: {
+          iban: order.iban.replace(/\s+/g, "").toUpperCase(),
+          reference: order.reference,
+          amountMinor: order.amountMinor,
+          currency,
+        },
+        statement: order.statement,
+        lookBackSecs: config.lookBackSecs,
+      });
+    },
+  });
+}
+
+async function creditedPreimage(params: {
+  secret: string;
+  asked: Asked;
+  statement: Statement;
+  lookBackSecs?: number;
+}): Promise<string | null> {
+  const since = unixNow() - (params.lookBackSecs ?? DEFAULT_LOOK_BACK_SECS);
+  const landed = (await params.statement(since)).some((credit) => pays(credit, params.asked));
+  if (!landed) {
+    return null;
+  }
+
+  const { iban, amountMinor, currency, reference } = params.asked;
+
+  return await hmacHex(
+    params.secret,
+    `preimage|${subjectOf(iban, amountMinor, currency, reference)}`,
+  );
 }
 
 interface Asked {
@@ -307,6 +411,9 @@ async function refuseAnOpenGateway(
 
 function refuseUnusable(params: BankTransferParams, currency: string): void {
   refuseAWeakSecret(params.secret);
+  if (params.answerBy !== "agent" && params.verifyUrl === undefined) {
+    throw new Error("a transfer the gateway polls needs the verify url it is polled at");
+  }
   if (!IBAN.test(params.iban)) {
     throw new Error(`${params.iban} is not an IBAN`);
   }

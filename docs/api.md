@@ -12,6 +12,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`AmountError`](#thunder-bridge-class-amounterror) | class | Thrown when a price cannot be held exactly |
 | [`AmountFault`](#thunder-bridge-type-amountfault) | type | Why an amount was refused |
 | [`answerVerifyChallenge`](#thunder-bridge-function-answerverifychallenge) | function | Answer the challenge the gateway sends a verify URL before it will poll it, which is how a caller shows the endpoint agreed to the traffic rather than merely being named |
+| [`AttendOptions`](#thunder-bridge-interface-attendoptions) | interface | How this caller holds a socket open and what it answers on it |
 | [`BankRailConfig`](#thunder-bridge-interface-bankrailconfig) | interface | A bank rail: the account the money lands in, and where its arrival is read back from |
 | [`BankVerifyConfig`](#thunder-bridge-interface-bankverifyconfig) | interface | The endpoint the gateway polls for a bank transfer, answering off your own statement |
 | [`BlindLightningRailConfig`](#thunder-bridge-interface-blindlightningrailconfig) | interface | The same rail with the invoice resolved here, so the gateway is told neither address nor amount |
@@ -140,6 +141,30 @@ verify endpoint hands the request on to its own reading of a payment.
 
 The nonce is echoed to whoever asked, which grants them nothing, so there is
 no signature to check here and no secret to hold
+
+### <a id="thunder-bridge-interface-attendoptions"></a>AttendOptions
+
+```ts
+interface AttendOptions {
+  /**
+   * What this caller answers when the gateway asks about one of its payments.
+   * The preimage when the money is there, null while it is not, and the gateway
+   * checks the preimage against the hash either way
+   */
+  answer: (paymentHash: string) => Promise<string | null> | string | null;
+
+  /** Called when a connection drops or a frame is refused, the socket keeps going */
+  onError?: (error: unknown) => void;
+
+  /** Reconnect after a drop, defaults to true */
+  reconnect?: boolean;
+
+  /** The first wait after a drop, doubling and jittered, defaults to 3000 */
+  reconnectDelayMs?: number;
+}
+```
+
+How this caller holds a socket open and what it answers on it
 
 ### <a id="thunder-bridge-interface-bankrailconfig"></a>BankRailConfig
 
@@ -1141,6 +1166,7 @@ Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself
 | <a id="thunder-bridge-class-thunderbridge-firstsettled"></a>`async firstSettled(ids: string[], options?: WaitOptions): Promise<Payment \| null>` | Wait on several payments and keep the first one that is really paid, then stop waiting on the losers, which closes their sockets |
 | <a id="thunder-bridge-class-thunderbridge-watch"></a>`async watch(handover: Handover): Promise<Payment>` | Hand over an invoice you obtained yourself so the gateway watches it without being told the address or the amount |
 | <a id="thunder-bridge-class-thunderbridge-namefor"></a>`async nameFor(paymentHash: string): Promise<string \| null>` | What this payment is called, which you can work out before any gateway has heard of it |
+| <a id="thunder-bridge-class-thunderbridge-attend"></a>`attend(options: AttendOptions): () => void` | Hold a socket open and answer what the gateway asks about this caller's own payments, so a watch addressed to this caller settles without anybody hosting a URL |
 | <a id="thunder-bridge-class-thunderbridge-follow"></a>`follow(secret: string, options: FollowOptions): () => void` | Follow every payment made to one trigger, replayed from the recent ones on connect and then live, reconnecting on its own until the returned function is called |
 | <a id="thunder-bridge-class-thunderbridge-ticket"></a>`async ticket(trigger: string, options?: TicketOptions): Promise<SocketTicket>` | A one minute pass onto one trigger's stream, for something that must hold neither the token nor the trigger secret |
 
@@ -1777,6 +1803,9 @@ shape
 
 | Export | Kind | What it is |
 |---|---|---|
+| [`bankAgent`](#thunder-bridge-bank-function-bankagent) | function | Answer the gateway over a socket this device opens, so a transfer addressed to this caller settles from a till behind NAT, a browser tab or a phone |
+| [`BankAgentConfig`](#thunder-bridge-bank-interface-bankagentconfig) | interface | What a caller needs to answer for its own transfers over a socket |
+| [`BankOrder`](#thunder-bridge-bank-interface-bankorder) | interface | One order this caller is waiting on, and the account it is waiting on it in |
 | [`BankTransfer`](#thunder-bridge-bank-interface-banktransfer) | interface | A transfer the gateway is now watching, and the descriptor the payer scans |
 | [`BankTransferParams`](#thunder-bridge-bank-interface-banktransferparams) | interface | One transfer to ask for: what is owed, where it lands, and where its arrival is read back from |
 | [`BankVerifyConfig`](#thunder-bridge-bank-interface-bankverifyconfig) | interface | The endpoint the gateway polls for a bank transfer, answering off your own statement |
@@ -1784,6 +1813,57 @@ shape
 | [`FioConfig`](#thunder-bridge-bank-interface-fioconfig) | interface | A Fio account to read credits from, as its own API describes one |
 | [`fioStatement`](#thunder-bridge-bank-function-fiostatement) | function | Read one Fio account as a `Statement`, so a bank transfer proves itself the way a Lightning payment does |
 | [`Statement`](#thunder-bridge-bank-type-statement) | type | Recent credits on one account, oldest or newest first, it makes no difference |
+
+### <a id="thunder-bridge-bank-function-bankagent"></a>bankAgent
+
+```ts
+function bankAgent(config: BankAgentConfig): () => void
+```
+
+Answer the gateway over a socket this device opens, so a transfer addressed to
+this caller settles from a till behind NAT, a browser tab or a phone. The
+preimage is derived here from the secret, so the gateway is told only that one
+exists and can check it against the hash it already holds.
+
+Call the returned function to stop attending. Whatever is still open is asked
+again on the gateway's own schedule, so leaving and coming back loses nothing
+
+### <a id="thunder-bridge-bank-interface-bankagentconfig"></a>BankAgentConfig
+
+```ts
+interface BankAgentConfig {
+  /** The gateway holding the watches this caller raised */
+  gateway: ThunderBridge;
+
+  /** The same secret `bankTransfer` was given, never leaving this device */
+  secret: string;
+
+  /** What the payment the gateway is asking about was asking for, or null when it is none of ours */
+  orders: (paymentHash: string) => Promise<BankOrder | null> | BankOrder | null;
+
+  /** How far back a credit still counts, seven days by default */
+  lookBackSecs?: number;
+
+  /** Called when a connection drops or a frame is refused, the socket keeps going */
+  onError?: (error: unknown) => void;
+}
+```
+
+What a caller needs to answer for its own transfers over a socket
+
+### <a id="thunder-bridge-bank-interface-bankorder"></a>BankOrder
+
+```ts
+interface BankOrder {
+  iban: string;
+  reference: string;
+  amountMinor: number;
+  currency?: string;
+  statement: Statement;
+}
+```
+
+One order this caller is waiting on, and the account it is waiting on it in
 
 ### <a id="thunder-bridge-bank-interface-banktransfer"></a>BankTransfer
 
@@ -1824,8 +1904,18 @@ interface BankTransferParams {
   /** The account the money goes to, as an IBAN */
   iban: string;
 
-  /** Where `bankVerifyEndpoint` is mounted, a public https URL with no query of its own */
-  verifyUrl: string;
+  /**
+   * Where `bankVerifyEndpoint` is mounted, a public https URL with no query of
+   * its own. Not needed when `answerBy` is "agent", because then nothing is polled
+   */
+  verifyUrl?: string;
+
+  /**
+   * How the gateway gets its answer. "poll" hands it a URL it fetches, which
+   * needs a public host. "agent" hands it this caller's name instead, and the
+   * socket `bankAgent` holds open answers for it, which needs no host at all
+   */
+  answerBy?: "poll" | "agent";
 
   /** When the offer dies, in unix seconds. Money in a bank moves on banking days, so give it days */
   expiresAt: number;
