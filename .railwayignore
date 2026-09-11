@@ -1,7 +1,6 @@
 vault/
 .agents/
 .claude/
-skills-lock.json
 node_modules
 data/
 .env

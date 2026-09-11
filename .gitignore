@@ -11,5 +11,6 @@ wrap-lab.ledger.json.writing
 docs/demo/bundle.js
 
 .agents/
+skills-lock.json
 .claude/
 .playwright-mcp/
