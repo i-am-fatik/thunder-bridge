@@ -83,7 +83,8 @@ export type QuoteRequest = {
 
 export type TicketRequest =
 	| { kind: "trigger"; secret: string; replay: number }
-	| { kind: "payment"; paymentId: string };
+	| { kind: "payment"; paymentId: string }
+	| { kind: "agent" };
 
 export function paymentToWire(payment: PublicPayment): IncomingPayment {
 	return {
@@ -190,9 +191,17 @@ export function readTicketRequest(body: unknown): TicketRequest {
 	const fields = asObject(body, "the request body must be a JSON object");
 	const secret = fields["trigger_secret"];
 	const paymentId = fields["payment_id"];
+	const agent = fields["agent"];
 
-	if ((secret === undefined) === (paymentId === undefined)) {
-		throw new MalformedRequest("name exactly one of trigger_secret or payment_id");
+	if ([secret, paymentId, agent].filter((asked) => asked !== undefined).length !== 1) {
+		throw new MalformedRequest("name exactly one of trigger_secret, payment_id or agent");
+	}
+	if (agent !== undefined) {
+		if (agent !== true) {
+			throw new MalformedRequest("agent must be true");
+		}
+
+		return { kind: "agent" };
 	}
 	if (secret !== undefined) {
 		if (typeof secret !== "string" || secret.length === 0) {

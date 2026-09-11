@@ -9,6 +9,7 @@ const TTL = 60;
 
 const WATCHING: Subject = { kind: "trigger", trigger: "a".repeat(64), replay: 10 };
 const READING: Subject = { kind: "payment", paymentId: "b".repeat(64) };
+const ANSWERING: Subject = { kind: "agent", caller: "d".repeat(64) };
 
 test("a ticket reads back as the subject it was minted for", async () => {
 	const watching = await mint(KEY, WATCHING, TTL, NOW);
@@ -106,4 +107,31 @@ test("a trigger ticket carries how much to replay, and that rides under the same
 	expect(await read(KEY, shallow.ticket, NOW)).toMatchObject({ replay: 1 });
 	expect(await read(KEY, deep.ticket, NOW)).toMatchObject({ replay: 50 });
 	expect(await read(KEY, shallow.ticket.replace(".1.", ".50."), NOW)).toBeNull();
+});
+
+test("an agent ticket reads back as the caller it was minted for", async () => {
+	const answering = await mint(KEY, ANSWERING, TTL, NOW);
+
+	expect(await read(KEY, answering.ticket, NOW)).toMatchObject(ANSWERING);
+});
+
+test("an agent ticket for one caller never speaks for another", async () => {
+	const mine = await mint(KEY, ANSWERING, TTL, NOW);
+	const theirs = await mint(KEY, { kind: "agent", caller: "e".repeat(64) }, TTL, NOW);
+
+	expect(await read(KEY, mine.ticket, NOW)).not.toMatchObject({ caller: "e".repeat(64) });
+	expect(mine.ticket).not.toBe(theirs.ticket);
+});
+
+test("an agent ticket is refused by a gateway holding another key, like every other kind", async () => {
+	const answering = await mint(KEY, ANSWERING, TTL, NOW);
+
+	expect(await read(OTHER_KEY, answering.ticket, NOW)).toBeNull();
+	expect(await read(KEY, answering.ticket, NOW + TTL)).toBeNull();
+});
+
+test("an agent subject never reads back as a payment or a trigger", async () => {
+	const answering = await read(KEY, (await mint(KEY, ANSWERING, TTL, NOW)).ticket, NOW);
+
+	expect(answering?.kind).toBe("agent");
 });

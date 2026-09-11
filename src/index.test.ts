@@ -965,6 +965,50 @@ test("a ticket is not minted for a payment that belongs to somebody else", async
 	app.stop();
 });
 
+test("an agent ticket is minted for the caller that asked for it, and for nobody anonymous", async () => {
+	const app = await running();
+	const asked = JSON.stringify({ agent: true });
+	const port = app.service.at;
+
+	const signed = await fetch(`http://127.0.0.1:${port}/ws-tickets`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+		},
+		body: asked,
+	});
+	expect(signed.status).toBe(200);
+	expect(String(((await signed.json()) as Record<string, unknown>)["ticket"])).toMatch(/^2\.a\./);
+
+	const anonymous = await fetch(`http://127.0.0.1:${port}/ws-tickets`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: asked,
+	});
+	expect(anonymous.status).toBe(404);
+
+	app.stop();
+});
+
+test("a ticket names one subject, so asking for an agent and a payment at once is refused", async () => {
+	const app = await running();
+	const asked = JSON.stringify({ agent: true, payment_id: "whatever" });
+	const port = app.service.at;
+
+	const answer = await fetch(`http://127.0.0.1:${port}/ws-tickets`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+		},
+		body: asked,
+	});
+
+	expect(answer.status).toBe(400);
+	app.stop();
+});
+
 test("a watch nobody signed for stays readable by anyone, until callers are required", async () => {
 	const app = await running();
 

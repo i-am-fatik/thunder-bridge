@@ -15,6 +15,7 @@ import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.
 import type { Send } from "../core/outbound.ts";
 import { pinnedToTheAddressWeVerified } from "../core/pinned.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
+import { type Agents, attend } from "./agents.ts";
 import { Cluster } from "./cluster.ts";
 import { allowed, bearer, daysToSecs, positive, secret, secsToMs, whole } from "./env.ts";
 import { Ledger } from "./ledger.ts";
@@ -216,6 +217,7 @@ export async function start(
 				: "serving";
 
 	const followers = new Map<WebSocket, Follower>();
+	const agents: Agents = new Map();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
 		void respond(incoming, store, serving, vitals()).then((answer) => reply(answer, outgoing));
@@ -239,9 +241,14 @@ export async function start(
 		upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
 			if (permits.kind === "trigger") {
 				subscribe(accepted, permits.trigger, store, followers, permits.replay);
-			} else {
-				follow(accepted, permits.paymentId, store, followers);
+				return;
 			}
+			if (permits.kind === "agent") {
+				attend(accepted, permits.caller, agents);
+				return;
+			}
+
+			follow(accepted, permits.paymentId, store, followers);
 		});
 	};
 
@@ -706,6 +713,17 @@ function replay(store: Store, paymentId: string): Response {
 	return json(paymentToWire(payment), 201);
 }
 
+function subjectAsked(asked: TicketRequest, caller: string | null): Subject | null {
+	if (asked.kind === "trigger") {
+		return { kind: "trigger", trigger: hashed(asked.secret), replay: asked.replay };
+	}
+	if (asked.kind === "payment") {
+		return { kind: "payment", paymentId: asked.paymentId };
+	}
+
+	return caller === null ? null : { kind: "agent", caller };
+}
+
 async function ticketed(
 	request: Request,
 	store: Store,
@@ -725,11 +743,10 @@ async function ticketed(
 			return notFound();
 		}
 	}
-
-	const subject: Subject =
-		asked.kind === "trigger"
-			? { kind: "trigger", trigger: hashed(asked.secret), replay: asked.replay }
-			: { kind: "payment", paymentId: asked.paymentId };
+	const subject = subjectAsked(asked, caller);
+	if (subject === null) {
+		return notFound();
+	}
 
 	const minted = await mintTicket(key, subject, TICKET_TTL_SECS, unixNow());
 
