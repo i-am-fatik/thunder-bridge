@@ -1,6 +1,6 @@
 import { bytesToHex, hexToBytes } from "../../core/bytes.js";
 import { hmacHex } from "../../core/hmac.js";
-import { sealStable, unseal } from "../../core/sealed.js";
+import { refuseAWeakSecret, sealStable, unseal } from "../../core/sealed.js";
 import { sha256 } from "../../core/sha256.js";
 import type { ThunderBridge } from "./client.js";
 import { minorScaleOf, minorUnitsOf } from "./currency.js";
@@ -194,6 +194,12 @@ export async function bankTransfer(
 export function bankVerifyEndpoint(
   config: BankVerifyConfig,
 ): (request: Request) => Promise<Response> {
+  refuseAWeakSecret(config.secret);
+  const answersFor = config.iban.replace(/\s+/g, "").toUpperCase();
+  if (!IBAN.test(answersFor)) {
+    throw new Error(`${config.iban} is not an IBAN, so this endpoint answers for no account`);
+  }
+
   const paced = {
     "cache-control": `max-age=${config.pollEverySecs ?? DEFAULT_POLL_EVERY_SECS}`,
   };
@@ -211,10 +217,7 @@ export function bankVerifyEndpoint(
 
     const subject = await unseal(config.secret, sealed);
     const asked = subject === null ? null : askedFrom(subject);
-    if (asked === null) {
-      return Response.json({ settled: false }, { status: 403 });
-    }
-    if (asked.iban !== config.iban) {
+    if (asked === null || asked.iban !== answersFor) {
       return Response.json({ settled: false }, { status: 403 });
     }
 
@@ -303,6 +306,7 @@ async function refuseAnOpenGateway(
 }
 
 function refuseUnusable(params: BankTransferParams, currency: string): void {
+  refuseAWeakSecret(params.secret);
   if (!IBAN.test(params.iban)) {
     throw new Error(`${params.iban} is not an IBAN`);
   }

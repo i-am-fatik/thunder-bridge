@@ -78,10 +78,18 @@ export async function unseal(secret: string, sealed: string): Promise<string | n
 	}
 }
 
-async function keyFor(secret: string) {
+/**
+ * Refuse a secret too short to derive a key from, at the moment someone mounts
+ * something on it rather than on the first request that needed it
+ */
+export function refuseAWeakSecret(secret: string): void {
 	if (secret.length < MIN_SECRET_CHARS) {
 		throw new Error(`the sealing secret needs ${MIN_SECRET_CHARS} characters of randomness`);
 	}
+}
+
+async function keyFor(secret: string) {
+	refuseAWeakSecret(secret);
 
 	const material = await crypto.subtle.importKey(
 		"raw",

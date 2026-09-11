@@ -235,6 +235,7 @@ describe("bankTransfer", () => {
   it("refuses before it registers anything, so a bad ask reaches no gateway", async () => {
     const calls = watching();
 
+    await expect(bankTransfer(owned(), asking({ secret: "short" }))).rejects.toThrow("32 characters");
     await expect(bankTransfer(owned(), asking({ iban: "12345" }))).rejects.toThrow("is not an IBAN");
     await expect(bankTransfer(owned(), asking({ amountMinor: 0 }))).rejects.toThrow("above zero");
     await expect(bankTransfer(owned(), asking({ amountMinor: 1.5 }))).rejects.toThrow("whole number");
@@ -389,6 +390,41 @@ describe("bankVerifyEndpoint", () => {
     );
 
     expect(await answer.json()).toEqual({ settled: true, preimage: expect.any(String) });
+  });
+
+  it("refuses to mount on a secret too short to seal with", () => {
+    expect(() =>
+      bankVerifyEndpoint({ secret: "too-short", iban: IBAN, statement: statementOf() }),
+    ).toThrow("32 characters");
+  });
+
+  it("refuses to mount on something that is not an account", () => {
+    expect(() =>
+      bankVerifyEndpoint({ secret: SECRET, iban: "12345", statement: statementOf() }),
+    ).toThrow("is not an IBAN");
+  });
+
+  it("answers for its account however the operator spelled it", async () => {
+    const transfer = await asked();
+    const handler = bankVerifyEndpoint({
+      secret: SECRET,
+      iban: "cz65 0800 0000 1920 0014 5399",
+      statement: statementOf(credit()),
+    });
+
+    expect(await (await handler(new Request(transfer.verifyUrl))).json()).toEqual({
+      settled: true,
+      preimage: expect.any(String),
+    });
+  });
+
+  it("refuses the query shape it used to answer, rather than reading it", async () => {
+    const answer = await verified(
+      statementOf(credit()),
+      `${MOUNT}?ref=${REFERENCE}&minor=${AMOUNT_MINOR}&cc=CZK&sig=${"f".repeat(64)}`,
+    );
+
+    expect(answer.status).toBe(400);
   });
 
   it("refuses a query carrying no sealed blob at all", async () => {
