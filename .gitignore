@@ -9,3 +9,7 @@ wrap-lab.ledger.json
 wrap-lab.ledger.json.writing
 
 docs/demo/bundle.js
+
+.agents/
+.claude/
+.playwright-mcp/
