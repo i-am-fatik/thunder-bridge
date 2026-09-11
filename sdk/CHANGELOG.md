@@ -13,6 +13,48 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 2.0.0
+
+A bank transfer answers over a socket, and a watch stops naming the order. The
+gateway learned one new subject and one new address shape and kept everything else,
+so a 1.5.0 client talks to a 2.0.0 gateway unchanged. The bank rail did not: its
+verify query and its preimage both changed, and an in-flight transfer raised by
+1.5.0 cannot be settled by a 2.0.0 endpoint.
+
+### Added
+
+- `bankAgent(config)`: one socket this device holds open, answering what the gateway
+  asks about this caller's own transfers off a `Statement` it chooses by payment
+  hash. A till behind NAT, a browser tab or a phone settles a transfer without
+  hosting anything, and the preimage is derived on the device from a secret that
+  never leaves it.
+- `answerBy: "agent"` on `bankTransfer`, which hands the gateway this caller's name
+  instead of a URL to fetch. `verifyUrl` is optional under it, because nothing is
+  polled.
+- `gateway.attend(options)`: the socket underneath `bankAgent`, for answering
+  anything else the gateway can ask a caller about. It trades a signature for a one
+  minute ticket, because no browser socket can carry a header.
+- `BankOrder`, `BankAgentConfig` and `AttendOptions` are exported, so a caller that
+  wraps any of the three can name what it passes.
+
+### Changed
+
+- The bank verify query is one sealed blob. `ref`, `minor`, `cc` and `sig` are gone
+  and `q` carries all four encrypted under the rail secret, so a watch tells the
+  gateway neither the amount, the reference nor the account. Being able to write a
+  blob that opens is the proof `sig` used to give, so nothing checks a signature any
+  more.
+- `BankVerifyConfig` takes the `iban` it answers for, and that account is inside the
+  HMAC the preimage comes from. Two accounts under one secret used to answer each
+  other's questions, because the account was in the QR and nowhere else. An endpoint
+  now refuses a question sealed for another account.
+- `bankTransfer` and `bankVerifyEndpoint` refuse a secret under 32 characters, and
+  they refuse it at the mount and before the network rather than on the request that
+  needed a key.
+- An account is spelled one way wherever the rail reads one, so `CZ65 0800 ...` and
+  `cz6508000000...` are the same account in the QR, in the proof and in the endpoint
+  config.
+
 ## 1.5.0
 
 One gateway to start from. Seventy-two callable exports became twenty-one on the main
