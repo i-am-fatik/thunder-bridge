@@ -965,6 +965,40 @@ test("a ticket is not minted for a payment that belongs to somebody else", async
 	app.stop();
 });
 
+test("a watch answered over a socket names the caller asking, and no verify url is fetched", async () => {
+	const app = await running();
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+	let fetched = 0;
+	const was = app.outbound.send;
+	app.outbound.send = async (url, sent, signal, at) => {
+		fetched += 1;
+		return await was(url, sent, signal, at);
+	};
+
+	const answer = await postWatch(app, { ...WATCHABLE, verify_url: `agent:${owner}` }, OWNER);
+
+	expect(answer.status).toBe(201);
+	expect(fetched).toBe(0);
+	app.stop();
+});
+
+test("a watch cannot point at somebody else's agent, nor at an agent while anonymous", async () => {
+	const app = await running();
+	const stranger = (await callerKey(STRANGER)).publicKeyHex;
+
+	const theirs = await postWatch(app, { ...WATCHABLE, verify_url: `agent:${stranger}` }, OWNER);
+	expect(theirs.status).toBe(400);
+
+	const anonymous = await postWatch(app, {
+		...WATCHABLE,
+		payment_hash: "dd".repeat(32),
+		verify_url: `agent:${stranger}`,
+	});
+	expect(anonymous.status).toBe(400);
+
+	app.stop();
+});
+
 test("an agent ticket is minted for the caller that asked for it, and for nobody anonymous", async () => {
 	const app = await running();
 	const asked = JSON.stringify({ agent: true });

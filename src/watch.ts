@@ -2,8 +2,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { bytesToHex } from "../core/bytes.ts";
 import type { SigningKey } from "../core/ed25519.ts";
-import { checkSettled } from "../core/lnurl.ts";
+import { checkSettled, type Settlement } from "../core/lnurl.ts";
 import { ask, type Send } from "../core/outbound.ts";
+import { agentAddressed } from "../core/url.ts";
+import { type Agents, askAnAgent } from "./agents.ts";
 import * as log from "./log.ts";
 import type { Delivery, Payment, Webhook } from "./payment.ts";
 import type { Store } from "./store.ts";
@@ -37,6 +39,7 @@ export type Watcher = {
 	budget: Budget;
 	webhookKey: SigningKey;
 	send: Send;
+	agents: Agents;
 };
 
 export async function tick(watcher: Watcher): Promise<void> {
@@ -55,15 +58,14 @@ async function pollDue(watcher: Watcher): Promise<void> {
 }
 
 async function poll(watcher: Watcher, payment: Payment): Promise<void> {
-	const host = hostOf(payment.verifyUrl);
+	const agent = agentAddressed(payment.verifyUrl);
+	const host = agent ?? hostOf(payment.verifyUrl);
 	await spend(watcher.budget, host);
 
-	const settlement = await checkSettled(watcher.send, payment.verifyUrl, payment.paymentHash).catch(
-		(error: unknown) => {
-			log.warn(`verify poll for ${payment.id} failed: ${String(error)}`);
-			return null;
-		},
-	);
+	const settlement = await answerFor(watcher, payment, agent).catch((error: unknown) => {
+		log.warn(`verify poll for ${payment.id} failed: ${String(error)}`);
+		return null;
+	});
 	if (settlement?.pace) {
 		watcher.budget.pace.set(host, settlement.pace);
 	}
@@ -81,6 +83,16 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 
 	const { payment: settled, won } = watcher.store.paid(payment.id, settlement.preimage);
 	log.info(`payment ${settled.id} paid${won ? "" : ", settled elsewhere"}`);
+}
+
+async function answerFor(
+	watcher: Watcher,
+	payment: Payment,
+	agent: string | null,
+): Promise<Settlement | null> {
+	return agent === null
+		? await checkSettled(watcher.send, payment.verifyUrl, payment.paymentHash)
+		: await askAnAgent(watcher.agents, agent, payment.paymentHash);
 }
 
 function paceAsked(watcher: Watcher, host: string): number | null {

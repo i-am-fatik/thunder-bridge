@@ -4,6 +4,7 @@ import { expect, test, vi } from "vitest";
 
 import { signingKeyFromSeed, verifyHex } from "../core/ed25519.ts";
 import type { Send } from "../core/outbound.ts";
+import type { Agents } from "./agents.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
 import {
@@ -121,6 +122,7 @@ function queueing(send: Send, work: Payment[], settle: (id: string, preimage: st
 			eagerDelayMs: 5,
 			budget: paced(),
 			webhookKey: GATEWAY_KEY,
+			agents: new Map(),
 			send,
 		} satisfies Watcher,
 	};
@@ -149,6 +151,7 @@ function owing(send: Send, work: Delivery[]) {
 			eagerDelayMs: 5,
 			budget: paced(),
 			webhookKey: GATEWAY_KEY,
+			agents: new Map(),
 			send,
 		} satisfies Watcher,
 	};
@@ -183,6 +186,67 @@ test("an unsettled payment goes back on the queue with a later due time", async 
 	expect(handed).toEqual([]);
 	expect(parked).toHaveLength(1);
 	expect(parked[0]?.dueAt).toBeGreaterThan(unixNow());
+});
+
+const CALLER = "ab".repeat(32);
+
+class AnsweringSocket {
+	private heard: ((said: unknown) => void) | null = null;
+
+	constructor(private readonly answer: (ask: string) => unknown) {}
+
+	on(event: string, listener: (said: unknown) => void): this {
+		if (event === "message") {
+			this.heard = listener;
+		}
+		return this;
+	}
+
+	off(): this {
+		this.heard = null;
+		return this;
+	}
+
+	send(frame: string): void {
+		const { ask } = JSON.parse(frame) as { ask: string };
+		this.heard?.(JSON.stringify(this.answer(ask)));
+	}
+}
+
+function attending(answer: (ask: string) => unknown): Agents {
+	return new Map([[CALLER, new Set([new AnsweringSocket(answer) as never])]]);
+}
+
+test("a payment answered by an agent settles without a request leaving the gateway", async () => {
+	const wire = intercepting(() => {
+		throw new Error("an agent payment must not be fetched");
+	});
+	const { handed, watcher } = queueing(
+		wire.send,
+		[payment({ verifyUrl: `agent:${CALLER}` })],
+		settlesAs(false),
+	);
+	watcher.agents = attending((ask) => ({ ask, settled: true, preimage: PREIMAGE }));
+
+	await tick(watcher);
+
+	expect(handed).toEqual([PREIMAGE]);
+});
+
+test("a payment whose agent is offline is left due rather than failed", async () => {
+	const wire = intercepting(() => {
+		throw new Error("an agent payment must not be fetched");
+	});
+	const { parked, handed, watcher } = queueing(
+		wire.send,
+		[payment({ verifyUrl: `agent:${CALLER}` })],
+		settlesAs(false),
+	);
+
+	await tick(watcher);
+
+	expect(handed).toEqual([]);
+	expect(parked).toHaveLength(1);
 });
 
 test("a settled payment is handed to the store with its preimage", async () => {
@@ -327,7 +391,14 @@ test("a poll and a webhook owed in the same tick go out together, not one after 
 		delivered: () => {},
 	} as unknown as Store;
 
-	await tick({ store, eagerDelayMs: 5, budget: paced(), webhookKey: GATEWAY_KEY, send: wire.send });
+	await tick({
+		store,
+		eagerDelayMs: 5,
+		budget: paced(),
+		webhookKey: GATEWAY_KEY,
+		send: wire.send,
+		agents: new Map(),
+	});
 
 	expect(wire.peak()).toBe(2);
 });
@@ -461,6 +532,7 @@ test("a delivery with no retries left is reported at error level, not as one mor
 			eagerDelayMs: 5,
 			budget: paced(),
 			webhookKey: GATEWAY_KEY,
+			agents: new Map(),
 			send: wire.send,
 		});
 
@@ -497,6 +569,7 @@ test("a challenge answered wrongly leaves the webhook unconfirmed, whichever way
 	const refusing = {
 		...intercepting(() => new Response("no thanks", { status: 500 })),
 		webhookKey: GATEWAY_KEY,
+		agents: new Map(),
 	};
 	const silent = () => Response.json({});
 	const inventing = () => Response.json({ nonce: "f".repeat(64) });

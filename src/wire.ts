@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Quote } from "../core/lnurl.ts";
-import { publicHttps } from "../core/url.ts";
+import { agentAddressed, publicHttps } from "../core/url.ts";
 import type { Kept } from "./ledger.ts";
 import type { PublicPayment, Status, Webhook } from "./payment.ts";
 import { MalformedRequest, type WalletFailure } from "./problem.ts";
@@ -137,8 +137,8 @@ export function keptToWire(kept: Kept): KeptRecord {
 export function readWatchRequest(body: unknown): WatchRequest {
 	const fields = asObject(body, "the request body must be a JSON object");
 	const verifyUrl = fields["verify_url"];
-	if (typeof verifyUrl !== "string" || !publicHttps(verifyUrl)) {
-		throw new MalformedRequest("verify_url must be a public https URL");
+	if (typeof verifyUrl !== "string" || !(publicHttps(verifyUrl) || agentAddressed(verifyUrl))) {
+		throw new MalformedRequest("verify_url must be a public https URL or an agent address");
 	}
 
 	return {

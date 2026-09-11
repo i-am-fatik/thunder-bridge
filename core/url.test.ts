@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { publicHttps, sameOrigin } from "./url.ts";
+import { agentAddressed, publicHttps, sameOrigin } from "./url.ts";
 
 test("public https hosts are fetchable", () => {
 	for (const url of [
@@ -45,4 +45,17 @@ test("same origin compares scheme, host and port, not path", () => {
 	expect(sameOrigin("https://coinos.io/a", "https://coinos.io/b")).toBe(true);
 	expect(sameOrigin("https://coinos.io/a", "https://evil.io/a")).toBe(false);
 	expect(sameOrigin("https://coinos.io/a", "not a url")).toBe(false);
+});
+
+test("an agent address names the caller that answers for it", () => {
+	expect(agentAddressed(`agent:${"a".repeat(64)}`)).toBe("a".repeat(64));
+});
+
+test("anything that is not one agent key is no agent address", () => {
+	expect(agentAddressed("https://coinos.io/verify")).toBeNull();
+	expect(agentAddressed(`agent:${"a".repeat(63)}`)).toBeNull();
+	expect(agentAddressed(`agent:${"A".repeat(64)}`)).toBeNull();
+	expect(agentAddressed(`agent:${"a".repeat(64)} `)).toBeNull();
+	expect(agentAddressed(`AGENT:${"a".repeat(64)}`)).toBeNull();
+	expect(agentAddressed("agent:")).toBeNull();
 });

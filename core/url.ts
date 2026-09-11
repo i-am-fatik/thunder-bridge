@@ -104,3 +104,13 @@ function ipv6Groups(address: string): number[] {
 
 	return [...left, ...gap, ...right].map((group) => parseInt(group, 16));
 }
+
+const AGENT_ADDRESS = /^agent:([0-9a-f]{64})$/;
+
+/**
+ * The caller an address names, or null when it names a host instead. A watch
+ * says which way it answers by the address it carries, so nothing else has to
+ */
+export function agentAddressed(verifyUrl: string): string | null {
+	return AGENT_ADDRESS.exec(verifyUrl)?.[1] ?? null;
+}

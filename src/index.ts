@@ -15,6 +15,7 @@ import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.
 import type { Send } from "../core/outbound.ts";
 import { pinnedToTheAddressWeVerified } from "../core/pinned.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
+import { agentAddressed } from "../core/url.ts";
 import { type Agents, attend } from "./agents.ts";
 import { Cluster } from "./cluster.ts";
 import { allowed, bearer, daysToSecs, positive, secret, secsToMs, whole } from "./env.ts";
@@ -180,6 +181,7 @@ export async function start(
 	}: Options,
 	store: Store,
 ): Promise<Service> {
+	const agents: Agents = new Map();
 	const serving: Serving = {
 		token: token === "" ? null : token,
 		key,
@@ -204,6 +206,7 @@ export async function start(
 			ceiling: new Map(),
 		},
 		webhookKey: serving.webhookKey,
+		agents,
 	};
 
 	let draining = false;
@@ -217,7 +220,6 @@ export async function start(
 				: "serving";
 
 	const followers = new Map<WebSocket, Follower>();
-	const agents: Agents = new Map();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
 		void respond(incoming, store, serving, vitals()).then((answer) => reply(answer, outgoing));
@@ -816,14 +818,20 @@ async function watchOnly(
 	if (known && (!belongsTo(known, caller) || !isThisWatch(known, asked))) {
 		return conflict(ALREADY_WATCHED, "This payment hash is already being watched here");
 	}
-	if (serving.verifyHosts && !serving.verifyHosts.has(hostOf(asked.verifyUrl))) {
-		return refusedVerifyHost(asked.verifyUrl);
+	const agent = agentAddressed(asked.verifyUrl);
+	if (agent !== null && agent !== caller) {
+		return invalidRequest("verify_url names an agent, and it has to be the caller asking");
 	}
-	if (!(await speaksVerify(serving.send, asked.verifyUrl))) {
-		return unconfirmedVerify(asked.verifyUrl);
-	}
-	if (serving.verifyChallenge && !(await confirmVerify(serving, asked.verifyUrl))) {
-		return unconsentedVerify(asked.verifyUrl);
+	if (agent === null) {
+		if (serving.verifyHosts && !serving.verifyHosts.has(hostOf(asked.verifyUrl))) {
+			return refusedVerifyHost(asked.verifyUrl);
+		}
+		if (!(await speaksVerify(serving.send, asked.verifyUrl))) {
+			return unconfirmedVerify(asked.verifyUrl);
+		}
+		if (serving.verifyChallenge && !(await confirmVerify(serving, asked.verifyUrl))) {
+			return unconsentedVerify(asked.verifyUrl);
+		}
 	}
 	if (asked.webhook && !(await confirmWebhook(serving, asked.webhook))) {
 		return unconfirmedWebhook(asked.webhook.url);
