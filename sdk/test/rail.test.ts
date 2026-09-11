@@ -32,7 +32,7 @@ const VERIFY = "https://example.com/lnurl/verify/1a2b3c";
 const METADATA = '[["text/plain","one coffee for alice"]]';
 const AMOUNT_MSAT = 21_000_000;
 const PAYMENT_HASH = "ab".repeat(32);
-const SECRET = "keep-me-server-side";
+const SECRET = "keep-me-server-side-and-thirty-two-plus";
 const IBAN = "CZ6508000000192000145399";
 const MOUNT = "https://shop.example.org/verify/bank";
 const EXPIRES_AT = 1_900_000_000;
@@ -210,14 +210,16 @@ describe("bankRail", () => {
     });
   });
 
-  it("still names the amount and the reference in the verify URL, which is why the gateway must be yours", async () => {
+  it("names neither the amount nor the reference in the verify URL it hands the gateway", async () => {
     const calls = stubFetch(railsServing());
 
     await bank()(ORDER);
 
     const polled = new URL(String(bodyOf(`${GATEWAY}/watched-payments`, calls)["verify_url"]));
-    expect(polled.searchParams.get("minor")).toBe(String(ORDER.amountMinor));
-    expect(polled.searchParams.get("ref")).toBe(ORDER.reference);
+    expect([...polled.searchParams.keys()]).toEqual(["q"]);
+    expect(polled.toString()).not.toContain(ORDER.reference);
+    expect(polled.toString()).not.toContain(String(ORDER.amountMinor));
+    expect(polled.toString()).not.toContain(IBAN);
   });
 });
 
@@ -289,7 +291,11 @@ describe("blindLightningRail", () => {
 
 describe("a leg the bank rail built, against the gateway's own settlement check", () => {
   function paidInto(...credits: Credit[]): void {
-    const handler = bankVerifyEndpoint({ secret: SECRET, statement: async () => credits });
+    const handler = bankVerifyEndpoint({
+      secret: SECRET,
+      iban: IBAN,
+      statement: async () => credits,
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn((url: RequestInfo | URL) => handler(new Request(String(url)))),

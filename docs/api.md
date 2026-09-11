@@ -164,8 +164,8 @@ interface BankRailConfig extends RailConfig {
   variableSymbol?: (order: Order) => string | undefined;
 
   /**
-   * Register on a gateway you do not own anyway. The verify URL names the amount
-   * and the reference, so its operator could read your order book off the watches
+   * Register on a gateway you do not own anyway. The sealed verify URL names
+   * nothing about the order, but its operator still learns every watch you place
    */
   allowPublicGateway?: boolean;
 }
@@ -179,6 +179,9 @@ A bank rail: the account the money lands in, and where its arrival is read back 
 interface BankVerifyConfig {
   /** The same secret `bankTransfer` was given */
   secret: string;
+
+  /** The IBAN this endpoint answers for, refusing a question sealed for another account */
+  iban: string;
 
   /** The account to read */
   statement: Statement;
@@ -1806,7 +1809,10 @@ A transfer the gateway is now watching, and the descriptor the payer scans
 
 ```ts
 interface BankTransferParams {
-  /** Long lived and server side. The preimage is derived from it, so losing it loses every proof */
+  /**
+   * Long lived and server side, at least 32 characters. The preimage is derived
+   * from it and the verify query is sealed with it, so losing it loses every proof
+   */
   secret: string;
 
   /** What the payer must leave on the transfer, an order id or a nonce. It is matched, not stored */
@@ -1853,10 +1859,9 @@ interface BankTransferParams {
   webhookUrl?: string;
 
   /**
-   * Register on a gateway you do not own anyway. The verify URL names the amount
-   * and the reference, so its operator ends up reading your order book, and the
-   * URL itself answers whether that order was paid. Say true only when the order
-   * book is not worth hiding
+   * Register on a gateway you do not own anyway. The sealed verify URL tells its
+   * operator nothing about the order, but the URL itself still answers whether
+   * that order was paid. Say true only when that much is not worth hiding
    */
   allowPublicGateway?: boolean;
 }
@@ -1870,6 +1875,9 @@ One transfer to ask for: what is owed, where it lands, and where its arrival is 
 interface BankVerifyConfig {
   /** The same secret `bankTransfer` was given */
   secret: string;
+
+  /** The IBAN this endpoint answers for, refusing a question sealed for another account */
+  iban: string;
 
   /** The account to read */
   statement: Statement;

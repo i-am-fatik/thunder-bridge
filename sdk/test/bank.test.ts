@@ -17,7 +17,8 @@ vi.mock("node:dns/promises", () => ({
   lookup: async () => [{ address: "203.0.113.1", family: 4 }],
 }));
 
-const SECRET = "keep-me-server-side";
+const SECRET = "keep-me-server-side-and-thirty-two-plus";
+const OTHER_IBAN = "CZ9455000000001028912385";
 const REFERENCE = "ORDER-2026-77";
 const AMOUNT_MINOR = 48_055;
 const IBAN = "CZ6508000000192000145399";
@@ -98,7 +99,7 @@ async function asked(overrides: Partial<BankTransferParams> = {}): Promise<BankT
 }
 
 async function verified(statement: Statement, url: string): Promise<Response> {
-  return bankVerifyEndpoint({ secret: SECRET, statement })(new Request(url));
+  return bankVerifyEndpoint({ secret: SECRET, iban: IBAN, statement })(new Request(url));
 }
 
 describe("bankTransfer", () => {
@@ -118,15 +119,38 @@ describe("bankTransfer", () => {
     expect(transfer.spd).toContain("*X-VS:1234567890");
   });
 
-  it("puts what to look for and a signature over it in the verify url", async () => {
+  it("puts one sealed blob in the verify url and nothing else", async () => {
     const transfer = await asked();
     const url = new URL(transfer.verifyUrl);
 
     expect(url.origin + url.pathname).toBe(MOUNT);
-    expect(url.searchParams.get("ref")).toBe(REFERENCE);
-    expect(url.searchParams.get("minor")).toBe(String(AMOUNT_MINOR));
-    expect(url.searchParams.get("cc")).toBe("CZK");
-    expect(url.searchParams.get("sig")).toMatch(/^[0-9a-f]{64}$/);
+    expect([...url.searchParams.keys()]).toEqual(["q"]);
+    expect(url.searchParams.get("q")).toMatch(/^v1\.[A-Za-z0-9_-]+$/);
+  });
+
+  it("tells whoever carries the url neither the account, the amount nor the reference", async () => {
+    const transfer = await asked();
+
+    expect(transfer.verifyUrl).not.toContain(REFERENCE);
+    expect(transfer.verifyUrl).not.toContain(String(AMOUNT_MINOR));
+    expect(transfer.verifyUrl).not.toContain("480.55");
+    expect(transfer.verifyUrl).not.toContain(IBAN);
+    expect(transfer.verifyUrl).not.toContain("CZK");
+  });
+
+  it("names a different payment for the same order paid into another account", async () => {
+    const here = await asked();
+    const there = await asked({ iban: OTHER_IBAN });
+
+    expect(there.paymentHash).not.toBe(here.paymentHash);
+  });
+
+  it("refuses a secret too short to seal with, rather than sealing weakly", async () => {
+    watching();
+
+    await expect(bankTransfer(owned(), asking({ secret: "too-short" }))).rejects.toThrow(
+      "32 characters",
+    );
   });
 
   it("registers the watch itself, with the hash and nothing else the gateway does not need", async () => {
@@ -236,7 +260,7 @@ describe("bankVerifyEndpoint", () => {
 
   it("agrees to be polled, so the gateway does not take a caller's word for it", async () => {
     const transfer = await asked();
-    const handler = bankVerifyEndpoint({ secret: SECRET, statement: statementOf() });
+    const handler = bankVerifyEndpoint({ secret: SECRET, iban: IBAN, statement: statementOf() });
     const answer = await handler(
       new Request(transfer.verifyUrl, {
         method: "POST",
@@ -250,7 +274,7 @@ describe("bankVerifyEndpoint", () => {
 
   it("reads a payment as before when the POST is not a challenge", async () => {
     const transfer = await asked();
-    const handler = bankVerifyEndpoint({ secret: SECRET, statement: statementOf() });
+    const handler = bankVerifyEndpoint({ secret: SECRET, iban: IBAN, statement: statementOf() });
     const answer = await handler(
       new Request(transfer.verifyUrl, { method: "POST", body: JSON.stringify({ type: "other" }) }),
     );
@@ -270,6 +294,7 @@ describe("bankVerifyEndpoint", () => {
     const url = new URL(transfer.verifyUrl);
     const handler = bankVerifyEndpoint({
       secret: SECRET,
+      iban: IBAN,
       statement: statementOf(),
       pollEverySecs: 900,
     });
@@ -309,28 +334,64 @@ describe("bankVerifyEndpoint", () => {
     expect(await wiped.json()).toEqual({ settled: false });
   });
 
-  it("refuses to answer a question it did not sign, so it is no statement oracle", async () => {
-    const transfer = await asked();
-    const forged = new URL(transfer.verifyUrl);
-    forged.searchParams.set("sig", "f".repeat(64));
-
-    const answer = await verified(statementOf(credit()), forged.toString());
+  it("refuses a question it did not seal, so it is no statement oracle", async () => {
+    const answer = await verified(statementOf(credit()), `${MOUNT}?q=v1.AAAAAAAAAAAAAAAAAAAA`);
 
     expect(answer.status).toBe(403);
     expect(await answer.json()).toEqual({ settled: false });
   });
 
-  it("refuses a probe for a different amount under a signature that was minted for this one", async () => {
+  it("refuses a blob edited on the way, however small the edit", async () => {
     const transfer = await asked();
-    const moved = new URL(transfer.verifyUrl);
-    moved.searchParams.set("minor", "1");
+    const sealed = new URL(transfer.verifyUrl).searchParams.get("q") ?? "";
+    const at = Math.floor(sealed.length / 2);
+    const flipped = sealed.slice(0, at) + (sealed[at] === "A" ? "B" : "A") + sealed.slice(at + 1);
 
-    const answer = await verified(statementOf(credit({ amountMinor: 1 })), moved.toString());
+    const answer = await verified(statementOf(credit()), `${MOUNT}?q=${flipped}`);
 
     expect(answer.status).toBe(403);
   });
 
-  it("refuses a query missing what it needs", async () => {
+  it("refuses a question sealed for another account, even holding the same secret", async () => {
+    const transfer = await asked({ iban: OTHER_IBAN });
+    const handler = bankVerifyEndpoint({
+      secret: SECRET,
+      iban: IBAN,
+      statement: statementOf(credit()),
+    });
+
+    const answer = await handler(new Request(transfer.verifyUrl));
+
+    expect(answer.status).toBe(403);
+    expect(await answer.json()).toEqual({ settled: false });
+  });
+
+  it("answers the account it was mounted for, when that is the one asked about", async () => {
+    const transfer = await asked({ iban: OTHER_IBAN });
+    const handler = bankVerifyEndpoint({
+      secret: SECRET,
+      iban: OTHER_IBAN,
+      statement: statementOf(credit()),
+    });
+
+    expect(await (await handler(new Request(transfer.verifyUrl))).json()).toEqual({
+      settled: true,
+      preimage: expect.any(String),
+    });
+  });
+
+  it("carries a reference with a pipe in it through the seal unharmed", async () => {
+    const reference = "ORDER|2026|77";
+    const transfer = await asked({ reference });
+    const answer = await verified(
+      statementOf(credit({ reference: `PLATBA ${reference} DIKY` })),
+      transfer.verifyUrl,
+    );
+
+    expect(await answer.json()).toEqual({ settled: true, preimage: expect.any(String) });
+  });
+
+  it("refuses a query carrying no sealed blob at all", async () => {
     const answer = await verified(statementOf(credit()), `${MOUNT}?ref=x`);
 
     expect(answer.status).toBe(400);
@@ -342,7 +403,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
     vi.unstubAllGlobals();
   });
 
-  function mounted(config: { secret: string; statement: Statement }): void {
+  function mounted(config: { secret: string; iban: string; statement: Statement }): void {
     const handler = bankVerifyEndpoint(config);
     vi.stubGlobal(
       "fetch",
@@ -352,7 +413,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
 
   it("settles with nothing added to the gateway", async () => {
     const transfer = await asked();
-    mounted({ secret: SECRET, statement: statementOf(credit()) });
+    mounted({ secret: SECRET, iban: IBAN, statement: statementOf(credit()) });
 
     expect((await checkSettled(throughFetch, transfer.verifyUrl, transfer.paymentHash)).preimage).toMatch(
       /^[0-9a-f]{64}$/,
@@ -361,7 +422,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
 
   it("stays unsettled while nothing has landed, and says how soon to ask again", async () => {
     const transfer = await asked();
-    mounted({ secret: SECRET, statement: statementOf() });
+    mounted({ secret: SECRET, iban: IBAN, statement: statementOf() });
 
     expect(await checkSettled(throughFetch, transfer.verifyUrl, transfer.paymentHash)).toEqual({
       preimage: null,
@@ -372,7 +433,7 @@ describe("a bank transfer against the gateway's own settlement check", () => {
 
   it("cannot be settled by a server holding a different secret", async () => {
     const transfer = await asked();
-    mounted({ secret: "not-the-secret", statement: statementOf(credit()) });
+    mounted({ secret: "not-the-secret-but-also-thirty-two", iban: IBAN, statement: statementOf(credit()) });
 
     await expect(checkSettled(throughFetch, transfer.verifyUrl, transfer.paymentHash)).rejects.toThrow(
       "answered 403",
@@ -437,7 +498,7 @@ describe("one statement read answers every order at once", () => {
     const counted = fioServing(
       orders.map((order) => credit({ reference: `PLATBA ORDER-${order}` })),
     );
-    const verify = bankVerifyEndpoint({ secret: SECRET, statement });
+    const verify = bankVerifyEndpoint({ secret: SECRET, iban: IBAN, statement });
 
     const answers = [];
     for (const transfer of transfers) {

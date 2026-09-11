@@ -1,5 +1,6 @@
 import { bytesToHex, hexToBytes } from "../../core/bytes.js";
-import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
+import { hmacHex } from "../../core/hmac.js";
+import { sealStable, unseal } from "../../core/sealed.js";
 import { sha256 } from "../../core/sha256.js";
 import type { ThunderBridge } from "./client.js";
 import { minorScaleOf, minorUnitsOf } from "./currency.js";
@@ -35,7 +36,10 @@ export type Statement = (sinceUnix: number) => Promise<Credit[]>;
 
 /** One transfer to ask for: what is owed, where it lands, and where its arrival is read back from */
 export interface BankTransferParams {
-  /** Long lived and server side. The preimage is derived from it, so losing it loses every proof */
+  /**
+   * Long lived and server side, at least 32 characters. The preimage is derived
+   * from it and the verify query is sealed with it, so losing it loses every proof
+   */
   secret: string;
 
   /** What the payer must leave on the transfer, an order id or a nonce. It is matched, not stored */
@@ -82,10 +86,9 @@ export interface BankTransferParams {
   webhookUrl?: string;
 
   /**
-   * Register on a gateway you do not own anyway. The verify URL names the amount
-   * and the reference, so its operator ends up reading your order book, and the
-   * URL itself answers whether that order was paid. Say true only when the order
-   * book is not worth hiding
+   * Register on a gateway you do not own anyway. The sealed verify URL tells its
+   * operator nothing about the order, but the URL itself still answers whether
+   * that order was paid. Say true only when that much is not worth hiding
    */
   allowPublicGateway?: boolean;
 }
@@ -109,6 +112,9 @@ export interface BankTransfer {
 export interface BankVerifyConfig {
   /** The same secret `bankTransfer` was given */
   secret: string;
+
+  /** The IBAN this endpoint answers for, refusing a question sealed for another account */
+  iban: string;
 
   /** The account to read */
   statement: Statement;
@@ -139,10 +145,9 @@ export interface BankVerifyConfig {
  * the server holding the secret saw the money arrive. It is the recipient's
  * own word, made unforgeable by anyone else.
  *
- * The gateway has to be one of your own. Unlike a blind Lightning watch, which
- * hands over a hash and an opaque wallet URL, this hands over a URL naming the
- * amount and the reference, so whoever runs the gateway can read your order book
- * from the watches alone.
+ * The gateway is handed a hash, an expiry and a URL whose query is sealed to the
+ * same secret, so a watch names neither the account, the amount nor the reference
+ * and the order book cannot be read off the watches.
  */
 export async function bankTransfer(
   gateway: ThunderBridge,
@@ -152,13 +157,10 @@ export async function bankTransfer(
   refuseUnusable(params, currency);
   await refuseAnOpenGateway(gateway, params);
   const spd = shortPaymentDescriptor(params, currency);
-  const subject = subjectOf(params.reference, params.amountMinor, currency);
+  const subject = subjectOf(params.iban, params.amountMinor, currency, params.reference);
 
   const polling = new URL(params.verifyUrl);
-  polling.searchParams.set("ref", params.reference);
-  polling.searchParams.set("minor", String(params.amountMinor));
-  polling.searchParams.set("cc", currency);
-  polling.searchParams.set("sig", await hmacHex(params.secret, `verify|${subject}`));
+  polling.searchParams.set("q", await sealStable(params.secret, subject));
   const verifyUrl = polling.toString();
 
   const watched = await gateway.watch({
@@ -182,9 +184,12 @@ export async function bankTransfer(
  * statement, then `settled` true with the preimage. Nothing is stored, because
  * the preimage is derived again from the secret every time it is asked for.
  *
- * The query has to carry the signature `bankTransfer` put there. Without that
- * check this would answer "did anyone send you 480.55 with this note" to whoever
- * asked, which is your bank statement handed out one question at a time.
+ * The query carries one sealed blob `bankTransfer` put there, naming the account,
+ * the amount and the reference. Only the holder of the secret can write one, so
+ * opening it is the whole of the check, and whoever carried it past the gateway
+ * read nothing on the way. Without that this would answer "did anyone send you
+ * 480.55 with this note" to whoever asked, which is your bank statement handed out
+ * one question at a time.
  */
 export function bankVerifyEndpoint(
   config: BankVerifyConfig,
@@ -199,14 +204,17 @@ export function bankVerifyEndpoint(
       return consented;
     }
 
-    const asked = readQuery(new URL(request.url));
-    if (asked === null) {
+    const sealed = new URL(request.url).searchParams.get("q");
+    if (sealed === null) {
       return Response.json({ settled: false }, { status: 400 });
     }
 
-    const subject = subjectOf(asked.reference, asked.amountMinor, asked.currency);
-    const expected = await hmacHex(config.secret, `verify|${subject}`);
-    if (!equalInConstantTime(asked.signature, expected)) {
+    const subject = await unseal(config.secret, sealed);
+    const asked = subject === null ? null : askedFrom(subject);
+    if (asked === null) {
+      return Response.json({ settled: false }, { status: 403 });
+    }
+    if (asked.iban !== config.iban) {
       return Response.json({ settled: false }, { status: 403 });
     }
 
@@ -224,25 +232,24 @@ export function bankVerifyEndpoint(
 }
 
 interface Asked {
+  iban: string;
   reference: string;
   amountMinor: number;
   currency: string;
-  signature: string;
 }
 
-function readQuery(url: URL): Asked | null {
-  const reference = url.searchParams.get("ref");
-  const minor = Number(url.searchParams.get("minor"));
-  const currency = url.searchParams.get("cc");
-  const signature = url.searchParams.get("sig");
-  if (!reference || !currency || !signature) {
+function askedFrom(subject: string): Asked | null {
+  const [iban, minorText, currency, ...rest] = subject.split("|");
+  const reference = rest.join("|");
+  const amountMinor = Number(minorText);
+  if (!iban || !currency || reference.length === 0) {
     return null;
   }
-  if (!Number.isInteger(minor) || minor <= 0) {
+  if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
     return null;
   }
 
-  return { reference, amountMinor: minor, currency, signature };
+  return { iban, reference, amountMinor, currency };
 }
 
 function pays(credit: Credit, asked: Asked): boolean {
@@ -253,8 +260,8 @@ function pays(credit: Credit, asked: Asked): boolean {
   );
 }
 
-function subjectOf(reference: string, amountMinor: number, currency: string): string {
-  return `${reference}|${amountMinor}|${currency.toUpperCase()}`;
+function subjectOf(iban: string, amountMinor: number, currency: string, reference: string): string {
+  return `${iban.toUpperCase()}|${amountMinor}|${currency.toUpperCase()}|${reference}`;
 }
 
 function hashOf(preimage: string): string {
@@ -291,7 +298,7 @@ async function refuseAnOpenGateway(
   }
 
   throw new Error(
-    "this gateway serves callers with no token, so it is not yours, and its operator would read the amount and the reference off every verify URL. Point at one that answers 401 to a stranger, or say allowPublicGateway",
+    "this gateway serves callers with no token, so it is not yours, and its operator would learn every watch you place. Point at one that answers 401 to a stranger, or say allowPublicGateway",
   );
 }
 

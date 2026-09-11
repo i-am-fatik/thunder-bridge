@@ -1,3 +1,5 @@
+import { hmacHex } from "./hmac.ts";
+
 const VERSION = "v1";
 const IV_BYTES = 12;
 const MIN_SECRET_CHARS = 32;
@@ -10,13 +12,36 @@ const INFO = new TextEncoder().encode("thunder-bridge/sealed");
  * in `sealed` is something you told it, which is what blind mode exists to avoid
  */
 export async function seal(secret: string, plaintext: string): Promise<string> {
+	return await sealUnder(secret, plaintext, crypto.getRandomValues(new Uint8Array(IV_BYTES)));
+}
+
+/**
+ * The same, for what has to stay the same. One plaintext seals to one blob every
+ * time, so re-offering an order hands the gateway the watch it already holds
+ * rather than a second one that differs only in noise. The nonce is derived from
+ * the content, so two different plaintexts never share one
+ */
+export async function sealStable(secret: string, plaintext: string): Promise<string> {
+	const derived = await hmacHex(secret, `sealed-nonce|${plaintext}`);
+	const nonce = new Uint8Array(IV_BYTES);
+	for (let at = 0; at < IV_BYTES; at++) {
+		nonce[at] = Number.parseInt(derived.slice(at * 2, at * 2 + 2), 16);
+	}
+
+	return await sealUnder(secret, plaintext, nonce);
+}
+
+async function sealUnder(
+	secret: string,
+	plaintext: string,
+	iv: Uint8Array<ArrayBuffer>,
+): Promise<string> {
 	const body = new TextEncoder().encode(plaintext);
 	if (body.length > MAX_PLAIN_BYTES) {
 		throw new Error(`sealed takes at most ${MAX_PLAIN_BYTES} bytes, this was ${body.length}`);
 	}
 
 	const key = await keyFor(secret);
-	const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
 	const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, body));
 	const joined = new Uint8Array(iv.length + cipher.length);
 	joined.set(iv);

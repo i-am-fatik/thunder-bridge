@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { seal, unseal } from "./sealed.ts";
+import { seal, sealStable, unseal } from "./sealed.ts";
 
 const SECRET = "a".repeat(32);
 const OTHER_SECRET = "b".repeat(32);
@@ -65,4 +65,36 @@ test("utf-8 survives the round trip, so a message is not mangled", async () => {
 	const text = "příliš žluťoučký kůň, 21 000 sat 🐴";
 
 	expect(await unseal(SECRET, await seal(SECRET, text))).toBe(text);
+});
+
+test("a stable seal gives one blob for one plaintext, however often it is asked for", async () => {
+	expect(await sealStable(SECRET, PLAIN)).toBe(await sealStable(SECRET, PLAIN));
+});
+
+test("a stable blob reads back like any other, and only under its own secret", async () => {
+	const sealed = await sealStable(SECRET, PLAIN);
+
+	expect(await unseal(SECRET, sealed)).toBe(PLAIN);
+	expect(await unseal(OTHER_SECRET, sealed)).toBeNull();
+});
+
+test("two plaintexts never share a stable nonce, which is what makes the reuse safe", async () => {
+	const one = await sealStable(SECRET, PLAIN);
+	const other = await sealStable(SECRET, `${PLAIN} `);
+	const nonceOf = (sealed: string) =>
+		Buffer.from(sealed.slice(3), "base64url").subarray(0, 12).toString("hex");
+
+	expect(nonceOf(one)).not.toBe(nonceOf(other));
+});
+
+test("the same plaintext under two secrets seals to two blobs", async () => {
+	expect(await sealStable(SECRET, PLAIN)).not.toBe(await sealStable(OTHER_SECRET, PLAIN));
+});
+
+test("a stable blob hides what it carries, exactly like a random one", async () => {
+	const sealed = await sealStable(SECRET, PLAIN);
+
+	expect(sealed).not.toContain("21000");
+	expect(sealed).not.toContain("iamfatik");
+	expect(sealed.startsWith("v1.")).toBe(true);
 });

@@ -121,8 +121,8 @@ export interface BankRailConfig extends RailConfig {
   variableSymbol?: (order: Order) => string | undefined;
 
   /**
-   * Register on a gateway you do not own anyway. The verify URL names the amount
-   * and the reference, so its operator could read your order book off the watches
+   * Register on a gateway you do not own anyway. The sealed verify URL names
+   * nothing about the order, but its operator still learns every watch you place
    */
   allowPublicGateway?: boolean;
 }
