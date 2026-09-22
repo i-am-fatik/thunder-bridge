@@ -133,7 +133,23 @@ describe("bankTransfer", () => {
 
     expect(url.origin + url.pathname).toBe(MOUNT);
     expect([...url.searchParams.keys()]).toEqual(["q"]);
-    expect(url.searchParams.get("q")).toMatch(/^v1\.[A-Za-z0-9_-]+$/);
+    expect(url.searchParams.get("q")).toMatch(/^v2\.[A-Za-z0-9_-]+$/);
+  });
+
+  it("seals every order's query to one length, so its size gives no amount away", async () => {
+    const queryLength = async (overrides: Partial<BankTransferParams>) =>
+      new URL((await asked(overrides)).verifyUrl).searchParams.get("q")?.length;
+
+    const small = await queryLength({ amountMinor: 5 });
+
+    expect(await queryLength({ amountMinor: AMOUNT_MINOR })).toBe(small);
+    expect(
+      await queryLength({
+        iban: `CZ00${"0".repeat(30)}`,
+        amountMinor: Number.MAX_SAFE_INTEGER,
+        reference: "€".repeat(60),
+      }),
+    ).toBe(small);
   });
 
   it("tells whoever carries the url neither the account, the amount nor the reference", async () => {
@@ -247,8 +263,12 @@ describe("bankTransfer", () => {
     await expect(bankTransfer(owned(), asking({ iban: "12345" }))).rejects.toThrow("is not an IBAN");
     await expect(bankTransfer(owned(), asking({ amountMinor: 0 }))).rejects.toThrow("above zero");
     await expect(bankTransfer(owned(), asking({ amountMinor: 1.5 }))).rejects.toThrow("whole number");
+    await expect(bankTransfer(owned(), asking({ amountMinor: 2 ** 53 }))).rejects.toThrow("whole number");
     await expect(bankTransfer(owned(), asking({ reference: "" }))).rejects.toThrow("no reference");
     await expect(bankTransfer(owned(), asking({ reference: "A*B" }))).rejects.toThrow("asterisk");
+    await expect(bankTransfer(owned(), asking({ reference: "A".repeat(61) }))).rejects.toThrow(
+      "at most 60 characters",
+    );
     await expect(bankTransfer(owned(), asking({ variableSymbol: "nope" }))).rejects.toThrow("ten digits");
     expect(calls).toHaveLength(0);
   });

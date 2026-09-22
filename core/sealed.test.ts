@@ -5,6 +5,8 @@ import { seal, sealStable, unseal } from "./sealed.ts";
 const SECRET = "a".repeat(32);
 const OTHER_SECRET = "b".repeat(32);
 const PLAIN = JSON.stringify({ amountMsat: 21_000, lnAddress: "iamfatik@blink.sv" });
+const SEALED_BEFORE_PADDING =
+	"v1.WDRS_M_tbcwi132WrGdvo63Zz3dQJXhyS1VnBe8ULlZFeimhurJdNQQgxxJn3bHZsCjca3A1Ij4i";
 
 test("a sealed blob reads back only with the secret that sealed it", async () => {
 	const sealed = await seal(SECRET, PLAIN);
@@ -19,7 +21,7 @@ test("nothing readable survives into the blob, which is the whole point", async 
 	expect(sealed).not.toContain("21000");
 	expect(sealed).not.toContain("iamfatik");
 	expect(sealed).not.toContain("amountMsat");
-	expect(sealed.startsWith("v1.")).toBe(true);
+	expect(sealed.startsWith("v2.")).toBe(true);
 });
 
 test("sealing the same thing twice gives two different blobs", async () => {
@@ -61,6 +63,24 @@ test("a sealed blob fits the 4096 the wire allows, even at full size", async () 
 	expect((await seal(SECRET, "x".repeat(3000))).length).toBeLessThanOrEqual(4096);
 });
 
+test("blobs in one size class seal to one length, so the length gives away only the class", async () => {
+	const short = await seal(SECRET, "x");
+
+	expect((await seal(SECRET, "x".repeat(256))).length).toBe(short.length);
+	expect((await seal(SECRET, "x".repeat(257))).length).toBeGreaterThan(short.length);
+});
+
+test("a blob sealed before padding existed still opens to what it held", async () => {
+	expect(await unseal(SECRET, SEALED_BEFORE_PADDING)).toBe("sealed before padding existed");
+});
+
+test("a blob relabelled as the other version is refused rather than read with its padding on", async () => {
+	const sealed = await seal(SECRET, PLAIN);
+
+	expect(await unseal(SECRET, `v1.${sealed.slice(3)}`)).toBeNull();
+	expect(await unseal(SECRET, `v2.${SEALED_BEFORE_PADDING.slice(3)}`)).toBeNull();
+});
+
 test("utf-8 survives the round trip, so a message is not mangled", async () => {
 	const text = "příliš žluťoučký kůň, 21 000 sat 🐴";
 
@@ -96,5 +116,5 @@ test("a stable blob hides what it carries, exactly like a random one", async () 
 
 	expect(sealed).not.toContain("21000");
 	expect(sealed).not.toContain("iamfatik");
-	expect(sealed.startsWith("v1.")).toBe(true);
+	expect(sealed.startsWith("v2.")).toBe(true);
 });

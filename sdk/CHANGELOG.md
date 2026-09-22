@@ -54,6 +54,15 @@ verify query and its preimage both changed, and an in-flight transfer raised by
 - An account is spelled one way wherever the rail reads one, so `CZ65 0800 ...` and
   `cz6508000000...` are the same account in the QR, in the proof and in the endpoint
   config.
+- Every sealed blob is padded before it is encrypted, and `seal` writes `v2.` where
+  it wrote `v1.`. A bank verify query is one length for every order, so the size of
+  `q` no longer gives away how many digits the amount has, and anything else sealed
+  reveals only whether it is up to 256 bytes, up to 1024 or up to 3000. A `v1.` blob
+  still opens, but 1.5.0 cannot open a `v2.` one, so upgrade whatever opens a blob
+  before whatever seals it.
+- `bankTransfer` refuses a reference over 60 characters, which is all a QR payment's
+  message carries, and an amount past `Number.MAX_SAFE_INTEGER`. Those two bounds are
+  what let the verify query be one length.
 
 ## 1.5.0
 

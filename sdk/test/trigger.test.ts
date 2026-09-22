@@ -379,7 +379,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
     const body = JSON.parse(String(watch?.init?.body)) as Record<string, unknown>;
     const sealed = String(body["sealed"]);
 
-    expect(sealed.startsWith("v1.")).toBe(true);
+    expect(sealed.startsWith("v2.")).toBe(true);
     expect(sealed).not.toContain(String(AMOUNT_MSAT));
     expect(sealed).not.toContain(WINNER);
     expect(JSON.stringify(body)).not.toContain(String(AMOUNT_MSAT));

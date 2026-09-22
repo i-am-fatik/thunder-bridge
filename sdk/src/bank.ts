@@ -12,6 +12,7 @@ const DEFAULT_LOOK_BACK_SECS = 7 * 24 * 60 * 60;
 const DEFAULT_POLL_EVERY_SECS = 30;
 const IBAN = /^[A-Z]{2}[0-9]{2}[0-9A-Z]{8,30}$/;
 const FORBIDDEN_IN_SPD = "*";
+const MAX_REFERENCE_CHARS = 60;
 
 /** One incoming payment as the bank booked it, in the smallest unit of its currency */
 export interface Credit {
@@ -422,11 +423,16 @@ function refuseUnusable(params: BankTransferParams, iban: string, currency: stri
   if (!IBAN.test(iban)) {
     throw new Error(`${params.iban} is not an IBAN`);
   }
-  if (!Number.isInteger(params.amountMinor) || params.amountMinor <= 0) {
+  if (!Number.isSafeInteger(params.amountMinor) || params.amountMinor <= 0) {
     throw new Error("amountMinor must be a whole number of minor units above zero");
   }
   if (params.reference.length === 0) {
     throw new Error("a transfer with no reference cannot be found");
+  }
+  if (params.reference.length > MAX_REFERENCE_CHARS) {
+    throw new Error(
+      `a reference is at most ${MAX_REFERENCE_CHARS} characters, as many as a QR payment's message carries and its sealed query hides`,
+    );
   }
   if (params.reference.includes(FORBIDDEN_IN_SPD)) {
     throw new Error("a reference cannot contain an asterisk, it separates the QR fields");

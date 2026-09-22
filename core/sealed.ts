@@ -1,10 +1,14 @@
 import { hmacHex } from "./hmac.ts";
 
-const VERSION = "v1";
+const VERSION = "v2";
+const UNPADDED_VERSION = "v1";
 const IV_BYTES = 12;
 const MIN_SECRET_CHARS = 32;
 const MAX_PLAIN_BYTES = 3000;
+const SIZE_CLASSES = [256, 1024, MAX_PLAIN_BYTES];
+const END_OF_TEXT = 0x80;
 const INFO = new TextEncoder().encode("thunder-bridge/sealed");
+const BOUND_TO_VERSION = new TextEncoder().encode(VERSION);
 
 /**
  * Encrypt what the watcher needs and the gateway must not have. The gateway
@@ -36,13 +40,15 @@ async function sealUnder(
 	plaintext: string,
 	iv: Uint8Array<ArrayBuffer>,
 ): Promise<string> {
-	const body = new TextEncoder().encode(plaintext);
-	if (body.length > MAX_PLAIN_BYTES) {
-		throw new Error(`sealed takes at most ${MAX_PLAIN_BYTES} bytes, this was ${body.length}`);
-	}
-
+	const body = padToClass(plaintext);
 	const key = await keyFor(secret);
-	const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, body));
+	const cipher = new Uint8Array(
+		await crypto.subtle.encrypt(
+			{ name: "AES-GCM", iv, additionalData: BOUND_TO_VERSION },
+			key,
+			body,
+		),
+	);
 	const joined = new Uint8Array(iv.length + cipher.length);
 	joined.set(iv);
 	joined.set(cipher, iv.length);
@@ -57,7 +63,8 @@ async function sealUnder(
  */
 export async function unseal(secret: string, sealed: string): Promise<string | null> {
 	const key = await keyFor(secret);
-	if (!sealed.startsWith(`${VERSION}.`)) {
+	const padded = sealed.startsWith(`${VERSION}.`);
+	if (!padded && !sealed.startsWith(`${UNPADDED_VERSION}.`)) {
 		return null;
 	}
 
@@ -67,12 +74,19 @@ export async function unseal(secret: string, sealed: string): Promise<string | n
 	}
 
 	try {
-		const body = await crypto.subtle.decrypt(
-			{ name: "AES-GCM", iv: joined.slice(0, IV_BYTES) },
-			key,
-			joined.slice(IV_BYTES),
+		const body = new Uint8Array(
+			await crypto.subtle.decrypt(
+				{
+					name: "AES-GCM",
+					iv: joined.slice(0, IV_BYTES),
+					additionalData: padded ? BOUND_TO_VERSION : undefined,
+				},
+				key,
+				joined.slice(IV_BYTES),
+			),
 		);
-		return new TextDecoder().decode(body);
+		const text = padded ? unpad(body) : body;
+		return text === null ? null : new TextDecoder().decode(text);
 	} catch {
 		return null;
 	}
@@ -86,6 +100,25 @@ export function refuseAWeakSecret(secret: string): void {
 	if (secret.length < MIN_SECRET_CHARS) {
 		throw new Error(`the sealing secret needs ${MIN_SECRET_CHARS} characters of randomness`);
 	}
+}
+
+function padToClass(plaintext: string): Uint8Array<ArrayBuffer> {
+	const text = new TextEncoder().encode(plaintext);
+	const size = SIZE_CLASSES.find((limit) => text.length <= limit);
+	if (size === undefined) {
+		throw new Error(`sealed takes at most ${MAX_PLAIN_BYTES} bytes, this was ${text.length}`);
+	}
+
+	const body = new Uint8Array(size + 1);
+	body.set(text);
+	body[text.length] = END_OF_TEXT;
+
+	return body;
+}
+
+function unpad(body: Uint8Array): Uint8Array | null {
+	const end = body.lastIndexOf(END_OF_TEXT);
+	return end === -1 ? null : body.subarray(0, end);
 }
 
 async function keyFor(secret: string) {
