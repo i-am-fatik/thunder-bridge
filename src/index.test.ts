@@ -34,7 +34,7 @@ import { fingerprint, readCreateRequest } from "./wire.ts";
 vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
 
 async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
-	return [{ address: "203.0.113.1", family: 4 }];
+	return [{ address: "93.184.216.34", family: 4 }];
 }
 
 const MSAT_21K = { value: "21000", asset_code: "BTC", asset_scale: 11 };

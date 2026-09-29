@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { agentAddressed, publicHttps, sameOrigin } from "./url.ts";
+import { agentAddressed, publicAddress, publicHttps, sameOrigin } from "./url.ts";
 
 test("public https hosts are fetchable", () => {
 	for (const url of [
@@ -33,6 +33,55 @@ test("local and plaintext hosts are refused", () => {
 		"https://[::ffff:127.0.0.1]/cb",
 	]) {
 		expect(publicHttps(url)).toBe(false);
+	}
+});
+
+test("an address the resolver spells with a dotted tail is judged by the IPv4 inside it", () => {
+	for (const address of [
+		"::ffff:127.0.0.1",
+		"::ffff:169.254.169.254",
+		"::ffff:10.0.0.7",
+		"::127.0.0.1",
+		"64:ff9b::127.0.0.1",
+		"::ffff:300.0.0.1",
+		"::ffff:1.300.0.1",
+	]) {
+		expect(publicAddress(address)).toBe(false);
+	}
+	expect(publicAddress("::ffff:1.1.1.1")).toBe(true);
+	expect(publicAddress("64:ff9b::1.1.1.1")).toBe(true);
+});
+
+test("an address in a range nobody reaches over the internet is not public, however it is spelled", () => {
+	for (const address of [
+		"64:ff9b::a9fe:a9fe",
+		"64:ff9b:1::1",
+		"64:ff9b:1::101:101",
+		"2002:a9fe:a9fe::1",
+		"2002:7f00:1::1",
+		"2001:0:4136:e378::1",
+		"::7f00:1",
+		"::ffff:0:7f00:1",
+		"fec0::1",
+		"ff02::1",
+		"100::1",
+		"1::2::3",
+		"1:2:3:4:5:6:7:8::9",
+		"fe80::1%eth0",
+		"2606:4700::11g1",
+		"224.0.0.1",
+		"239.255.255.250",
+		"198.18.0.1",
+		"198.19.255.1",
+		"192.0.0.170",
+		"192.0.2.1",
+		"198.51.100.7",
+		"203.0.113.1",
+	]) {
+		expect(publicAddress(address)).toBe(false);
+	}
+	for (const address of ["2002:0101:0101::1", "2606:4700::1111", "1.1.1.1", "8.8.4.4"]) {
+		expect(publicAddress(address)).toBe(true);
 	}
 });
 

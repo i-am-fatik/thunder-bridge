@@ -5,7 +5,7 @@ import { bankAgent, type BankOrder, bankTransfer, type Credit } from "../src/ban
 import { ThunderBridge } from "../src/client";
 
 vi.mock("node:dns/promises", () => ({
-  lookup: async () => [{ address: "203.0.113.1", family: 4 }],
+  lookup: async () => [{ address: "93.184.216.34", family: 4 }],
 }));
 
 const SECRET = "keep-me-server-side-and-thirty-two-plus";

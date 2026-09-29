@@ -21,7 +21,7 @@ import { bolt11 } from "./encode";
 import { jsonResponse, stubFetch, throughFetch, type Routes } from "./harness";
 
 vi.mock("node:dns/promises", () => ({
-  lookup: async () => [{ address: "203.0.113.1", family: 4 }],
+  lookup: async () => [{ address: "93.184.216.34", family: 4 }],
 }));
 
 const GATEWAY = "https://gateway.example.net";

@@ -50,8 +50,8 @@ function ipv4IsGlobal(literal: string): boolean {
 		return false;
 	}
 
-	const [a, b] = parts as [number, number, number, number];
-	if (a === 0 || a === 10 || a === 127 || a >= 240) {
+	const [a, b, c] = parts as [number, number, number, number];
+	if (a === 0 || a === 10 || a === 127 || a >= 224) {
 		return false;
 	}
 	if (a === 100 && b >= 64 && b < 128) {
@@ -63,7 +63,13 @@ function ipv4IsGlobal(literal: string): boolean {
 	if (a === 172 && b >= 16 && b < 32) {
 		return false;
 	}
-	if (a === 192 && b === 168) {
+	if (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)))) {
+		return false;
+	}
+	if (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) {
+		return false;
+	}
+	if (a === 203 && b === 0 && c === 113) {
 		return false;
 	}
 
@@ -76,20 +82,42 @@ function ipv6IsGlobal(literal: string): boolean {
 		return false;
 	}
 
-	const leading = groups.slice(0, 5).every((group) => group === 0);
-	if (leading && groups[5] === 0 && groups[6] === 0 && groups[7]! <= 1) {
-		return false;
-	}
-	if (leading && groups[5] === 0xffff) {
-		const [high, low] = [groups[6]!, groups[7]!];
-		return ipv4IsGlobal(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
-	}
+	const [first, second, third, fourth, fifth, sixth, high, low] = groups as [
+		number,
+		number,
+		number,
+		number,
+		number,
+		number,
+		number,
+		number,
+	];
+	const embedded = (one: number, other: number) =>
+		ipv4IsGlobal(`${one >> 8}.${one & 0xff}.${other >> 8}.${other & 0xff}`);
+	const zeroBefore = (count: number) => groups.slice(0, count).every((group) => group === 0);
 
-	const first = groups[0]!;
-	if ((first & 0xfe00) === 0xfc00) {
+	if (zeroBefore(5) && sixth === 0xffff) {
+		return embedded(high, low);
+	}
+	if (zeroBefore(6) || (zeroBefore(4) && fifth === 0xffff && sixth === 0)) {
 		return false;
 	}
-	if ((first & 0xffc0) === 0xfe80) {
+	if (first === 0x64 && second === 0xff9b) {
+		return third === 0 && fourth === 0 && fifth === 0 && sixth === 0 && embedded(high, low);
+	}
+	if (first === 0x2002) {
+		return embedded(second, third);
+	}
+	if (first === 0x2001 && second === 0) {
+		return false;
+	}
+	if (first === 0x100 && second === 0 && third === 0 && fourth === 0) {
+		return false;
+	}
+	if ((first & 0xfe00) === 0xfc00 || (first & 0xff00) === 0xff00) {
+		return false;
+	}
+	if ((first & 0xffc0) === 0xfe80 || (first & 0xffc0) === 0xfec0) {
 		return false;
 	}
 
@@ -97,12 +125,33 @@ function ipv6IsGlobal(literal: string): boolean {
 }
 
 function ipv6Groups(address: string): number[] {
-	const [head = "", tail] = address.split("::");
+	const halves = withDottedTailAsGroups(address).split("::");
+	const [head = "", tail] = halves;
 	const left = head.split(":").filter((group) => group !== "");
 	const right = (tail ?? "").split(":").filter((group) => group !== "");
-	const gap = tail === undefined ? [] : Array<string>(8 - left.length - right.length).fill("0");
+	const missing = 8 - left.length - right.length;
+	if (halves.length > 2 || missing < 0) {
+		return [Number.NaN];
+	}
+	const gap = tail === undefined ? [] : Array<string>(missing).fill("0");
 
-	return [...left, ...gap, ...right].map((group) => parseInt(group, 16));
+	return [...left, ...gap, ...right].map((group) =>
+		/^[0-9a-f]{1,4}$/.test(group) ? parseInt(group, 16) : Number.NaN,
+	);
+}
+
+function withDottedTailAsGroups(address: string): string {
+	const dotted = /^(.*:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(address);
+	if (dotted === null) {
+		return address;
+	}
+
+	const [a, b, c, d] = dotted[2]!.split(".").map(Number) as [number, number, number, number];
+	if ([a, b, c, d].some((part) => part > 255)) {
+		return `${dotted[1]}x`;
+	}
+
+	return `${dotted[1]}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
 }
 
 const AGENT_ADDRESS = /^agent:([0-9a-f]{64})$/;

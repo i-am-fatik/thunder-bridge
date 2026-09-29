@@ -5,7 +5,7 @@ import { checkSettled } from "../../core/lnurl.js";
 import { lightningVerifyEndpoint, relayedVerifyUrl } from "../src/relay";
 
 vi.mock("node:dns/promises", () => ({
-  lookup: async () => [{ address: "203.0.113.1", family: 4 }],
+  lookup: async () => [{ address: "93.184.216.34", family: 4 }],
 }));
 
 const SECRET = "relay_2f0c8a4e7b1d9c05e3a71486bf20";

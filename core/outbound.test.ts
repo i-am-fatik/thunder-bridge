@@ -23,7 +23,7 @@ vi.mock("node:dns/promises", async (importOriginal) => {
 });
 
 const ENTRY = "https://93.184.216.34/pay";
-const ELSEWHERE = "https://198.51.100.7/pay";
+const ELSEWHERE = "https://1.0.0.1/pay";
 const READ_LIMIT = 262_144;
 
 function answering(answer: (url: string, sent: Sent) => Response): {
