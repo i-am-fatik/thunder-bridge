@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { callerKey, paymentNamedBy } from "../../core/caller.js";
+import { GatewayCheatError } from "../src/errors";
 import { Gateways } from "../src/gateways";
 import { jsonResponse, problemResponse, stubFetch, type Routes } from "./harness";
 
@@ -111,6 +112,27 @@ describe("Gateways", () => {
 
     const settled = await gateways.settled({ id: await named(), paymentHash: HASH });
     expect(settled.status).toBe("paid");
+  });
+
+  it("names a gateway caught lying and still takes the settlement an honest one proves", async () => {
+    stubFetch({});
+    const caught: string[] = [];
+    const gateways = new Gateways([ONE, TWO], {
+      secret: SECRET,
+      onCaught: (baseUrl, cheat) => caught.push(`${baseUrl} ${cheat.code}`),
+    });
+    const paid = { ...(await watching("paid")), preimage: "cd".repeat(32) };
+
+    vi.spyOn(gateways.each[0]!, "settled").mockRejectedValue(
+      new GatewayCheatError("preimage_mismatch", await named()),
+    );
+    vi.spyOn(gateways.each[1]!, "settled").mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { ...(paid as unknown as Awaited<ReturnType<typeof gateways.settled>>), status: "paid" };
+    });
+
+    expect((await gateways.settled({ id: await named(), paymentHash: HASH })).status).toBe("paid");
+    expect(caught).toEqual([`${ONE} preimage_mismatch`]);
   });
 
   it("hands back the first ending when none of them saw a payment", async () => {

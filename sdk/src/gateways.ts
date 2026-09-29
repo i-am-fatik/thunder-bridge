@@ -1,4 +1,5 @@
 import { ThunderBridge, type ThunderBridgeOptions, type WaitOptions } from "./client.js";
+import { GatewayCheatError } from "./errors.js";
 import type { Handover, Held, Payment } from "./types.js";
 
 /** The client's own options, plus what to do about a gateway that will not take the watch */
@@ -10,6 +11,14 @@ export interface GatewaysOptions extends ThunderBridgeOptions {
    * than finding out when the one that took it goes away
    */
   onRefused?: (baseUrl: string, refusal: unknown) => void;
+
+  /**
+   * Called for a gateway caught lying about the payment while you waited on it,
+   * with its url and what gave it away. The wait goes on at the others, because
+   * one gateway that lies is what watching at several is for, so this is how you
+   * learn which one to stop trusting rather than never hearing of it
+   */
+  onCaught?: (baseUrl: string, cheat: GatewayCheatError) => void;
 }
 
 /**
@@ -26,6 +35,7 @@ export class Gateways {
 
   private readonly urls: readonly string[];
   private readonly onRefused: (baseUrl: string, refusal: unknown) => void;
+  private readonly onCaught: (baseUrl: string, cheat: GatewayCheatError) => void;
 
   constructor(baseUrls: string[], options?: GatewaysOptions) {
     if (baseUrls.length === 0) {
@@ -35,6 +45,7 @@ export class Gateways {
     this.urls = [...baseUrls];
     this.each = baseUrls.map((baseUrl) => new ThunderBridge(baseUrl, options));
     this.onRefused = options?.onRefused ?? (() => {});
+    this.onCaught = options?.onCaught ?? (() => {});
   }
 
   /** What this payment is called, which every gateway here will agree on */
@@ -90,7 +101,7 @@ export class Gateways {
             resolve(null);
           }
         };
-        for (const gateway of this.each) {
+        for (const [at, gateway] of this.each.entries()) {
           gateway
             .settled(held, { ...options, signal })
             .then((watched) => {
@@ -101,6 +112,9 @@ export class Gateways {
               lost();
             })
             .catch((failure: unknown) => {
+              if (failure instanceof GatewayCheatError) {
+                this.onCaught(this.urls[at]!, failure);
+              }
               refused ??= failure;
               lost();
             });
