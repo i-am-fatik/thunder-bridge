@@ -12,6 +12,7 @@ import type { Payment, Settlement } from "./types.js";
 import { carriesProof, type Proven } from "./verify.js";
 import {
   answerWebhookChallenge,
+  DEFAULT_TOLERANCE_SECS,
   readPayment,
   readSettlement,
   type WebhookCredential,
@@ -97,13 +98,14 @@ export class Serve {
   /**
    * The whole webhook route: it answers the gateway's challenge, checks the
    * signature against the key the gateway publishes, refuses a settlement that
-   * proves nothing, and calls you for the one that does.
+   * proves nothing, and calls you once for the one that does.
    *
    * `export const POST = gateway.serve.webhook({ onSettled: fulfil })` is the
    * entire integration
    */
   webhook(handlers: WebhookHandlers): Handler {
     const options: WebhookOptions = { toleranceSecs: handlers.toleranceSecs };
+    const once = onceWhileReplayable(handlers.toleranceSecs ?? DEFAULT_TOLERANCE_SECS);
 
     return async (request: Request) => {
       const credential = await this.credential(handlers);
@@ -115,14 +117,18 @@ export class Serve {
 
       const settlement = await readSettlement(request, credential, options);
       if (settlement !== null) {
-        return await acted(settlement, handlers);
+        return await once(`${settlement.id}:${settlement.status}`, () =>
+          acted(settlement, handlers),
+        );
       }
 
       const payment = await readPayment(request, credential, options);
       if (payment !== null) {
-        await handlers.onPayment?.(payment);
+        return await once(`${payment.id}:${payment.status}`, async () => {
+          await handlers.onPayment?.(payment);
 
-        return new Response("ok");
+          return new Response("ok");
+        });
       }
 
       return new Response("bad signature", { status: 401 });
@@ -150,6 +156,39 @@ export class Serve {
   private async credential(handlers: WebhookHandlers): Promise<WebhookCredential> {
     return handlers.credential ?? { publicKey: await this.gateway.webhookKey() };
   }
+}
+
+function onceWhileReplayable(
+  toleranceSecs: number,
+): (delivery: string, act: () => Promise<Response>) => Promise<Response> {
+  const acting = new Map<string, { forgetAt: number; done: Promise<Response> }>();
+  const replayableForMs = 2 * toleranceSecs * 1000;
+
+  return async (delivery, act) => {
+    const now = Date.now();
+    for (const [earlier, { forgetAt }] of acting) {
+      if (forgetAt > now) {
+        break;
+      }
+      acting.delete(earlier);
+    }
+
+    const earlier = acting.get(delivery);
+    if (earlier !== undefined) {
+      await earlier.done;
+
+      return new Response("ok");
+    }
+
+    const done = act();
+    acting.set(delivery, { forgetAt: now + replayableForMs, done });
+    try {
+      return await done;
+    } catch (failure: unknown) {
+      acting.delete(delivery);
+      throw failure;
+    }
+  };
 }
 
 async function acted(settlement: Settlement, handlers: WebhookHandlers): Promise<Response> {

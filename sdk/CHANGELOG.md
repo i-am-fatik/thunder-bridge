@@ -13,6 +13,18 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## Unreleased
+
+### Fixed
+
+- `serve.webhook` acts on each settlement once for as long as a delivery of it
+  could still be believed, twice the signature tolerance. A captured delivery
+  replayed inside that window, a gateway retry landing in it, and a second delivery
+  arriving while the first is still being handled are answered `200` without
+  calling `onSettled`, `onUnproven` or `onPayment` again. A callback that throws is
+  forgotten, so the gateway's retry reaches it. The memory is per mounted handler,
+  so a retry after the window or on another instance still calls you again.
+
 ## 2.1.1
 
 The first 2.x on npm. 2.0.0 and 2.1.0 were tagged with the gateway and never

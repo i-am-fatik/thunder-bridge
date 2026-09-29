@@ -6,7 +6,7 @@ import { paymentFromWire, settlementFromWire } from "./wire.js";
 const SIGNATURE_HEADER = "x-signature";
 const TIMESTAMP_HEADER = "x-timestamp";
 const GATEWAY_KEY_PREFIX = "ed25519=";
-const DEFAULT_TOLERANCE_SECS = 300;
+export const DEFAULT_TOLERANCE_SECS = 300;
 const CHALLENGE = "webhook-challenge";
 const VERIFY_CHALLENGE = "verify-challenge";
 

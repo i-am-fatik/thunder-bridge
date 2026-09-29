@@ -4,6 +4,7 @@ import { type SigningKey, signingKeyFromSeed } from "../../core/ed25519.js";
 import { ThunderBridge } from "../src/client";
 import { ProblemError } from "../src/errors";
 import type { Settlement } from "../src/types";
+import { bolt11 } from "./encode";
 import { jsonResponse, type Routes, stubFetch } from "./harness";
 
 const GATEWAY = "https://gateway.example.net";
@@ -55,6 +56,7 @@ async function delivered(body: string, key: Promise<SigningKey> = KEY): Promise<
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -165,6 +167,98 @@ describe("serve.webhook", () => {
     await expect(gateway.webhookKey()).rejects.toThrow(ProblemError);
     await expect(gateway.webhookKey()).resolves.toBe(key.publicKeyHex);
     expect(asked).toBe(2);
+  });
+
+  it("acts on a delivery replayed while its signature is still believable only once", async () => {
+    stubFetch(await keyRoutes());
+    const onSettled = vi.fn();
+    const route = new ThunderBridge(GATEWAY).serve.webhook({ onSettled });
+    const captured = await delivered(SETTLED);
+    const replayed = captured.clone();
+    const another = JSON.stringify({ ...JSON.parse(SETTLED), id: "7c2e11ab" });
+
+    const first = await route(captured);
+    const replay = await route(replayed);
+    const retry = await route(await delivered(SETTLED));
+    await route(await delivered(another));
+
+    expect([first.status, replay.status, retry.status]).toEqual([200, 200, 200]);
+    expect(onSettled.mock.calls.map(([one]) => one.id)).toEqual(["9500f6c6", "7c2e11ab"]);
+  });
+
+  it("holds a second delivery until the first is handled, rather than acting on both", async () => {
+    stubFetch(await keyRoutes());
+    let finish = () => {};
+    const onSettled = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const route = new ThunderBridge(GATEWAY).serve.webhook({ onSettled });
+
+    let released = false;
+    let answeredBeforeRelease = false;
+    const first = route(await delivered(SETTLED));
+    const second = route(await delivered(SETTLED)).then((answer) => {
+      answeredBeforeRelease = !released;
+      return answer;
+    });
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    released = true;
+    finish();
+
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
+    expect(answeredBeforeRelease).toBe(false);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("acts again on a retry once the callback failed the first time", async () => {
+    stubFetch(await keyRoutes());
+    const onSettled = vi.fn().mockRejectedValueOnce(new Error("the database was down"));
+    const route = new ThunderBridge(GATEWAY).serve.webhook({ onSettled });
+
+    await expect(route(await delivered(SETTLED))).rejects.toThrow("the database was down");
+    const retry = await route(await delivered(SETTLED));
+
+    expect(retry.status).toBe(200);
+    expect(onSettled).toHaveBeenCalledTimes(2);
+  });
+
+  it("forgets a settlement once no delivery of it could still be believed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    stubFetch(await keyRoutes());
+    const onSettled = vi.fn();
+    const route = new ThunderBridge(GATEWAY).serve.webhook({ onSettled, toleranceSecs: 60 });
+
+    await route(await delivered(SETTLED));
+    vi.setSystemTime(Date.now() + 119_000);
+    await route(await delivered(SETTLED));
+    expect(onSettled).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(Date.now() + 2_000);
+    await route(await delivered(SETTLED));
+    expect(onSettled).toHaveBeenCalledTimes(2);
+  });
+
+  it("acts on a whole payment an older gateway posts only once too", async () => {
+    stubFetch(await keyRoutes());
+    const onPayment = vi.fn();
+    const route = new ThunderBridge(GATEWAY).serve.webhook({ onPayment });
+    const payment = JSON.stringify({
+      id: "pay_7f3c9d21",
+      ln_address: "tips@wallet.example",
+      incoming_amount: { value: "21000", asset_code: "BTC", asset_scale: 11 },
+      status: "paid",
+      bolt11: bolt11({ paymentHash: HASH, amountMsat: 21_000 }),
+      payment_hash: HASH,
+      verify_url: "https://wallet.example/verify/7f3c9d21",
+      preimage: PREIMAGE,
+      expires_at: "2026-08-13T09:51:00.000Z",
+      created_at: "2026-08-13T09:41:00.000Z",
+    });
+
+    await route(await delivered(payment));
+    await route(await delivered(payment));
+
+    expect(onPayment).toHaveBeenCalledTimes(1);
   });
 
   it("uses the key the caller pinned instead of asking the gateway for one", async () => {

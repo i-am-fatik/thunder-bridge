@@ -402,8 +402,11 @@ Pass `webhookUrl` when you create a payment, or on any rail. There is no webhook
 secret: a gateway holds nothing of yours, and sending one is refused rather than
 ignored. Every delivery is signed `ed25519=<signature>` with the key the gateway
 publishes at `/webhook-key`, over `<x-timestamp>.<raw body>` rather than the body
-alone, so a captured delivery cannot be replayed at you later. Delivery is
-at-least-once, so deduplicate on `id`.
+alone, so a captured delivery cannot be replayed at you later. Until then
+`serve.webhook` acts on each settlement once, answering a replay `200` without
+calling you again. Delivery is still at-least-once: a retry after that window, or
+one reaching another instance of your server, calls you again, so fulfil
+idempotently on `id`.
 
 Your handler answers one challenge before any of that. The gateway POSTs
 `{"type":"webhook-challenge","nonce":"..."}` to the URL while the create is still
