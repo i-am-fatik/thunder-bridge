@@ -13,7 +13,12 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
-## Unreleased
+## 2.2.0
+
+Every lie the client can catch a gateway in is now caught or named, and a signed
+request, a webhook delivery and a sealed blob each prove only what they were made
+for. A signed request and a webhook both change shape on the wire, so upgrade the
+gateway to 2.2.0 before a client that signs requests or reads webhooks.
 
 ### Added
 
