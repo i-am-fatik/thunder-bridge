@@ -23,12 +23,17 @@ export const pinnedToTheAddressWeVerified: Send = async (url, sent, signal, at) 
 
 		const call = request(reaching(asked, sent, at, first), (answer: IncomingMessage) => {
 			const status = answer.statusCode ?? 502;
-			settle(
-				new Response(
-					CARRIES_NO_BODY.includes(status) ? null : (Readable.toWeb(answer) as ReadableStream),
-					{ status, headers: headersOf(answer.headers) },
-				),
-			);
+			try {
+				settle(
+					new Response(
+						CARRIES_NO_BODY.includes(status) ? null : (Readable.toWeb(answer) as ReadableStream),
+						{ status, headers: headersOf(answer.headers) },
+					),
+				);
+			} catch (unreadable) {
+				answer.destroy();
+				fail(new Error(`${url} answered with something HTTP cannot carry`, { cause: unreadable }));
+			}
 		});
 
 		const give = () => call.destroy(new Error(`${url} took longer than allowed`));

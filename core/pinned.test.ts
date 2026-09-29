@@ -165,6 +165,20 @@ test("a status that carries no body is not given one", async () => {
 	expect(answer.body).toBeNull();
 });
 
+test("a status HTTP has no meaning for is refused instead of taking the process down", async () => {
+	freshly();
+	answering = { statusCode: 999, headers: {}, body: ["nope"] };
+
+	await expect(
+		pinnedToTheAddressWeVerified(
+			"https://example.com/verify",
+			{},
+			AbortSignal.timeout(5000),
+			VERIFIED,
+		),
+	).rejects.toThrow("answered with something HTTP cannot carry");
+});
+
 test("a header sent more than once keeps every value", async () => {
 	freshly();
 	answering = { statusCode: 200, headers: { "set-cookie": ["a=1", "b=2"] }, body: ["{}"] };
