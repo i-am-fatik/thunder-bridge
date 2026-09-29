@@ -180,8 +180,9 @@ export async function bankTransfer(
 
   const verifyUrl = await answeredAt(params, subject);
 
+  const paymentHash = hashOf(await hmacHex(params.secret, `preimage|${subject}`));
   const watched = await gateway.watch({
-    paymentHash: hashOf(await hmacHex(params.secret, `preimage|${subject}`)),
+    paymentHash,
     verifyUrl,
     expiresAt: params.expiresAt,
     trigger: params.trigger,
@@ -190,7 +191,7 @@ export async function bankTransfer(
     webhookUrl: params.webhookUrl,
   });
 
-  return { id: watched.id, paymentHash: watched.paymentHash, verifyUrl, spd };
+  return { id: watched.id, paymentHash, verifyUrl, spd };
 }
 
 /**

@@ -58,11 +58,22 @@ function wire(overrides: Record<string, unknown> = {}): Record<string, unknown> 
 }
 
 function minting(): Routes {
-  return { [`${GATEWAY}/incoming-payments`]: () => jsonResponse(wire(), 201) };
+  return {
+    [`${GATEWAY}/incoming-payments`]: () => jsonResponse(wire(), 201),
+    "https://example.com/.well-known/lnurlp/alice": () =>
+      jsonResponse({
+        tag: "payRequest",
+        callback: "https://example.com/lnurl/pay/alice",
+        metadata: METADATA,
+        minSendable: 1_000,
+        maxSendable: 100_000_000,
+      }),
+    [VERIFY_URL]: () => jsonResponse({ settled: false, pr: INVOICE }),
+  };
 }
 
 function requesting(): ThunderBridge {
-  return new ThunderBridge(GATEWAY, { verify: false });
+  return new ThunderBridge(GATEWAY);
 }
 
 beforeEach(() => {
@@ -146,6 +157,34 @@ describe("requestPayment", () => {
     await vi.waitFor(() => expect(paid).toHaveBeenCalledTimes(1));
 
     expect(paid.mock.calls[0]?.[0]).toMatchObject({ preimage: PREIMAGE });
+  });
+
+  it("refuses a different invoice the gateway really did pay, because it is not the one proved", async () => {
+    stubFetch(minting());
+    const asked = await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
+    const otherPreimage = "22".repeat(32);
+    const otherHash = createHash("sha256").update(Buffer.from(otherPreimage, "hex")).digest("hex");
+    const paid = vi.fn();
+    const failed = vi.fn();
+
+    const waiting = asked.paid();
+    asked.onPaid(paid, failed);
+    for (const socket of FakeSocket.opened) {
+      socket.onmessage?.({
+        data: JSON.stringify(
+          wire({
+            status: "paid",
+            preimage: otherPreimage,
+            payment_hash: otherHash,
+            bolt11: bolt11({ paymentHash: otherHash, amountMsat: 1_000 }),
+          }),
+        ),
+      });
+    }
+
+    await expect(waiting).rejects.toMatchObject({ code: "hash_mismatch" });
+    await vi.waitFor(() => expect(failed).toHaveBeenCalledTimes(1));
+    expect(paid).not.toHaveBeenCalled();
   });
 
   it("stops waiting when the returned function is called, and reports nothing after", async () => {

@@ -1,5 +1,6 @@
 import { verifyHex } from "../../core/ed25519.js";
 import type { Payment, Settlement } from "./types.js";
+import { carriesProof } from "./verify.js";
 import { paymentFromWire, settlementFromWire } from "./wire.js";
 
 const SIGNATURE_HEADER = "x-signature";
@@ -37,7 +38,7 @@ export async function readPayment(
 ): Promise<Payment | null> {
   const body = await believable(request, credential, options);
 
-  return body === null ? null : decoded(body, paymentFromWire);
+  return body === null ? null : proved(decoded(body, paymentFromWire));
 }
 
 /**
@@ -52,7 +53,7 @@ export async function readSettlement(
 ): Promise<Settlement | null> {
   const body = await believable(request, credential, options);
 
-  return body === null ? null : decoded(body, settlementFromWire);
+  return body === null ? null : proved(decoded(body, settlementFromWire));
 }
 
 /**
@@ -117,6 +118,10 @@ async function believable(
   );
 
   return signed ? body : null;
+}
+
+function proved<T extends Payment | Settlement>(read: T | null): T | null {
+  return read !== null && read.status === "paid" && !carriesProof(read) ? null : read;
 }
 
 function decoded<T>(body: string, from: (wire: unknown) => T | null): T | null {

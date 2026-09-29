@@ -18,6 +18,7 @@ import { Serve } from "./serving.js";
 import type {
   Charge,
   Handover,
+  Held,
   MintedPayment,
   Payment,
   PaymentStatus,
@@ -59,15 +60,8 @@ function backoffMs(firstDelay: number, attempt: number): number {
   return Math.round(grown * (0.5 + Math.random() / 2));
 }
 
-/** How this instance talks to one gateway, and how much of what it says to check */
+/** How this instance talks to one gateway */
 export interface ThunderBridgeOptions {
-  /**
-   * Prove every payment against the recipient's own server before handing it
-   * back, and refuse a reported settlement whose preimage does not hash to the
-   * payment hash, defaults to true
-   */
-  verify?: boolean;
-
   /**
    * Sent as `Authorization: Bearer`, which a gateway started with
    * `GATEWAY_TOKEN` requires on every call, the socket handshake included. No
@@ -221,7 +215,6 @@ function gatewayAt(baseUrl: string): string {
 /** Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself */
 export class ThunderBridge {
   private readonly baseUrl: string;
-  private readonly verify: boolean;
   private readonly token: string | null;
   private readonly secret: string | null;
   private strangers: Promise<boolean> | null = null;
@@ -236,7 +229,6 @@ export class ThunderBridge {
 
   constructor(baseUrl: string, options?: ThunderBridgeOptions) {
     this.baseUrl = gatewayAt(baseUrl);
-    this.verify = options?.verify ?? true;
     this.token = options?.token ?? null;
     this.secret = options?.secret ?? null;
     this.serve = new Serve(this);
@@ -307,9 +299,7 @@ export class ThunderBridge {
     }
 
     const payment = await mintedFrom(response);
-    if (this.verify) {
-      await proveOrigin(payment, asked);
-    }
+    await proveOrigin(payment, asked);
 
     return payment;
   }
@@ -385,8 +375,8 @@ export class ThunderBridge {
    * for both sorts: `kind` says whether the gateway minted it or was handed it,
    * and the address, amount and invoice are null on one it was never told
    */
-  async payment(id: string): Promise<Payment | null> {
-    const path = `/incoming-payments/${encodeURIComponent(id)}`;
+  async payment(held: Held): Promise<Payment | null> {
+    const path = `/incoming-payments/${encodeURIComponent(held.id)}`;
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: await this.reading("GET", path),
     });
@@ -397,7 +387,7 @@ export class ThunderBridge {
       throw await problemFrom(response);
     }
 
-    return this.proven(await paymentFrom(response));
+    return this.proven(await paymentFrom(response), held);
   }
 
   /**
@@ -423,7 +413,10 @@ export class ThunderBridge {
       settled_scanned?: unknown;
     } | null;
     const listed = Array.isArray(body?.payments)
-      ? body.payments.map(paymentFromWire).filter((one): one is Payment => one !== null)
+      ? body.payments
+          .map(paymentFromWire)
+          .filter((one): one is Payment => one !== null)
+          .filter((one) => one.status !== "paid" || carriesProof(one))
       : null;
     if (listed === null || typeof body?.settled_scanned !== "number") {
       throw new ProblemError({
@@ -441,8 +434,8 @@ export class ThunderBridge {
    * one that has answered is followed until its own expiry, so the wait always
    * ends by itself
    */
-  async settled(id: string, options?: WaitOptions): Promise<Payment> {
-    const ended = paymentFromWire(await this.followed(id, options));
+  async settled(held: Held, options?: WaitOptions): Promise<Payment> {
+    const ended = paymentFromWire(await this.followed(held.id, options));
     if (ended === null) {
       throw new ProblemError({
         status: 200,
@@ -450,7 +443,7 @@ export class ThunderBridge {
       });
     }
 
-    return this.proven(ended);
+    return this.proven(ended, held);
   }
 
   private followed(id: string, options?: WaitOptions): Promise<unknown> {
@@ -566,8 +559,8 @@ export class ThunderBridge {
    * really does pay twice and that shows up on `follow` as a second settlement to
    * refund.
    */
-  async firstSettled(ids: string[], options?: WaitOptions): Promise<Payment | null> {
-    if (ids.length === 0) {
+  async firstSettled(held: Held[], options?: WaitOptions): Promise<Payment | null> {
+    if (held.length === 0) {
       return null;
     }
 
@@ -579,15 +572,15 @@ export class ThunderBridge {
 
     try {
       const winner = await new Promise<Payment | null>((resolve) => {
-        let waiting = ids.length;
+        let waiting = held.length;
         const lost = () => {
           waiting -= 1;
           if (waiting === 0) {
             resolve(null);
           }
         };
-        for (const id of ids) {
-          this.settled(id, { ...options, signal })
+        for (const leg of held) {
+          this.settled(leg, { ...options, signal })
             .then((watched) => (watched.status === "paid" ? resolve(watched) : lost()))
             .catch((failure: unknown) => {
               refused ??= failure;
@@ -635,6 +628,9 @@ export class ThunderBridge {
     const named = await this.nameFor(handover.paymentHash);
     if (named !== null && watched.id !== named) {
       throw new GatewayCheatError("id_not_mine", watched.id);
+    }
+    if (watched.paymentHash.toLowerCase() !== handover.paymentHash.toLowerCase()) {
+      throw new GatewayCheatError("hash_mismatch", watched.id);
     }
     return watched;
   }
@@ -857,8 +853,15 @@ export class ThunderBridge {
     return await this.speaks;
   }
 
-  private proven<T extends Payment>(payment: T): T {
-    if (this.verify && payment.status === "paid" && !carriesProof(payment)) {
+  private proven<T extends Payment>(payment: T, held?: Held): T {
+    const other =
+      held !== undefined &&
+      (payment.id !== held.id ||
+        payment.paymentHash.toLowerCase() !== held.paymentHash.toLowerCase());
+    if (other) {
+      throw new GatewayCheatError("hash_mismatch", payment.id);
+    }
+    if (payment.status === "paid" && !carriesProof(payment)) {
       throw new GatewayCheatError("preimage_mismatch", payment.id);
     }
 

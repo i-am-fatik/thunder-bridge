@@ -30,9 +30,9 @@ export interface WebhookHandlers {
   onSettled?: (settlement: Proven<Settlement>) => void | Promise<void>;
 
   /**
-   * A delivery that carries no proof, so an expiry or a paid claim with no
-   * preimage behind it. Left unset, the handler answers `202` and does nothing,
-   * because acting on an unproven claim is the one thing this refuses to do
+   * A delivery that carries no proof, so an expiry. Left unset, the handler
+   * answers `202` and does nothing, because acting on an unproven claim is the
+   * one thing this refuses to do
    */
   onUnproven?: (settlement: Settlement) => void | Promise<void>;
 

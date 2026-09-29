@@ -77,11 +77,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("the id alone redraws the QR and picks the wait back up", async () => {
+test("the id and the hash redraw the QR and pick the wait back up", async () => {
   stubFetch(remembering());
   const into = { innerHTML: "" };
 
-  const settling = resumeAWait(into, ID);
+  const settling = resumeAWait(into, { id: ID, paymentHash: PAYMENT_HASH });
   await vi.waitFor(() => expect(FakeSocket.opened).toHaveLength(1));
 
   expect(into.innerHTML).toContain("<svg");
@@ -97,7 +97,9 @@ test("a payment the gateway never heard of is refused before any socket opens", 
   stubFetch({ [`${DEMO_GATEWAY}/incoming-payments/${ID}`]: () => jsonResponse(null, 404) });
   const into = { innerHTML: "" };
 
-  await expect(resumeAWait(into, ID)).rejects.toThrow("is not an invoice this gateway minted");
+  await expect(resumeAWait(into, { id: ID, paymentHash: PAYMENT_HASH })).rejects.toThrow(
+    "is not an invoice this gateway minted",
+  );
   expect(FakeSocket.opened).toHaveLength(0);
   expect(into.innerHTML).toBe("");
 });

@@ -291,7 +291,7 @@ const gateway = new ThunderBridge("https://public.thunder-bridge.agora.gripe", {
 });
 
 const asked = await gateway.requestPayment({ paidTo: "iamfatik@blink.sv", amount: sats(21) });
-const read = await gateway.payment(asked.id);
+const read = await gateway.payment(asked);
 const quoted = await gateway.quote({ paidTo: "iamfatik@blink.sv", amount: sats(21) });
 
 const lnurl = gateway.serve.lnurlPay({

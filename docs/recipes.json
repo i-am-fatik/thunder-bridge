@@ -175,16 +175,21 @@
 		{
 			"slug": "resume-a-wait",
 			"title": "Pick a wait back up after a reload",
-			"intent": "Carry on waiting for an invoice you already minted, holding nothing but its id",
+			"intent": "Carry on waiting for an invoice you already minted, holding nothing but its id and its payment hash",
 			"rail": "rails.lightning",
 			"shows": [
-				"the id is the whole handle, so a page that reloads keeps nothing else",
+				"the id and the payment hash are the whole handle, so a page that reloads keeps nothing else, and the hash is what every answer is checked against",
 				"payment reads the invoice back and the QR redraws from its own bolt11",
 				"settled opens the socket again, so a payment made while nobody watched still arrives",
 				"the proof takes the invoice as it was read, because nothing it checks changes when the money lands"
 			],
-			"source": "import { proveSettlement, ThunderBridge } from \"thunder-bridge\";\nimport { invoiceToSvg } from \"thunder-bridge/qr\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport async function resumeAWait(\n  into: { innerHTML: string },\n  id: string,\n  via = DEMO_GATEWAY,\n): Promise<string | null> {\n  const gateway = new ThunderBridge(via);\n\n  const asked = await gateway.payment(id);\n  if (asked?.kind !== \"minted\") {\n    throw new Error(`${id} is not an invoice this gateway minted`);\n  }\n\n  into.innerHTML = invoiceToSvg(asked.bolt11);\n\n  await gateway.settled(id);\n\n  return await proveSettlement(asked, { paidTo: [asked.lnAddress], amountMsat: asked.amountMsat });\n}\n",
+			"source": "import { type Held, proveSettlement, ThunderBridge } from \"thunder-bridge\";\nimport { invoiceToSvg } from \"thunder-bridge/qr\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport async function resumeAWait(\n  into: { innerHTML: string },\n  held: Held,\n  via = DEMO_GATEWAY,\n): Promise<string | null> {\n  const gateway = new ThunderBridge(via);\n\n  const asked = await gateway.payment(held);\n  if (asked?.kind !== \"minted\") {\n    throw new Error(`${held.id} is not an invoice this gateway minted`);\n  }\n\n  into.innerHTML = invoiceToSvg(asked.bolt11);\n\n  await gateway.settled(held);\n\n  return await proveSettlement(asked, { paidTo: [asked.lnAddress], amountMsat: asked.amountMsat });\n}\n",
 			"calls": [
+				{
+					"name": "Held",
+					"line": 1,
+					"anchor": "thunder-bridge-interface-held"
+				},
 				{
 					"name": "proveSettlement",
 					"line": 1,
@@ -201,6 +206,11 @@
 					"anchor": "thunder-bridge-qr-function-invoicetosvg"
 				},
 				{
+					"name": "Held",
+					"line": 8,
+					"anchor": "thunder-bridge-interface-held"
+				},
+				{
 					"name": "ThunderBridge",
 					"line": 11,
 					"anchor": "thunder-bridge-class-thunderbridge"
@@ -214,6 +224,11 @@
 					"name": "MintedPayment.kind",
 					"line": 14,
 					"anchor": "thunder-bridge-interface-mintedpayment"
+				},
+				{
+					"name": "Held.id",
+					"line": 15,
+					"anchor": "thunder-bridge-interface-held"
 				},
 				{
 					"name": "invoiceToSvg",

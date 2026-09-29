@@ -45,15 +45,19 @@ const INVOICE = bolt11({
 
 const ORDER: Order = { reference: "ORDER-2026-77", amountMinor: 48_055, currency: "CZK" };
 
+function echoedHash(init?: RequestInit): string {
+  return (JSON.parse(String(init?.body ?? "{}")) as { payment_hash?: string }).payment_hash ?? PAYMENT_HASH;
+}
+
 function railsServing(overrides: Routes = {}): Routes {
   return {
     [`${GATEWAY}/incoming-payments/is-this-gateway-yours`]: () => jsonResponse({}, 401),
-    [`${GATEWAY}/watched-payments`]: () =>
+    [`${GATEWAY}/watched-payments`]: (init) =>
       jsonResponse(
         {
           id: "watch_0001",
           status: "pending",
-          payment_hash: PAYMENT_HASH,
+          payment_hash: echoedHash(init),
           verify_url: VERIFY,
           preimage: null,
           expires_at: new Date(EXPIRES_AT * 1000).toISOString(),
@@ -86,6 +90,7 @@ function railsServing(overrides: Routes = {}): Routes {
         maxSendable: 100_000_000,
       }),
     [`${CALLBACK}?amount=${AMOUNT_MSAT}`]: () => jsonResponse({ pr: INVOICE, verify: VERIFY }),
+    [VERIFY]: () => jsonResponse({ settled: false, pr: INVOICE }),
     ...overrides,
   };
 }
@@ -101,7 +106,7 @@ function bank(overrides: Partial<BankRailConfig> = {}): Rail {
 }
 
 function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
-  return lightningRail(new ThunderBridge(GATEWAY, { verify: false }), {
+  return lightningRail(new ThunderBridge(GATEWAY), {
     paidTo: [LN_ADDRESS],
     amount: () => msat(AMOUNT_MSAT),
     ...overrides,
@@ -109,7 +114,7 @@ function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
 }
 
 function blind(overrides: Partial<BlindLightningRailConfig> = {}): Rail {
-  return blindLightningRail(new ThunderBridge(GATEWAY, { verify: false, token: "hunter2" }), {
+  return blindLightningRail(new ThunderBridge(GATEWAY, { token: "hunter2" }), {
     send: throughFetch,
     paidTo: [LN_ADDRESS],
     amount: () => msat(AMOUNT_MSAT),
@@ -128,7 +133,7 @@ afterEach(() => {
 });
 
 describe("every rail answers the same question", () => {
-  it("hands back the same five fields whichever rail built the leg", async () => {
+  it("hands back the same six fields whichever rail built the leg", async () => {
     stubFetch(railsServing());
     const rails: Rail[] = [bank(), lightning(), blind()];
 
@@ -136,8 +141,16 @@ describe("every rail answers the same question", () => {
     for (const rail of rails) legs.push(await rail(ORDER));
 
     for (const leg of legs) {
-      expect(Object.keys(leg).sort()).toEqual(["expiresAt", "id", "qr", "rail", "scan"]);
+      expect(Object.keys(leg).sort()).toEqual([
+        "expiresAt",
+        "id",
+        "paymentHash",
+        "qr",
+        "rail",
+        "scan",
+      ]);
       expect(typeof leg.id).toBe("string");
+      expect(leg.paymentHash).toMatch(/^[0-9a-f]{64}$/);
       expect(leg.scan.length).toBeGreaterThan(0);
       expect(leg.qr.length).toBeGreaterThan(0);
     }

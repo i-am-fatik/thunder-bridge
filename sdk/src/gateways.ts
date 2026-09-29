@@ -1,5 +1,5 @@
 import { ThunderBridge, type ThunderBridgeOptions, type WaitOptions } from "./client.js";
-import type { Handover, Payment } from "./types.js";
+import type { Handover, Held, Payment } from "./types.js";
 
 /** The client's own options, plus what to do about a gateway that will not take the watch */
 export interface GatewaysOptions extends ThunderBridgeOptions {
@@ -73,7 +73,7 @@ export class Gateways {
    * saying so. When they all end without a payment, the first ending is the answer,
    * and when they all fail, the first failure is thrown
    */
-  async settled(id: string, options?: WaitOptions): Promise<Payment> {
+  async settled(held: Held, options?: WaitOptions): Promise<Payment> {
     const stopLosers = new AbortController();
     const signal = options?.signal
       ? AbortSignal.any([stopLosers.signal, options.signal])
@@ -92,7 +92,7 @@ export class Gateways {
         };
         for (const gateway of this.each) {
           gateway
-            .settled(id, { ...options, signal })
+            .settled(held, { ...options, signal })
             .then((watched) => {
               if (watched.status === "paid") {
                 return resolve(watched);

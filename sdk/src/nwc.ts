@@ -530,6 +530,7 @@ export function nwcRail(gateway: ThunderBridge, config: NwcRailConfig): Rail {
 
     return {
       id: watched.id,
+      paymentHash: invoice.paymentHash,
       rail: config.name ?? "lightning",
       scan: invoice.bolt11,
       qr: toLightningUri(invoice.bolt11),

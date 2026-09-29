@@ -55,6 +55,7 @@ export type { Minted, Range, TriggerConfig, WatchTicketConfig } from "./trigger.
 export type {
   Charge,
   Handover,
+  Held,
   MintedPayment,
   Payment,
   PaymentStatus,

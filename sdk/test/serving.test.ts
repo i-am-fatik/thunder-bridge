@@ -74,13 +74,27 @@ describe("serve.webhook", () => {
     expect(settled[0]?.preimage).toBe(PREIMAGE);
   });
 
-  it("answers 202 and calls nobody when the delivery proves nothing", async () => {
+  it("refuses a paid delivery that proves nothing the way it refuses a bad signature", async () => {
     stubFetch(await keyRoutes());
     const onSettled = vi.fn();
-    const route = new ThunderBridge(GATEWAY).serve.webhook({ onSettled });
+    const onUnproven = vi.fn();
+    const route = new ThunderBridge(GATEWAY).serve.webhook({ onSettled, onUnproven });
     const lying = JSON.stringify({ ...JSON.parse(SETTLED), preimage: "ff".repeat(32) });
 
     const answer = await route(await delivered(lying));
+
+    expect(answer.status).toBe(401);
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(onUnproven).not.toHaveBeenCalled();
+  });
+
+  it("answers 202 and calls nobody for an expiry nobody asked to hear about", async () => {
+    stubFetch(await keyRoutes());
+    const onSettled = vi.fn();
+    const route = new ThunderBridge(GATEWAY).serve.webhook({ onSettled });
+    const expired = JSON.stringify({ ...JSON.parse(SETTLED), status: "expired", preimage: null });
+
+    const answer = await route(await delivered(expired));
 
     expect(answer.status).toBe(202);
     expect(onSettled).not.toHaveBeenCalled();

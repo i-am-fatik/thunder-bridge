@@ -24,7 +24,7 @@ test("the client's own methods are listed, because that is where the surface liv
 	for (const member of [
 		"requestPayment(asked: PaymentRequestInit)",
 		"mint(charge: Charge",
-		"settled(id: string",
+		"settled(held: Held",
 	]) {
 		expect(reference).toContain(member);
 	}

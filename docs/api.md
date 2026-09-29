@@ -29,6 +29,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`GatewaysOptions`](#thunder-bridge-interface-gatewaysoptions) | interface | The client's own options, plus what to do about a gateway that will not take the watch |
 | [`Handler`](#thunder-bridge-type-handler) | type | A Fetch handler, which is what every runtime this targets mounts |
 | [`Handover`](#thunder-bridge-interface-handover) | interface | An invoice you obtained yourself, handed over to be watched |
+| [`Held`](#thunder-bridge-interface-held) | interface | A payment as the caller already knows it: what the gateway calls it and the hash it settles against |
 | [`IdempotencyConflict`](#thunder-bridge-type-idempotencyconflict) | type | Why an `Idempotency-Key` was refused, `request-in-flight` is the benign one and `key-reused` means the same key was sent for a different request |
 | [`IdempotencyConflictError`](#thunder-bridge-class-idempotencyconflicterror) | class | Thrown when an `Idempotency-Key` is held by another request |
 | [`Invoice`](#thunder-bridge-interface-invoice) | interface | What a BOLT11 invoice says about itself, every field null when it does not carry one |
@@ -70,7 +71,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`Settlement`](#thunder-bridge-interface-settlement) | interface | What a delivery carries |
 | [`SocketTicket`](#thunder-bridge-interface-socketticket) | interface | A one minute pass onto one trigger's stream |
 | [`ThunderBridge`](#thunder-bridge-class-thunderbridge) | class | Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself |
-| [`ThunderBridgeOptions`](#thunder-bridge-interface-thunderbridgeoptions) | interface | How this instance talks to one gateway, and how much of what it says to check |
+| [`ThunderBridgeOptions`](#thunder-bridge-interface-thunderbridgeoptions) | interface | How this instance talks to one gateway |
 | [`TicketOptions`](#thunder-bridge-interface-ticketoptions) | interface | What a socket ticket opens beyond the trigger it names |
 | [`TriggerConfig`](#thunder-bridge-interface-triggerconfig) | interface | An LNURL-pay endpoint of your own: whose wallets it stands for, and what it charges |
 | [`unseal`](#thunder-bridge-function-unseal) | function | Read a sealed blob back, null when it was sealed with another secret, edited on the way, or is not one of ours |
@@ -465,7 +466,7 @@ from the wallet and only one of them could ever be paid
 | <a id="thunder-bridge-class-gateways-each"></a>`readonly each: readonly ThunderBridge[];` |  |
 | <a id="thunder-bridge-class-gateways-namefor"></a>`async nameFor(paymentHash: string): Promise<string \| null>` | What this payment is called, which every gateway here will agree on |
 | <a id="thunder-bridge-class-gateways-watch"></a>`async watch(handover: Handover): Promise<Payment>` | Hand the same invoice to every gateway |
-| <a id="thunder-bridge-class-gateways-settled"></a>`async settled(id: string, options?: WaitOptions): Promise<Payment>` | Wait for whichever gateway speaks first |
+| <a id="thunder-bridge-class-gateways-settled"></a>`async settled(held: Held, options?: WaitOptions): Promise<Payment>` | Wait for whichever gateway speaks first |
 
 ### <a id="thunder-bridge-interface-gatewaysoptions"></a>GatewaysOptions
 
@@ -520,6 +521,19 @@ An invoice you obtained yourself, handed over to be watched. The gateway is
 given no address and no amount, so it cannot refuse one recipient rather than
 all of them
 
+### <a id="thunder-bridge-interface-held"></a>Held
+
+```ts
+interface Held {
+  id: string;
+  paymentHash: string;
+}
+```
+
+A payment as the caller already knows it: what the gateway calls it and the
+hash it settles against. Every [`Payment`](#thunder-bridge-type-payment) is one, and a caller reading back
+after a restart builds one from the two fields it stored
+
 ### <a id="thunder-bridge-type-idempotencyconflict"></a>IdempotencyConflict
 
 ```ts
@@ -551,6 +565,7 @@ interface Invoice {
 	paymentHash: string | null;
 	descriptionHash: string | null;
 	amountMsat: number | null;
+	issuedAt: number | null;
 	expiresAt: number | null;
 }
 ```
@@ -579,8 +594,10 @@ do. Throws [`NoWalletAvailableError`](#thunder-bridge-class-nowalletavailableerr
 
 ```ts
 interface Leg {
-  /** The watched payment's id, which is what `firstSettled`, `payment` and `settled` take */
+  /** The watched payment's id, which with `paymentHash` is what `firstSettled`, `payment` and `settled` take */
   id: string;
+
+  paymentHash: string;
 
   /** Which rail made it, so a shop can label a leg without knowing how it was built */
   rail: string;
@@ -765,7 +782,7 @@ interface PaymentRequest {
    * unpaid or the wait is aborted. It follows a WebSocket and reconnects through
    * a drop, so this is one await rather than a poll.
    *
-   * `gateway.settled(id)` is the wider question and ends on an expiry too. This
+   * `gateway.settled(payment)` is the wider question and ends on an expiry too. This
    * one is about the payment that was asked for, and one that expired was never paid
    */
   paid(options?: WaitOptions): Promise<MintedPayment>;
@@ -1069,7 +1086,11 @@ A whole number of satoshi, so `sats(21)` is 21000 millisatoshi
 ### <a id="thunder-bridge-function-seal"></a>seal
 
 ```ts
-async function seal(secret: string, plaintext: string): Promise<string>
+async function seal(
+	secret: string,
+	plaintext: string,
+	paymentHash?: string,
+): Promise<string>
 ```
 
 Encrypt what the watcher needs and the gateway must not have. The gateway
@@ -1160,10 +1181,10 @@ Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself
 | <a id="thunder-bridge-class-thunderbridge-mint"></a>`async mint(charge: Charge, options?: CreateOptions): Promise<MintedPayment>` | Ask the gateway for an invoice payable to the first address on your list that can issue a provable one, throws `NoWalletAvailableError` when none can and `GatewayCheatError` when what comes back is not what you asked for |
 | <a id="thunder-bridge-class-thunderbridge-quote"></a>`async quote(charge: Charge): Promise<Quote>` | Ask which address would serve an amount without minting anything, throws `NoWalletAvailableError` when none would |
 | <a id="thunder-bridge-class-thunderbridge-webhookkey"></a>`async webhookKey(): Promise<string>` | The key this gateway signs webhooks with when you registered none of your own |
-| <a id="thunder-bridge-class-thunderbridge-payment"></a>`async payment(id: string): Promise<Payment \| null>` | Read a payment back, null when the gateway has never heard of it |
+| <a id="thunder-bridge-class-thunderbridge-payment"></a>`async payment(held: Held): Promise<Payment \| null>` | Read a payment back, null when the gateway has never heard of it |
 | <a id="thunder-bridge-class-thunderbridge-payments"></a>`async payments(limit?: number): Promise<{ payments: Payment[]; scanned: number }>` | List what this gateway is watching, newest first |
-| <a id="thunder-bridge-class-thunderbridge-settled"></a>`async settled(id: string, options?: WaitOptions): Promise<Payment>` | Follow a payment over WebSocket until it is paid or expired, reconnecting through a drop |
-| <a id="thunder-bridge-class-thunderbridge-firstsettled"></a>`async firstSettled(ids: string[], options?: WaitOptions): Promise<Payment \| null>` | Wait on several payments and keep the first one that is really paid, then stop waiting on the losers, which closes their sockets |
+| <a id="thunder-bridge-class-thunderbridge-settled"></a>`async settled(held: Held, options?: WaitOptions): Promise<Payment>` | Follow a payment over WebSocket until it is paid or expired, reconnecting through a drop |
+| <a id="thunder-bridge-class-thunderbridge-firstsettled"></a>`async firstSettled(held: Held[], options?: WaitOptions): Promise<Payment \| null>` | Wait on several payments and keep the first one that is really paid, then stop waiting on the losers, which closes their sockets |
 | <a id="thunder-bridge-class-thunderbridge-watch"></a>`async watch(handover: Handover): Promise<Payment>` | Hand over an invoice you obtained yourself so the gateway watches it without being told the address or the amount |
 | <a id="thunder-bridge-class-thunderbridge-namefor"></a>`async nameFor(paymentHash: string): Promise<string \| null>` | What this payment is called, which you can work out before any gateway has heard of it |
 | <a id="thunder-bridge-class-thunderbridge-attend"></a>`attend(options: AttendOptions): () => void` | Hold a socket open and answer what the gateway asks about this caller's own payments, so a watch addressed to this caller settles without anybody hosting a URL |
@@ -1174,13 +1195,6 @@ Talks to a Thunder Bridge gateway and trusts it for nothing it can check itself
 
 ```ts
 interface ThunderBridgeOptions {
-  /**
-   * Prove every payment against the recipient's own server before handing it
-   * back, and refuse a reported settlement whose preimage does not hash to the
-   * payment hash, defaults to true
-   */
-  verify?: boolean;
-
   /**
    * Sent as `Authorization: Bearer`, which a gateway started with
    * `GATEWAY_TOKEN` requires on every call, the socket handshake included. No
@@ -1199,7 +1213,7 @@ interface ThunderBridgeOptions {
 }
 ```
 
-How this instance talks to one gateway, and how much of what it says to check
+How this instance talks to one gateway
 
 ### <a id="thunder-bridge-interface-ticketoptions"></a>TicketOptions
 
@@ -1288,7 +1302,11 @@ An LNURL-pay endpoint of your own: whose wallets it stands for, and what it char
 ### <a id="thunder-bridge-function-unseal"></a>unseal
 
 ```ts
-async function unseal(secret: string, sealed: string): Promise<string | null>
+async function unseal(
+	secret: string,
+	sealed: string,
+	paymentHash?: string,
+): Promise<string | null>
 ```
 
 Read a sealed blob back, null when it was sealed with another secret, edited
@@ -1418,9 +1436,9 @@ interface WebhookHandlers {
   onSettled?: (settlement: Proven<Settlement>) => void | Promise<void>;
 
   /**
-   * A delivery that carries no proof, so an expiry or a paid claim with no
-   * preimage behind it. Left unset, the handler answers `202` and does nothing,
-   * because acting on an unproven claim is the one thing this refuses to do
+   * A delivery that carries no proof, so an expiry. Left unset, the handler
+   * answers `202` and does nothing, because acting on an unproven claim is the
+   * one thing this refuses to do
    */
   onUnproven?: (settlement: Settlement) => void | Promise<void>;
 

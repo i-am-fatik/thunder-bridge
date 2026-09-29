@@ -107,7 +107,7 @@ describe("Gateways", () => {
     });
     vi.spyOn(gateways.each[2]!, "settled").mockRejectedValue(new Error("unreachable"));
 
-    const settled = await gateways.settled(await named());
+    const settled = await gateways.settled({ id: await named(), paymentHash: HASH });
     expect(settled.status).toBe("paid");
   });
 
@@ -124,7 +124,7 @@ describe("Gateways", () => {
       });
     }
 
-    expect((await gateways.settled(await named())).status).toBe("expired");
+    expect((await gateways.settled({ id: await named(), paymentHash: HASH })).status).toBe("expired");
   });
 
   it("throws when every gateway failed rather than reporting nothing happened", async () => {
@@ -135,7 +135,7 @@ describe("Gateways", () => {
       vi.spyOn(gateway, "settled").mockRejectedValue(new Error("unreachable"));
     }
 
-    await expect(gateways.settled(await named())).rejects.toThrow("unreachable");
+    await expect(gateways.settled({ id: await named(), paymentHash: HASH })).rejects.toThrow("unreachable");
   });
 
   it("refuses to be built with no gateway at all", () => {

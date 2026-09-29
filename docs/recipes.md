@@ -9,7 +9,7 @@ recipe below was found by the TypeScript compiler and links to its own entry in
 |---|---|---|
 | [A price named in dollars, paid in bitcoin](#fiat-checkout) | `rails.lightning` | Charge 0.21 USD without ever converting it yourself |
 | [A lightning address of your own](#pay-me) | `rails.lightning` | Print one QR that never expires and lets the payer choose what to give |
-| [Pick a wait back up after a reload](#resume-a-wait) | `rails.lightning` | Carry on waiting for an invoice you already minted, holding nothing but its id |
+| [Pick a wait back up after a reload](#resume-a-wait) | `rails.lightning` | Carry on waiting for an invoice you already minted, holding nothing but its id and its payment hash |
 | [Run the gateway in your own process](#run-a-gateway) | `gateway` | Keep a gateway inside a runtime you already have, on a unix socket, so nothing new needs hosting |
 | [Tip jar on a static page](#tip-jar) | `rails.lightning` | Take a tip with no backend of your own and no wallet of your own |
 | [Watch every payment made to one place](#watch-a-place) | `rails.lightning` | See the money arrive at an endpoint nobody is standing in front of |
@@ -83,33 +83,33 @@ export function payMe(
 
 ## <a id="resume-a-wait"></a>Pick a wait back up after a reload
 
-Carry on waiting for an invoice you already minted, holding nothing but its id. It lives in `examples/resume-a-wait/main.ts`, and what it claims is asserted in `examples/resume-a-wait/main.test.ts`.
+Carry on waiting for an invoice you already minted, holding nothing but its id and its payment hash. It lives in `examples/resume-a-wait/main.ts`, and what it claims is asserted in `examples/resume-a-wait/main.test.ts`.
 
-<pre><code>import { <a href="api.md#thunder-bridge-function-provesettlement">proveSettlement</a>, <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a> } from "thunder-bridge";
+<pre><code>import { type <a href="api.md#thunder-bridge-interface-held">Held</a>, <a href="api.md#thunder-bridge-function-provesettlement">proveSettlement</a>, <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a> } from "thunder-bridge";
 import { <a href="api.md#thunder-bridge-qr-function-invoicetosvg">invoiceToSvg</a> } from "thunder-bridge/qr";
 
 export const DEMO_GATEWAY = "https://public.thunder-bridge.agora.gripe";
 
 export async function resumeAWait(
   into: { innerHTML: string },
-  id: string,
+  held: <a href="api.md#thunder-bridge-interface-held">Held</a>,
   via = DEMO_GATEWAY,
 ): Promise&lt;string | null&gt; {
   const gateway = new <a href="api.md#thunder-bridge-class-thunderbridge">ThunderBridge</a>(via);
 
-  const asked = await gateway.<a href="api.md#thunder-bridge-class-thunderbridge-payment">payment</a>(id);
+  const asked = await gateway.<a href="api.md#thunder-bridge-class-thunderbridge-payment">payment</a>(held);
   if (asked?.<a href="api.md#thunder-bridge-interface-mintedpayment">kind</a> !== "minted") {
-    throw new Error(`${id} is not an invoice this gateway minted`);
+    throw new Error(`${held.<a href="api.md#thunder-bridge-interface-held">id</a>} is not an invoice this gateway minted`);
   }
 
   into.innerHTML = <a href="api.md#thunder-bridge-qr-function-invoicetosvg">invoiceToSvg</a>(asked.<a href="api.md#thunder-bridge-interface-mintedpayment">bolt11</a>);
 
-  await gateway.<a href="api.md#thunder-bridge-class-thunderbridge-settled">settled</a>(id);
+  await gateway.<a href="api.md#thunder-bridge-class-thunderbridge-settled">settled</a>(held);
 
   return await <a href="api.md#thunder-bridge-function-provesettlement">proveSettlement</a>(asked, { paidTo: [asked.<a href="api.md#thunder-bridge-interface-mintedpayment">lnAddress</a>], <a href="api.md#thunder-bridge-interface-mintedpayment">amountMsat</a>: asked.amountMsat });
 }</code></pre>
 
-- the id is the whole handle, so a page that reloads keeps nothing else
+- the id and the payment hash are the whole handle, so a page that reloads keeps nothing else, and the hash is what every answer is checked against
 - payment reads the invoice back and the QR redraws from its own bolt11
 - settled opens the socket again, so a payment made while nobody watched still arrives
 - the proof takes the invoice as it was read, because nothing it checks changes when the money lands

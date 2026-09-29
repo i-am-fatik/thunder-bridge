@@ -9,10 +9,14 @@ import {
   readSettlement,
   type WebhookCredential,
 } from "../src/webhook";
+import { bolt11 } from "./encode";
 
 const KEY = signingKeyFromSeed(new Uint8Array(32).fill(9));
 const OTHER = signingKeyFromSeed(new Uint8Array(32).fill(1));
 const HOOK = "https://app.example.com/hooks/thunder-bridge";
+
+const PREIMAGE = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f";
+const PREIMAGE_HASH = createHash("sha256").update(Buffer.from(PREIMAGE, "hex")).digest("hex");
 
 const PAYMENT: MintedPayment = {
   id: "pay_7f3c9d21",
@@ -20,9 +24,9 @@ const PAYMENT: MintedPayment = {
   lnAddress: "i_am_fatik@btcpay.3d3d.cz",
   amountMsat: 21000000,
   status: "paid",
-  paymentHash: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-  bolt11: "lnbc210000n1pjfillerinvoice",
-  preimage: "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+  paymentHash: PREIMAGE_HASH,
+  bolt11: bolt11({ paymentHash: PREIMAGE_HASH, amountMsat: 21000000 }),
+  preimage: PREIMAGE,
   expiresAt: 1754000600,
   createdAt: 1753999999,
   verifyUrl: "https://btcpay.3d3d.cz/lnurlp/verify/7f3c9d21",
@@ -275,12 +279,18 @@ describe("a delivery in the shape the gateway sends now", () => {
     expect(settled && carriesProof(settled)).toBe(true);
   });
 
-  it("does not prove itself when the preimage hashes to something else", async () => {
+  it("reads as nothing when the preimage hashes to something else, as a bad signature does", async () => {
     const lying = JSON.stringify({ ...JSON.parse(SETTLED), preimage: "ff".repeat(32) });
+    const bare = JSON.stringify({ ...JSON.parse(SETTLED), preimage: null });
 
-    const settled = await readSettlement(await delivery(lying), await published());
+    expect(await readSettlement(await delivery(lying), await published())).toBeNull();
+    expect(await readSettlement(await delivery(bare), await published())).toBeNull();
+  });
 
-    expect(settled && carriesProof(settled)).toBe(false);
+  it("reads a paid payment that does not prove itself as nothing too", async () => {
+    const lying = JSON.stringify({ ...JSON.parse(BODY), preimage: "ff".repeat(32) });
+
+    expect(await readPayment(await delivery(lying), await published())).toBeNull();
   });
 
   it("refuses a delivery missing any part of what would be acted on", async () => {

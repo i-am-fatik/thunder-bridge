@@ -53,7 +53,7 @@ export interface PaymentRequest {
    * unpaid or the wait is aborted. It follows a WebSocket and reconnects through
    * a drop, so this is one await rather than a poll.
    *
-   * `gateway.settled(id)` is the wider question and ends on an expiry too. This
+   * `gateway.settled(payment)` is the wider question and ends on an expiry too. This
    * one is about the payment that was asked for, and one that expired was never paid
    */
   paid(options?: WaitOptions): Promise<MintedPayment>;
@@ -88,7 +88,7 @@ export function paymentRequestOf(
     payment,
 
     paid: async (waiting?: WaitOptions) =>
-      paidOnly(await gateway.settled(payment.id, { ...waitingOf(options), ...waiting })),
+      paidOnly(await gateway.settled(payment, { ...waitingOf(options), ...waiting })),
 
     prove: () =>
       proveSettlement(payment, { paidTo: [payment.lnAddress], amountMsat: payment.amountMsat }),
@@ -99,7 +99,7 @@ export function paymentRequestOf(
       const signal = waiting.signal ? AbortSignal.any([stop.signal, waiting.signal]) : stop.signal;
 
       gateway
-        .settled(payment.id, { ...waiting, signal })
+        .settled(payment, { ...waiting, signal })
         .then((ended) => arrived(paidOnly(ended)))
         .catch((reason: unknown) => {
           if (!stop.signal.aborted) {

@@ -48,6 +48,16 @@ export interface WatchedPayment extends Reported {
 export type Payment = MintedPayment | WatchedPayment;
 
 /**
+ * A payment as the caller already knows it: what the gateway calls it and the
+ * hash it settles against. Every `Payment` is one, and a caller reading back
+ * after a restart builds one from the two fields it stored
+ */
+export interface Held {
+  id: string;
+  paymentHash: string;
+}
+
+/**
  * Who is paid and how much. `to` is a priority list when it is an array: the
  * gateway takes the first address that can issue a provable invoice for the
  * amount and the rest are the fallback

@@ -11,8 +11,9 @@ import {
   NoWalletAvailableError,
   PAYMENT_ALREADY_WATCHED,
   ProblemError,
+  UnverifiedRecipientError,
 } from "../src/errors";
-import type { MintedPayment, Payment } from "../src/types";
+import type { Held, MintedPayment, Payment } from "../src/types";
 import { bolt11 } from "./encode";
 import { jsonResponse, problemResponse, stubFetch, type FetchCall, type Routes } from "./harness";
 
@@ -60,6 +61,10 @@ function pendingPayment(overrides: Partial<MintedPayment> = {}): MintedPayment {
 
 function settledPayment(overrides: Partial<MintedPayment> = {}): MintedPayment {
   return pendingPayment({ status: "paid", preimage: PREIMAGE, ...overrides });
+}
+
+function held(id: string, paymentHash = PAYMENT_HASH): Held {
+  return { id, paymentHash };
 }
 
 function amount(msat: number): Record<string, unknown> {
@@ -327,6 +332,17 @@ describe("createPayment", () => {
     expect((rejection as GatewayCheatError).code).toBe("hash_mismatch");
   });
 
+  it("hands back no invoice when the recipient cannot be reached to prove it, whatever the caller wants", async () => {
+    stubFetch(gatewayMints(pendingPayment()));
+
+    const rejection = await new ThunderBridge(GATEWAY)
+      .mint({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) })
+      .catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(UnverifiedRecipientError);
+    expect((rejection as UnverifiedRecipientError).message).toContain(LN_ADDRESS);
+  });
+
   it("throws GatewayCheatError when the gateway chose an address that was never on the list", async () => {
     stubFetch({ ...gatewayMints(pendingPayment({ lnAddress: "mallory@evil.example" })) });
 
@@ -336,19 +352,6 @@ describe("createPayment", () => {
 
     expect(rejection).toBeInstanceOf(GatewayCheatError);
     expect((rejection as GatewayCheatError).code).toBe("address_not_requested");
-  });
-
-  it("hands back an unprovable payment without ever contacting the recipient when verification is off", async () => {
-    const unprovable = pendingPayment({ paymentHash: "ab".repeat(32) });
-    const calls = stubFetch({ ...gatewayMints(unprovable), ...recipientServing() });
-
-    const payment = await new ThunderBridge(GATEWAY, { verify: false }).mint({
-      paidTo: [LN_ADDRESS],
-      amount: msat(AMOUNT_MSAT),
-    });
-
-    expect(payment).toEqual(unprovable);
-    expect(calls.map((call) => call.url)).toEqual([`${GATEWAY}/incoming-payments`]);
   });
 
   it("turns a no-wallet-available problem into a NoWalletAvailableError keeping every wallet reason", async () => {
@@ -700,13 +703,108 @@ describe("webhookKey", () => {
   });
 });
 
+describe("a gateway that brings its own proof", () => {
+  const MADE_UP = "33".repeat(32);
+  const MADE_UP_HASH = sha256Hex(Buffer.from(MADE_UP, "hex"));
+
+  it("is refused on a read, because the pair it invented is not the hash the caller holds", async () => {
+    stubFetch({
+      [`${GATEWAY}/incoming-payments/pay_0001`]: () =>
+        jsonResponse(
+          wireOf(settledPayment({ preimage: MADE_UP, paymentHash: MADE_UP_HASH, bolt11: INVOICE })),
+        ),
+    });
+
+    const rejection = await new ThunderBridge(GATEWAY)
+      .payment(held("pay_0001"))
+      .catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(GatewayCheatError);
+    expect((rejection as GatewayCheatError).code).toBe("hash_mismatch");
+  });
+
+  it("is refused on a wait for the same reason", async () => {
+    const waiting = new ThunderBridge(GATEWAY).settled(held("pay_0001"));
+
+    theSocket().onmessage?.({
+      data: JSON.stringify(
+        wireOf(
+          settledPayment({
+            preimage: MADE_UP,
+            paymentHash: MADE_UP_HASH,
+            bolt11: bolt11({ paymentHash: MADE_UP_HASH, amountMsat: AMOUNT_MSAT }),
+          }),
+        ),
+      ),
+    });
+
+    await expect(waiting).rejects.toMatchObject({ code: "hash_mismatch" });
+  });
+
+  it("is refused when it answers about another payment than the one asked for", async () => {
+    stubFetch({
+      [`${GATEWAY}/incoming-payments/pay_0001`]: () =>
+        jsonResponse(wireOf(settledPayment({ id: "pay_0002" }))),
+    });
+
+    await expect(new ThunderBridge(GATEWAY).payment(held("pay_0001"))).rejects.toMatchObject({
+      code: "hash_mismatch",
+    });
+  });
+
+  it("gets no paid entry past a list without a preimage that proves it", async () => {
+    stubFetch({
+      [`${GATEWAY}/incoming-payments`]: () =>
+        jsonResponse({
+          payments: [
+            wireOf(settledPayment({ id: "pay_proven" })),
+            wireOf(settledPayment({ id: "pay_bare", preimage: null })),
+            wireOf(settledPayment({ id: "pay_lying", preimage: MADE_UP })),
+            wireOf(pendingPayment({ id: "pay_waiting" })),
+          ],
+          settled_scanned: 3,
+        }),
+    });
+
+    const { payments } = await new ThunderBridge(GATEWAY, { token: "an-operators" }).payments();
+
+    expect(payments.map((one) => one.id)).toEqual(["pay_proven", "pay_waiting"]);
+  });
+
+  it("is refused when it echoes a watch under a hash other than the one handed to it", async () => {
+    stubFetch({
+      [`${GATEWAY}/watched-payments`]: () =>
+        jsonResponse(
+          {
+            id: "watch_0001",
+            status: "pending",
+            payment_hash: MADE_UP_HASH,
+            verify_url: VERIFY_URL,
+            preimage: null,
+            expires_at: new Date(1_900_000_600 * 1000).toISOString(),
+            created_at: new Date(1_900_000_000 * 1000).toISOString(),
+          },
+          201,
+        ),
+    });
+
+    const rejection = await new ThunderBridge(GATEWAY)
+      .watch({ paymentHash: PAYMENT_HASH, verifyUrl: VERIFY_URL, expiresAt: 1_900_000_600 })
+      .catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(GatewayCheatError);
+    expect((rejection as GatewayCheatError).code).toBe("hash_mismatch");
+  });
+});
+
 describe("getPayment", () => {
   it("reads the payment back from the payment path with the id escaped", async () => {
     const calls = stubFetch({
-      [`${GATEWAY}/incoming-payments/pay%2F0001`]: () => jsonResponse(wireOf(pendingPayment())),
+      [`${GATEWAY}/incoming-payments/pay%2F0001`]: () =>
+        jsonResponse(wireOf(pendingPayment({ id: "pay/0001" }))),
     });
 
-    await new ThunderBridge(GATEWAY).payment("pay/0001");
+    await new ThunderBridge(GATEWAY).payment(held("pay/0001"));
 
     expect(calls.map((call) => call.url)).toEqual([`${GATEWAY}/incoming-payments/pay%2F0001`]);
   });
@@ -716,7 +814,7 @@ describe("getPayment", () => {
       [`${GATEWAY}/incoming-payments/pay_0001`]: () => problemResponse({ title: "Not Found" }, 404),
     });
 
-    await expect(new ThunderBridge(GATEWAY).payment("pay_0001")).resolves.toBeNull();
+    await expect(new ThunderBridge(GATEWAY).payment(held("pay_0001"))).resolves.toBeNull();
   });
 
   it("throws the problem document when the read fails for any reason other than not found", async () => {
@@ -726,7 +824,7 @@ describe("getPayment", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .payment("pay_0001")
+      .payment(held("pay_0001"))
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(ProblemError);
@@ -738,7 +836,7 @@ describe("getPayment", () => {
     const settled = settledPayment();
     stubFetch({ [`${GATEWAY}/incoming-payments/pay_0001`]: () => jsonResponse(wireOf(settled)) });
 
-    await expect(new ThunderBridge(GATEWAY).payment("pay_0001")).resolves.toEqual(settled);
+    await expect(new ThunderBridge(GATEWAY).payment(held("pay_0001"))).resolves.toEqual(settled);
   });
 
   it("throws GatewayCheatError preimage_mismatch when a reported settlement does not hash to the payment hash", async () => {
@@ -748,7 +846,7 @@ describe("getPayment", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .payment("pay_0001")
+      .payment(held("pay_0001"))
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(GatewayCheatError);
@@ -763,26 +861,17 @@ describe("getPayment", () => {
     });
 
     const rejection = await new ThunderBridge(GATEWAY)
-      .payment("pay_0001")
+      .payment(held("pay_0001"))
       .catch((error: unknown) => error);
 
     expect(rejection).toBeInstanceOf(GatewayCheatError);
     expect((rejection as GatewayCheatError).code).toBe("preimage_mismatch");
   });
-
-  it("returns a settlement with an unmatched preimage as it stands when verification is off", async () => {
-    const lying = settledPayment({ preimage: "22".repeat(32) });
-    stubFetch({ [`${GATEWAY}/incoming-payments/pay_0001`]: () => jsonResponse(wireOf(lying)) });
-
-    const payment = await new ThunderBridge(GATEWAY, { verify: false }).payment("pay_0001");
-
-    expect(payment).toEqual(lying);
-  });
 });
 
 describe("waitForPayment", () => {
   it("follows the payment over the websocket scheme of the base URL with the id escaped", () => {
-    const waiting = track(new ThunderBridge(`${GATEWAY}/`).settled("pay/0001"));
+    const waiting = track(new ThunderBridge(`${GATEWAY}/`).settled(held("pay/0001")));
 
     expect(theSocket().url).toBe("wss://gateway.example.net/ws/incoming-payments/pay%2F0001");
     expect(waiting.outcomes).toEqual([]);
@@ -790,7 +879,7 @@ describe("waitForPayment", () => {
 
   it("resolves with the payment as soon as a paid frame arrives", async () => {
     const settled = settledPayment();
-    const waiting = new ThunderBridge(GATEWAY).settled("pay_0001");
+    const waiting = new ThunderBridge(GATEWAY).settled(held("pay_0001"));
 
     theSocket().deliver(settled);
 
@@ -799,7 +888,7 @@ describe("waitForPayment", () => {
 
   it("resolves when the payment expires", async () => {
     const expired = pendingPayment({ status: "expired" });
-    const waiting = new ThunderBridge(GATEWAY).settled("pay_0001");
+    const waiting = new ThunderBridge(GATEWAY).settled(held("pay_0001"));
 
     theSocket().deliver(expired);
 
@@ -808,7 +897,7 @@ describe("waitForPayment", () => {
 
   it("keeps waiting through pending frames and settles only on the terminal one", async () => {
     const settled = settledPayment();
-    const waiting = track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     theSocket().deliver(pendingPayment());
     theSocket().deliver(pendingPayment({ expiresAt: 1_900_000_900 }));
@@ -823,7 +912,7 @@ describe("waitForPayment", () => {
   });
 
   it("closes the socket itself once it has what it was waiting for", async () => {
-    const waiting = track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     theSocket().deliver(settledPayment());
     await drainMicrotasks();
@@ -834,7 +923,7 @@ describe("waitForPayment", () => {
 
   it("settles exactly once when the server closes the socket right after the terminal frame", async () => {
     const settled = settledPayment();
-    const waiting = track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     theSocket().deliver(settled);
     theSocket().closeFromServer();
@@ -848,7 +937,7 @@ describe("waitForPayment", () => {
   it("rejects as soon as the abort signal fires and stops listening to the socket", async () => {
     const controller = new AbortController();
     const waiting = track(
-      new ThunderBridge(GATEWAY).settled("pay_0001", { signal: controller.signal }),
+      new ThunderBridge(GATEWAY).settled(held("pay_0001"), { signal: controller.signal }),
     );
 
     controller.abort();
@@ -863,7 +952,7 @@ describe("waitForPayment", () => {
     const controller = new AbortController();
     const settled = settledPayment();
     const waiting = track(
-      new ThunderBridge(GATEWAY).settled("pay_0001", { signal: controller.signal }),
+      new ThunderBridge(GATEWAY).settled(held("pay_0001"), { signal: controller.signal }),
     );
 
     theSocket().deliver(settled);
@@ -875,20 +964,11 @@ describe("waitForPayment", () => {
   });
 
   it("rejects with GatewayCheatError when the paid frame carries a preimage that does not hash", async () => {
-    const waiting = new ThunderBridge(GATEWAY).settled("pay_0001");
+    const waiting = new ThunderBridge(GATEWAY).settled(held("pay_0001"));
 
     theSocket().deliver(settledPayment({ preimage: "22".repeat(32) }));
 
     await expect(waiting).rejects.toBeInstanceOf(GatewayCheatError);
-  });
-
-  it("accepts a paid frame with an unmatched preimage when verification is off", async () => {
-    const lying = settledPayment({ preimage: "22".repeat(32) });
-    const waiting = new ThunderBridge(GATEWAY, { verify: false }).settled("pay_0001");
-
-    theSocket().deliver(lying);
-
-    await expect(waiting).resolves.toEqual(lying);
   });
 });
 
@@ -899,7 +979,7 @@ describe("firstToSettle", () => {
   }
 
   it("opens one socket per leg", () => {
-    track(new ThunderBridge(GATEWAY).firstSettled(["bank_01", "ln_01"]));
+    track(new ThunderBridge(GATEWAY).firstSettled([held("bank_01"), held("ln_01")]));
 
     expect(legs().map((socket) => socket.url)).toEqual([
       "wss://gateway.example.net/ws/incoming-payments/bank_01",
@@ -909,7 +989,7 @@ describe("firstToSettle", () => {
 
   it("keeps the leg that was paid and stops waiting on the other", async () => {
     const paid = settledPayment({ id: "bank_01" });
-    const winner = new ThunderBridge(GATEWAY).firstSettled(["bank_01", "ln_01"]);
+    const winner = new ThunderBridge(GATEWAY).firstSettled([held("bank_01"), held("ln_01")]);
 
     legs()[0].deliver(paid);
 
@@ -919,8 +999,8 @@ describe("firstToSettle", () => {
   });
 
   it("waits on the rest when a leg only expires, because an expiry is a loser", async () => {
-    const paid = settledPayment({ id: "ln_01" });
-    const winner = track(new ThunderBridge(GATEWAY).firstSettled(["bank_01", "ln_01"]));
+    const paid = settledPayment({ id: "bank_01" });
+    const winner = track(new ThunderBridge(GATEWAY).firstSettled([held("bank_01"), held("ln_01")]));
 
     legs()[1].deliver(pendingPayment({ id: "ln_01", status: "expired" }));
     await drainMicrotasks();
@@ -934,7 +1014,7 @@ describe("firstToSettle", () => {
   });
 
   it("answers null when every leg ended unpaid", async () => {
-    const winner = new ThunderBridge(GATEWAY).firstSettled(["bank_01", "ln_01"]);
+    const winner = new ThunderBridge(GATEWAY).firstSettled([held("bank_01"), held("ln_01")]);
 
     legs()[0].deliver(pendingPayment({ id: "bank_01", status: "expired" }));
     legs()[1].deliver(pendingPayment({ id: "ln_01", status: "expired" }));
@@ -950,7 +1030,7 @@ describe("firstToSettle", () => {
 
   it("surfaces a refusal only when it cost the last leg", async () => {
     const paid = settledPayment({ id: "ln_01" });
-    const winner = new ThunderBridge(GATEWAY).firstSettled(["bank_01", "ln_01"]);
+    const winner = new ThunderBridge(GATEWAY).firstSettled([held("bank_01"), held("ln_01")]);
 
     legs()[0].onmessage?.({ data: "not json at all" });
     legs()[1].deliver(paid);
@@ -959,7 +1039,7 @@ describe("firstToSettle", () => {
   });
 
   it("throws what refused when no leg was paid", async () => {
-    const winner = new ThunderBridge(GATEWAY).firstSettled(["bank_01", "ln_01"]);
+    const winner = new ThunderBridge(GATEWAY).firstSettled([held("bank_01"), held("ln_01")]);
 
     legs()[0].onmessage?.({ data: "not json at all" });
     legs()[1].deliver(pendingPayment({ id: "ln_01", status: "expired" }));
@@ -986,7 +1066,7 @@ describe("waitForPayment through a dropped socket", () => {
 
   it("reconnects after a drop and settles on the frame the next socket replays", async () => {
     const settled = settledPayment();
-    const waiting = track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     lastSocket().deliver(pendingPayment());
     lastSocket().closeFromServer();
@@ -1001,7 +1081,7 @@ describe("waitForPayment through a dropped socket", () => {
   });
 
   it("gives up after a few tries when no frame ever arrives, rather than hammering a wrong id", async () => {
-    const waiting = track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     for (let round = 0; round < 8; round += 1) {
       lastSocket().breakConnection();
@@ -1014,7 +1094,7 @@ describe("waitForPayment through a dropped socket", () => {
   });
 
   it("stops reconnecting once the payment's own expiry has passed", async () => {
-    const waiting = track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     lastSocket().deliver(pendingPayment({ expiresAt: 1_000_000 }));
     lastSocket().closeFromServer();
@@ -1028,7 +1108,7 @@ describe("waitForPayment through a dropped socket", () => {
   it("opens no further socket when aborted during the wait between tries", async () => {
     const controller = new AbortController();
     const waiting = track(
-      new ThunderBridge(GATEWAY).settled("pay_0001", { signal: controller.signal }),
+      new ThunderBridge(GATEWAY).settled(held("pay_0001"), { signal: controller.signal }),
     );
 
     lastSocket().closeFromServer();
@@ -1044,7 +1124,7 @@ describe("waitForPayment through a dropped socket", () => {
       [`${GATEWAY}/ws-tickets`]: () =>
         jsonResponse({ ticket: "1.p.abc.9.ff.mac", expires_at: new Date(Date.now() + 60_000).toISOString() }),
     });
-    track(new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }).settled("pay_0001"));
+    track(new ThunderBridge(GATEWAY, { token: TOKEN }).settled(held("pay_0001")));
     await vi.advanceTimersByTimeAsync(0);
 
     lastSocket().deliver(pendingPayment());
@@ -1057,7 +1137,7 @@ describe("waitForPayment through a dropped socket", () => {
 
   it("waits from the first delay again after each frame, not from a growing one", async () => {
     const firstWaitMs = 3_000;
-    track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     for (let round = 0; round < 3; round += 1) {
       lastSocket().deliver(pendingPayment());
@@ -1070,7 +1150,7 @@ describe("waitForPayment through a dropped socket", () => {
 
   it("keeps trying when the gateway is too dead to even mint a ticket", async () => {
     const calls = stubFetch({});
-    const waiting = track(new ThunderBridge(GATEWAY, { token: TOKEN }).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY, { token: TOKEN }).settled(held("pay_0001")));
 
     for (let round = 0; round < 8; round += 1) await vi.advanceTimersByTimeAsync(LONGEST_WAIT_MS);
 
@@ -1084,7 +1164,7 @@ describe("waitForPayment through a dropped socket", () => {
       [`${GATEWAY}/ws-tickets`]: () => problemResponse({ title: "Unauthorized" }, 401),
     });
     const waiting = track(
-      new ThunderBridge(GATEWAY, { token: "the-wrong-one" }).settled("pay_0001"),
+      new ThunderBridge(GATEWAY, { token: "the-wrong-one" }).settled(held("pay_0001")),
     );
 
     await vi.advanceTimersByTimeAsync(LONGEST_WAIT_MS);
@@ -1093,7 +1173,7 @@ describe("waitForPayment through a dropped socket", () => {
   });
 
   it("keeps checking the preimage on a socket it reconnected, not only the first one", async () => {
-    const waiting = track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     lastSocket().deliver(pendingPayment());
     lastSocket().closeFromServer();
@@ -1129,7 +1209,7 @@ describe("what the client will not take on faith", () => {
   });
 
   it("rejects at once when the abort signal has already fired, without opening a socket", async () => {
-    const waiting = new ThunderBridge(GATEWAY).settled("pay_0001", {
+    const waiting = new ThunderBridge(GATEWAY).settled(held("pay_0001"), {
       signal: AbortSignal.abort(),
     });
 
@@ -1138,7 +1218,7 @@ describe("what the client will not take on faith", () => {
   });
 
   it("rejects rather than hanging when the socket delivers something that is not JSON", async () => {
-    const waiting = track(new ThunderBridge(GATEWAY).settled("pay_0001"));
+    const waiting = track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     theSocket().onmessage?.({ data: "<html>502 Bad Gateway</html>" });
     await drainMicrotasks();
@@ -1154,7 +1234,7 @@ describe("what the client will not take on faith", () => {
     });
 
     const refusal = await new ThunderBridge(GATEWAY)
-      .payment("pay_0001")
+      .payment(held("pay_0001"))
       .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(ProblemError);
@@ -1231,7 +1311,7 @@ describe("follow", () => {
 
   function following(options: Partial<Parameters<ThunderBridge["follow"]>[1]> = {}) {
     const seen: Payment[] = [];
-    const stop = new ThunderBridge(GATEWAY, { verify: false }).follow(WATCH_SECRET, {
+    const stop = new ThunderBridge(GATEWAY).follow(WATCH_SECRET, {
       onPayment: (payment) => seen.push(payment),
       reconnectDelayMs: 0,
       ...options,
@@ -1330,11 +1410,11 @@ describe("a private gateway", () => {
       [`${GATEWAY}/incoming-payments/pay_0001`]: () => jsonResponse(wireOf(pendingPayment())),
       ...recipientServing(),
     });
-    const gateway = new ThunderBridge(GATEWAY, { token: TOKEN, verify: false });
+    const gateway = new ThunderBridge(GATEWAY, { token: TOKEN });
 
     await gateway.mint({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)});
     await gateway.quote({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT)});
-    await gateway.payment("pay_0001");
+    await gateway.payment(held("pay_0001"));
 
     const toGateway = calls.filter((call) => call.url.startsWith(GATEWAY));
     expect(toGateway).toHaveLength(3);
@@ -1346,7 +1426,7 @@ describe("a private gateway", () => {
   it("sends no authorization at all when no token was configured", async () => {
     const calls = stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
 
-    await new ThunderBridge(GATEWAY, { verify: false }).mint({
+    await new ThunderBridge(GATEWAY).mint({
       paidTo: [LN_ADDRESS],
       amount: msat(AMOUNT_MSAT),
     });
@@ -1363,7 +1443,7 @@ describe("a private gateway", () => {
         }),
     });
 
-    const listed = await new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }).payments(
+    const listed = await new ThunderBridge(GATEWAY, { token: TOKEN }).payments(
       10,
     );
 
@@ -1399,7 +1479,7 @@ describe("followTrigger with tickets", () => {
 
   it("puts a ticket in the socket URL and never the secret", async () => {
     minting();
-    const stop = new ThunderBridge(GATEWAY, { verify: false }).follow(WATCH_SECRET, {
+    const stop = new ThunderBridge(GATEWAY).follow(WATCH_SECRET, {
       onPayment: () => {},
       tickets: true,
     });
@@ -1412,7 +1492,7 @@ describe("followTrigger with tickets", () => {
 
   it("trades for a ticket whenever it signs, since a gateway that knows its clients opens nothing else", async () => {
     minting();
-    const stop = new ThunderBridge(GATEWAY, { verify: false, secret: "rail_signing_7c1e4b2a9d" }).follow(
+    const stop = new ThunderBridge(GATEWAY, { secret: "rail_signing_7c1e4b2a9d" }).follow(
       WATCH_SECRET,
       { onPayment: () => {} },
     );
@@ -1425,7 +1505,7 @@ describe("followTrigger with tickets", () => {
 
   it("asks for the ticket with the secret in the body, where logs do not reach", async () => {
     const calls = minting();
-    const stop = new ThunderBridge(GATEWAY, { verify: false }).follow(WATCH_SECRET, {
+    const stop = new ThunderBridge(GATEWAY).follow(WATCH_SECRET, {
       onPayment: () => {},
       tickets: true,
     });
@@ -1438,7 +1518,7 @@ describe("followTrigger with tickets", () => {
 
   it("puts the replay it wants in the ticket request, since a ticket URL carries nothing else", async () => {
     const calls = minting();
-    const stop = new ThunderBridge(GATEWAY, { verify: false }).follow(WATCH_SECRET, {
+    const stop = new ThunderBridge(GATEWAY).follow(WATCH_SECRET, {
       onPayment: () => {},
       tickets: true,
       replay: 25,
@@ -1451,7 +1531,7 @@ describe("followTrigger with tickets", () => {
 
   it("mints a fresh ticket for every reconnect, because a minute-old one is expired", async () => {
     const calls = minting();
-    const stop = new ThunderBridge(GATEWAY, { verify: false }).follow(WATCH_SECRET, {
+    const stop = new ThunderBridge(GATEWAY).follow(WATCH_SECRET, {
       onPayment: () => {},
       tickets: true,
       reconnectDelayMs: 0,
@@ -1472,7 +1552,7 @@ describe("followTrigger with tickets", () => {
     minting({
       [`${GATEWAY}/ws-tickets`]: () => problemResponse({ title: "Unauthorized" }, 401),
     });
-    const stop = new ThunderBridge(GATEWAY, { verify: false }).follow(WATCH_SECRET, {
+    const stop = new ThunderBridge(GATEWAY).follow(WATCH_SECRET, {
       onPayment: () => {},
       onError: (error) => errors.push(error),
       tickets: true,
@@ -1487,7 +1567,7 @@ describe("followTrigger with tickets", () => {
 
   it("opens no socket when stopped while the ticket was still being minted", async () => {
     minting();
-    const stop = new ThunderBridge(GATEWAY, { verify: false }).follow(WATCH_SECRET, {
+    const stop = new ThunderBridge(GATEWAY).follow(WATCH_SECRET, {
       onPayment: () => {},
       tickets: true,
     });
@@ -1512,7 +1592,7 @@ describe("waitForPayment with tickets", () => {
   it("puts a ticket in the socket URL and never the payment id", async () => {
     minting();
     const waiting = track(
-      new ThunderBridge(GATEWAY, { verify: false }).settled("pay_0001", { tickets: true }),
+      new ThunderBridge(GATEWAY).settled(held("pay_0001"), { tickets: true }),
     );
     await drainMicrotasks();
 
@@ -1523,7 +1603,7 @@ describe("waitForPayment with tickets", () => {
   it("asks for the ticket with the payment id in the body, where logs do not reach", async () => {
     const calls = minting();
     track(
-      new ThunderBridge(GATEWAY, { verify: false }).settled("pay_0001", { tickets: true }),
+      new ThunderBridge(GATEWAY).settled(held("pay_0001"), { tickets: true }),
     );
     await drainMicrotasks();
 
@@ -1533,7 +1613,7 @@ describe("waitForPayment with tickets", () => {
 
   it("tickets by itself once a token is set, because no socket can carry a header", async () => {
     const calls = minting();
-    track(new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }).settled("pay_0001"));
+    track(new ThunderBridge(GATEWAY, { token: TOKEN }).settled(held("pay_0001")));
     await drainMicrotasks();
 
     expect(theSocket().url).toBe(`wss://gateway.example.net/ws/tickets/${TICKET}`);
@@ -1542,7 +1622,7 @@ describe("waitForPayment with tickets", () => {
 
   it("does the same for followTrigger, so the two behave alike on a private gateway", async () => {
     minting();
-    const stop = new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }).follow(
+    const stop = new ThunderBridge(GATEWAY, { token: TOKEN }).follow(
       "the-overlay-holds-this",
       { onPayment: () => {} },
     );
@@ -1555,7 +1635,7 @@ describe("waitForPayment with tickets", () => {
   it("rejects the wait when the mint is refused, rather than waiting on a socket it never opened", async () => {
     minting({ [`${GATEWAY}/ws-tickets`]: () => problemResponse({ title: "Unauthorized" }, 401) });
     const waiting = track(
-      new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }).settled("pay_0001"),
+      new ThunderBridge(GATEWAY, { token: TOKEN }).settled(held("pay_0001")),
     );
     await drainMicrotasks();
 
@@ -1568,7 +1648,7 @@ describe("waitForPayment with tickets", () => {
     minting();
     const controller = new AbortController();
     const waiting = track(
-      new ThunderBridge(GATEWAY, { token: TOKEN, verify: false }).settled("pay_0001", {
+      new ThunderBridge(GATEWAY, { token: TOKEN }).settled(held("pay_0001"), {
         signal: controller.signal,
       }),
     );
@@ -1581,7 +1661,7 @@ describe("waitForPayment with tickets", () => {
 
   it("mints nothing on a public gateway, where the id in the path is the capability", async () => {
     const calls = minting();
-    track(new ThunderBridge(GATEWAY, { verify: false }).settled("pay_0001"));
+    track(new ThunderBridge(GATEWAY).settled(held("pay_0001")));
 
     expect(theSocket().url).toBe("wss://gateway.example.net/ws/incoming-payments/pay_0001");
     expect(calls).toHaveLength(0);
@@ -1866,7 +1946,7 @@ describe("a payment the gateway only watches", () => {
   it("reads back with payment, which asks for no address and no invoice", async () => {
     stubFetch({ [`${GATEWAY}/incoming-payments/${WATCHED}`]: () => jsonResponse(blindWire()) });
 
-    const watched = await new ThunderBridge(GATEWAY).payment(WATCHED);
+    const watched = await new ThunderBridge(GATEWAY).payment(held(WATCHED, HASH));
 
     expect(watched?.id).toBe(WATCHED);
     expect(watched?.lnAddress).toBeNull();
@@ -1879,7 +1959,7 @@ describe("a payment the gateway only watches", () => {
         problemResponse({ title: "Not Found" }, 404),
     });
 
-    expect(await new ThunderBridge(GATEWAY).payment(WATCHED)).toBeNull();
+    expect(await new ThunderBridge(GATEWAY).payment(held(WATCHED, HASH))).toBeNull();
   });
 
   it("refuses a settlement whose preimage does not hash to the payment hash", async () => {
@@ -1888,7 +1968,7 @@ describe("a payment the gateway only watches", () => {
         jsonResponse(blindWire({ status: "paid", preimage: "11".repeat(32) })),
     });
 
-    await expect(new ThunderBridge(GATEWAY).payment(WATCHED)).rejects.toBeInstanceOf(
+    await expect(new ThunderBridge(GATEWAY).payment(held(WATCHED, HASH))).rejects.toBeInstanceOf(
       GatewayCheatError,
     );
   });
@@ -1896,13 +1976,13 @@ describe("a payment the gateway only watches", () => {
   it("reads through the one method a minted payment reads through, with nulls where it was told nothing", async () => {
     stubFetch({ [`${GATEWAY}/incoming-payments/${WATCHED}`]: () => jsonResponse(blindWire()) });
 
-    const watched = await new ThunderBridge(GATEWAY).payment(WATCHED);
+    const watched = await new ThunderBridge(GATEWAY).payment(held(WATCHED, HASH));
 
     expect(watched).toMatchObject({ id: WATCHED, kind: "watched", bolt11: null });
   });
 
   it("settles on the socket the way a minted one does", async () => {
-    const waiting = new ThunderBridge(GATEWAY).settled(WATCHED);
+    const waiting = new ThunderBridge(GATEWAY).settled(held(WATCHED, HASH));
 
     theSocket().onmessage?.({
       data: JSON.stringify(blindWire({ status: "paid", preimage: PREIMAGE_FOR })),
@@ -1914,7 +1994,7 @@ describe("a payment the gateway only watches", () => {
   });
 
   it("ends on an expiry rather than throwing, because that is news and not a fault", async () => {
-    const waiting = new ThunderBridge(GATEWAY).settled(WATCHED);
+    const waiting = new ThunderBridge(GATEWAY).settled(held(WATCHED, HASH));
 
     theSocket().onmessage?.({ data: JSON.stringify(blindWire({ status: "expired" })) });
 
@@ -1922,7 +2002,7 @@ describe("a payment the gateway only watches", () => {
   });
 
   it("wins a two-rail race without an address or an invoice", async () => {
-    const winning = new ThunderBridge(GATEWAY).firstSettled([WATCHED, "ln_01"]);
+    const winning = new ThunderBridge(GATEWAY).firstSettled([held(WATCHED, HASH), held("ln_01")]);
 
     FakeSocket.opened[0].onmessage?.({
       data: JSON.stringify(blindWire({ status: "paid", preimage: PREIMAGE_FOR })),
@@ -1976,9 +2056,10 @@ describe("a client that names itself", () => {
   it("signs a create the way the gateway reads it, path and body and all", async () => {
     const calls = stubFetch({
       [`${GATEWAY}/incoming-payments`]: () => jsonResponse(wireOf(pendingPayment()), 201),
+      ...recipientServing(),
     });
 
-    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).mint({
+    await new ThunderBridge(GATEWAY, { secret: SECRET }).mint({
       paidTo: [LN_ADDRESS],
       amount: msat(AMOUNT_MSAT),
     });
@@ -2000,7 +2081,7 @@ describe("a client that names itself", () => {
         jsonResponse({ payments: [], settled_scanned: 0 }),
     });
 
-    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).payments(10);
+    await new ThunderBridge(GATEWAY, { secret: SECRET }).payments(10);
 
     expect(await callerOf(headersOf(calls[0]), "GET", "/incoming-payments?limit=10", "")).toBe(
       (await callerKey(SECRET)).publicKeyHex,
@@ -2014,7 +2095,7 @@ describe("a client that names itself", () => {
         jsonResponse({ payments: [], settled_scanned: 0 }),
     });
 
-    await new ThunderBridge(GATEWAY, { secret: SECRET, verify: false }).payments(10);
+    await new ThunderBridge(GATEWAY, { secret: SECRET }).payments(10);
 
     const headers = headersOf(calls[0]);
     for (const name of ["x-client-key", "x-signature", "x-timestamp", "authorization"]) {
@@ -2028,7 +2109,7 @@ describe("a client that names itself", () => {
         jsonResponse({ payments: [], settled_scanned: 0 }),
     });
 
-    await new ThunderBridge(GATEWAY, { verify: false }).payments(10);
+    await new ThunderBridge(GATEWAY).payments(10);
 
     expect(headersOf(calls[0]).get("x-signature")).toBeNull();
     expect(headersOf(calls[0]).get("x-client-key")).toBeNull();

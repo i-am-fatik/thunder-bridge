@@ -27,8 +27,10 @@ export interface Order {
 
 /** One way to pay one order, already registered with the gateway */
 export interface Leg {
-  /** The watched payment's id, which is what `firstSettled`, `payment` and `settled` take */
+  /** The watched payment's id, which with `paymentHash` is what `firstSettled`, `payment` and `settled` take */
   id: string;
+
+  paymentHash: string;
 
   /** Which rail made it, so a shop can label a leg without knowing how it was built */
   rail: string;
@@ -155,6 +157,7 @@ export function bankRail(gateway: ThunderBridge, config: BankRailConfig): Rail {
 
     return {
       id: transfer.id,
+      paymentHash: transfer.paymentHash,
       rail: config.name ?? BANK,
       scan: transfer.spd,
       qr: transfer.spd,
@@ -185,6 +188,7 @@ export function lightningRail(gateway: ThunderBridge, config: LightningRailConfi
 
     return {
       id: payment.id,
+      paymentHash: payment.paymentHash,
       rail: config.name ?? LIGHTNING,
       scan: payment.bolt11,
       qr: toLightningUri(payment.bolt11),
@@ -225,6 +229,7 @@ export function blindLightningRail(gateway: ThunderBridge, config: BlindLightnin
 
     return {
       id: watched.id,
+      paymentHash: resolved.paymentHash,
       rail: config.name ?? LIGHTNING,
       scan: resolved.bolt11,
       qr: toLightningUri(resolved.bolt11),

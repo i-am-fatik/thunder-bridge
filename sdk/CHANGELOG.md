@@ -39,6 +39,24 @@ verify query and its preimage both changed, and an in-flight transfer raised by
 
 ### Changed
 
+- `payment`, `settled`, `firstSettled` and `Gateways.settled` take the payment you
+  hold, a `Held` of `{ id, paymentHash }`, rather than its id. Every `Payment` is
+  one, a `Leg` now carries its `paymentHash` so it is one too, and a caller reading
+  back after a restart passes the two fields it stored. An answer naming another
+  payment or another hash, or claiming paid with a preimage that does not hash to
+  the one held, throws `GatewayCheatError` with `hash_mismatch` or
+  `preimage_mismatch`, so a gateway can no longer mark an order paid with a pair it
+  invented.
+- The `verify` option is gone. Every mint is proved against the recipient's own
+  server and every settlement against the hash the caller holds, and a recipient
+  that cannot be reached throws `UnverifiedRecipientError` before any invoice is
+  handed back.
+- `payments()` leaves out an entry reported paid without a preimage that proves it,
+  `watch` refuses a gateway that echoes the watch under another hash, and
+  `bankTransfer` returns the hash it derived rather than the one the gateway echoed.
+- `readSettlement`, `readPayment` and `serve.webhook` treat a signed delivery that
+  claims paid without proving it the way they treat a bad signature, so
+  `onUnproven` now hears only about expiries.
 - The bank verify query is one sealed blob. `ref`, `minor`, `cc` and `sig` are gone
   and `q` carries all four encrypted under the rail secret, so a watch tells the
   gateway neither the amount, the reference nor the account. Being able to write a

@@ -2,7 +2,7 @@ import { vi } from "vitest";
 
 import type { Send } from "../../core/outbound.js";
 
-export type Routes = Record<string, () => Response>;
+export type Routes = Record<string, (init?: RequestInit) => Response>;
 
 export interface FetchCall {
   url: string;
@@ -32,7 +32,7 @@ export function stubFetch(routes: Routes): FetchCall[] {
       calls.push({ url, init });
       const route = routes[url];
       if (route === undefined) throw new Error(`nothing is mounted at ${url}`);
-      return route();
+      return route(init);
     }),
   );
   return calls;

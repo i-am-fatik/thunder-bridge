@@ -54,7 +54,7 @@ for (let attempt = 1; ; attempt++) {
 		process.exit(2);
 	}
 
-	const seen = await watching.payment(leg.id).catch(() => null);
+	const seen = await watching.payment(leg).catch(() => null);
 	console.log(`  ${attempt}  ${seen?.status ?? "unreachable"}`);
 
 	if (seen?.preimage) {

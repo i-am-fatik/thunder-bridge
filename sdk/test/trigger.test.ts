@@ -42,6 +42,15 @@ function amount(msat: number): Record<string, unknown> {
 
 function gatewayServing(overrides: Record<string, unknown> = {}): Routes {
   return {
+    "https://coinos.io/.well-known/lnurlp/alice": () =>
+      jsonResponse({
+        tag: "payRequest",
+        callback: "https://coinos.io/api/lnurl/pay/alice",
+        metadata: METADATA,
+        minSendable: 1_000,
+        maxSendable: 100_000_000,
+      }),
+    "https://coinos.io/api/lnurl/verify/1a2b": () => jsonResponse({ settled: false, pr: INVOICE }),
     [`${GATEWAY}/quotes`]: () =>
       jsonResponse({
         ln_address: WINNER,
@@ -73,7 +82,7 @@ function gatewayServing(overrides: Record<string, unknown> = {}): Routes {
 }
 
 function endpoint(overrides: Partial<TriggerConfig> = {}) {
-  return lnurlPayEndpoint(new ThunderBridge(GATEWAY, { verify: false }), {
+  return lnurlPayEndpoint(new ThunderBridge(GATEWAY), {
     send: throughFetch,
     paidTo: [FALLBACK, WINNER],
     amount: () => msat(AMOUNT_MSAT),
@@ -575,7 +584,7 @@ describe("the watch ticket endpoints, which trade the secret for a pass that exp
   }
 
   function owner(): ThunderBridge {
-    return new ThunderBridge(GATEWAY, { token: TOKEN, verify: false });
+    return new ThunderBridge(GATEWAY, { token: TOKEN });
   }
 
   function board(replay?: number): WatchTicketConfig {
@@ -651,7 +660,7 @@ describe("a trigger a payer chooses the amount on", () => {
   }
 
   function jar(least: number, most: number) {
-    return lnurlPayEndpoint(new ThunderBridge(GATEWAY, { verify: false }), {
+    return lnurlPayEndpoint(new ThunderBridge(GATEWAY), {
     send: throughFetch,
       paidTo: [FALLBACK, WINNER],
       amount: { least: msat(least), most: msat(most) },
@@ -669,7 +678,31 @@ describe("a trigger a payer chooses the amount on", () => {
   });
 
   it("mints exactly what the payer asked for inside the range", async () => {
-    const calls = stubFetch(gatewayServing());
+    const asked = bolt11({
+      paymentHash: PAYMENT_HASH,
+      amountMsat: 50_000,
+      descriptionHash: sha256Hex(METADATA),
+    });
+    const calls = stubFetch({
+      ...gatewayServing(),
+      [`${GATEWAY}/incoming-payments`]: () =>
+        jsonResponse(
+          {
+            id: "pay_0001",
+            ln_address: WINNER,
+            incoming_amount: amount(50_000),
+            status: "pending",
+            bolt11: asked,
+            payment_hash: PAYMENT_HASH,
+            verify_url: "https://coinos.io/api/lnurl/verify/1a2b",
+            preimage: null,
+            expires_at: new Date(1_900_000_600 * 1000).toISOString(),
+            created_at: new Date(1_900_000_000 * 1000).toISOString(),
+          },
+          201,
+        ),
+      "https://coinos.io/api/lnurl/verify/1a2b": () => jsonResponse({ settled: false, pr: asked }),
+    });
     const handler = jar(1_000, 1_000_000);
     const callback = await callbackFor(handler);
     callback.searchParams.set("amount", "50000");
