@@ -55,9 +55,9 @@ last ten. The ceiling is the operator's `MAX_REPLAY`, retention is per trigger, 
 settlement kept this way is the same signed fact as any other, so peers prune it by the
 same rule and agree.
 
-`pending` is still written, and nothing reads it. It is there so a rollback to the
-release before this one finds the worklist where it expects it. The release after
-this one drops it.
+`pending` was the worklist the first release wrote, and it is gone. A ledger that
+still has one hands the facts every payment only it knew about on the next boot and
+then drops the table, which is the step that moved the stamp to 2.
 
 ## The file says which build wrote it
 
@@ -160,11 +160,10 @@ A short reply is also the only honest moment to say "I am in sync", because it
 means the peer held nothing above any of our marks. That is what `/ready` reports
 and it is why the report cannot be faked by counting messages.
 
-The old best-effort pending push and the whole-worklist handshake are still on the
-wire, and they are how an instance running the previous release still hears about a
-payment. A payment heard that way becomes an accepted fact here, so it reaches
-every other instance through the one mechanism. Both arms go away in the release
-that drops `pending`.
+The best-effort pending push and the whole-worklist handshake of the release before
+facts went with `pending`. The wire carries two notes, a set of marks and a batch of
+facts, so an instance still running that release hears nothing from this one and
+has to be upgraded rather than mixed in.
 
 The cluster key is the topic, the handshake and the write gate at once. That is
 why joining is one step and why there is no writer to authorise.
@@ -371,18 +370,11 @@ building: a bank transfer landing two days later would go unnoticed, and that is
 exactly the double payment the shop has to refund. The reads are cheap enough not
 to matter anyway.
 
-## Railway
+## The container
 
-Three things bite, and each fails in a way that does not name its own cause.
-
-- **No `VOLUME` instruction in the Dockerfile.** Railway's builder rejects it and
-  the build fails two seconds in with an empty log and `Failed to build an
-  image`. Mount points belong on the service.
-- **Point the domain at the injected port**, `railway domain --port 8080`.
-  Railway sets `PORT` and the server binds it. `EXPOSE 3000` is not what the
-  proxy routes to, and the mismatch shows up as a 502 while the container logs a
-  healthy start.
-- **Do not set `PORT`.** Railway injects it, the server reads it.
+The Dockerfile carries no `VOLUME` instruction, because some builders reject it and
+a mount point belongs to whatever runs the container. The server binds `PORT` when a
+platform injects one, so route to that port rather than to the `EXPOSE`d 3000.
 
 Alpine is not an option either, because Hyperswarm's native modules ship no musl
 prebuilds. Prebuilds for every platform except linux are pruned before the final

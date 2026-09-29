@@ -22,14 +22,11 @@ you want to debug at two in the morning.
 
 ## Deploy a new build
 
-Railway is not wired to the repository. Merging to `main` deploys nothing: run
-`railway up` from the repo root, and check `railway deployment list` says SUCCESS
-before believing it. `/health` answering 200 is the healthcheck Railway itself
-waits on, so a deploy that goes live has at least booted.
-
-Railway builds from the `Dockerfile` rather than pulling that image, so the two are
-the same recipe and not the same artifact. A client running the image is pinned. This
-deployment is not.
+Nothing deploys on a merge. A deployment moves when its manifest is pointed at a new
+image, pinned by tag and digest, and it has gone live once `/health` answers 200 to
+the liveness probe and `/ready` to the readiness one, so a rollout that finishes has
+at least booted. `/health` turns 503 when the watch loop stops being scheduled or a
+tick stays stuck in flight, which is the failure a restart actually fixes.
 
 A shutdown drains: the instance stops accepting, finishes the tick in flight, and
 leaves. `DRAIN_TIMEOUT_SECS` bounds the wait. A webhook may go out twice across a
@@ -63,11 +60,13 @@ that out, and a cutover without waiting means telling those clients first.
 
 Check the schema stamp first. `src/ledger.ts` refuses to open a ledger a newer
 build wrote, with `this ledger is at schema N and this build knows M`, and the
-process exits rather than starting on a file it does not understand. Every build
-to date stamps 1, so rolling back between them is safe. The release that drops the
-`pending` table stamps 2, and after that runs once against a volume, no earlier
-build will boot on it again. Rolling back past that point means restoring the
-volume, not redeploying the image.
+process exits rather than starting on a file it does not understand. The stamp has
+moved twice, to 2 when the `pending` table was dropped and to 3 when the `kept`
+table arrived, and a build older than the stamp on a volume will not boot on it, so
+rolling back across either step means restoring the volume, not redeploying the
+image. The columns added since, `heardAt` on `paid` and `retryUntil` and `parkedAt`
+on `outbox`, are local and nullable and leave the stamp alone, so a build at the
+same stamp reads past them.
 
 Nothing else needs undoing. Facts are append-only and a worklist is a query over
 them, so an older build reads what a newer one wrote as long as the stamp allows
@@ -83,8 +82,9 @@ and can reach the first. Two instances with volumes is the arrangement that
 survives both a redeploy and a disk.
 
 `sync.marks` plus `sync.rows` compared across two instances is strong evidence
-they agree. Read from one instance it proves nothing: a mark is a maximum and says
-nothing about holes below it.
+they agree. Read from one instance it says what that instance holds and nothing
+about its peers: a mark covers only a run of an origin's facts with no hole in it,
+so equal marks mean equal runs, and a fact held above a hole is not counted.
 
 ## Where the bank rail's verify endpoint runs
 
@@ -117,7 +117,7 @@ each other. A client gets their own key, always, and mixing them silently merges
 two clients' payments.
 
 Losing the key locks you out of that cluster and nobody can reissue it. Copy it
-out of Railway the moment the instance is up.
+out of wherever the deployment keeps its secrets the moment the instance is up.
 
 ## Rotate a cluster key
 
