@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 
 import { decodeInvoice } from "../core/bolt11.ts";
 import { paymentNamedBy } from "../core/caller.ts";
@@ -12,6 +12,7 @@ import {
 	type Webhook,
 	withoutSecrets,
 } from "./payment.ts";
+import { openLedgerFile } from "./schema.ts";
 import { deliveryToWire } from "./wire.ts";
 
 export type Claim =
@@ -32,107 +33,6 @@ export type Kept = {
 	settledAt: number | null;
 };
 
-const SCHEMA = `
-	CREATE TABLE IF NOT EXISTS meta (
-		key TEXT PRIMARY KEY,
-		value TEXT NOT NULL
-	);
-
-	CREATE TABLE IF NOT EXISTS accepted (
-		origin TEXT NOT NULL,
-		seq INTEGER NOT NULL,
-		id TEXT NOT NULL,
-		payment TEXT NOT NULL,
-		acceptedAt INTEGER NOT NULL,
-		expiresAt INTEGER NOT NULL,
-		mac TEXT NOT NULL,
-		PRIMARY KEY (origin, seq)
-	);
-	CREATE INDEX IF NOT EXISTS accepted_by_id ON accepted (id);
-	CREATE INDEX IF NOT EXISTS accepted_by_expiry ON accepted (expiresAt);
-
-	CREATE TABLE IF NOT EXISTS schedule (
-		id TEXT PRIMARY KEY,
-		expiresAt INTEGER NOT NULL,
-		dueAt INTEGER,
-		announced INTEGER NOT NULL DEFAULT 0
-	);
-	CREATE INDEX IF NOT EXISTS schedule_by_expiry ON schedule (expiresAt);
-	CREATE INDEX IF NOT EXISTS schedule_by_due ON schedule (dueAt);
-
-	CREATE TABLE IF NOT EXISTS paid (
-		origin TEXT NOT NULL,
-		seq INTEGER NOT NULL,
-		id TEXT NOT NULL,
-		payment TEXT NOT NULL,
-		settledAt INTEGER NOT NULL,
-		mac TEXT NOT NULL,
-		heardAt INTEGER,
-		PRIMARY KEY (origin, seq)
-	);
-	CREATE INDEX IF NOT EXISTS paid_by_id ON paid (id);
-	CREATE INDEX IF NOT EXISTS paid_by_age ON paid (settledAt);
-
-	CREATE TABLE IF NOT EXISTS outbox (
-		origin TEXT NOT NULL,
-		seq INTEGER NOT NULL,
-		id TEXT NOT NULL,
-		url TEXT NOT NULL,
-		body TEXT NOT NULL,
-		owedAt INTEGER NOT NULL,
-		mac TEXT NOT NULL,
-		dueAt INTEGER,
-		attempts INTEGER NOT NULL DEFAULT 0,
-		retryUntil INTEGER,
-		parkedAt INTEGER,
-		PRIMARY KEY (origin, seq)
-	);
-	CREATE INDEX IF NOT EXISTS outbox_by_due ON outbox (dueAt);
-	CREATE INDEX IF NOT EXISTS outbox_by_age ON outbox (owedAt);
-	CREATE INDEX IF NOT EXISTS outbox_by_hook ON outbox (id, url);
-
-	CREATE TABLE IF NOT EXISTS delivered (
-		origin TEXT NOT NULL,
-		seq INTEGER NOT NULL,
-		id TEXT NOT NULL,
-		url TEXT NOT NULL,
-		deliveredAt INTEGER NOT NULL,
-		mac TEXT NOT NULL,
-		PRIMARY KEY (origin, seq)
-	);
-	CREATE INDEX IF NOT EXISTS delivered_by_hook ON delivered (id, url);
-	CREATE INDEX IF NOT EXISTS delivered_by_age ON delivered (deliveredAt);
-
-	CREATE TABLE IF NOT EXISTS progress (
-		source TEXT NOT NULL,
-		origin TEXT NOT NULL,
-		seq INTEGER NOT NULL,
-		PRIMARY KEY (source, origin)
-	);
-
-	CREATE TABLE IF NOT EXISTS requests (
-		key TEXT PRIMARY KEY,
-		fingerprint TEXT NOT NULL,
-		paymentId TEXT,
-		claimedAt INTEGER NOT NULL,
-		leaseUntil INTEGER NOT NULL
-	);
-	CREATE INDEX IF NOT EXISTS requests_by_age ON requests (claimedAt);
-
-	CREATE TABLE IF NOT EXISTS kept (
-		id TEXT PRIMARY KEY,
-		caller TEXT,
-		sealed TEXT NOT NULL,
-		status TEXT NOT NULL,
-		settledAt INTEGER,
-		keptAt INTEGER NOT NULL
-	);
-	CREATE INDEX IF NOT EXISTS kept_by_age ON kept (keptAt);
-`;
-
-const SCHEMA_VERSION = 3;
-
-const BUSY_TIMEOUT_MS = 5000;
 const RETRY_FLOOR_SECS = 3600;
 const UNOWED_SLACK_SECS = 60;
 const TAKEOVER_SPREAD = 8;
@@ -196,6 +96,8 @@ export type Tuning = { takeoverAfterSecs?: number; deliveryBackoffSecs?: number 
 
 export type Retry = "scheduled" | "abandoned";
 
+type Fields = Record<string, string | number | null>;
+
 const COLUMNS: Record<Source, string> = {
 	accepted: "origin, seq, id, payment, acceptedAt, expiresAt, mac",
 	paid: "origin, seq, id, payment, settledAt, mac",
@@ -221,74 +123,20 @@ type Held = { fingerprint: string; paymentId: string | null; leaseUntil: number 
 
 type Attempted = { attempts: number; owedAt: number; retryUntil: number | null };
 
-type Statements = {
-	read: StatementSync;
-	all: StatementSync;
-	count: StatementSync;
-	countFor: StatementSync;
-	paymentsByIds: StatementSync;
-	listing: StatementSync;
-	factCounts: Record<Source, StatementSync>;
-	insertAccepted: StatementSync;
-	insertSchedule: StatementSync;
-	forget: StatementSync;
-	claim: StatementSync;
-	polled: StatementSync;
-	nextDue: StatementSync;
-	justExpired: StatementSync;
-	announce: StatementSync;
-	prune: StatementSync;
-	pruneAccepted: StatementSync;
-	pruneSettled: StatementSync;
-	unowed: StatementSync;
-	settlement: StatementSync;
-	settledForTrigger: StatementSync;
-	recentlyPaid: StatementSync;
-	insertPaid: StatementSync;
-	insertOutbox: StatementSync;
-	insertDelivered: StatementSync;
-	dueDeliveries: StatementSync;
-	attempted: StatementSync;
-	undelivered: StatementSync;
-	parkedDeliveries: StatementSync;
-	deliveryDeadline: StatementSync;
-	pruneOutbox: StatementSync;
-	prunePaid: StatementSync;
-	pruneDelivered: StatementSync;
-	heldRequest: StatementSync;
-	claimRequest: StatementSync;
-	fulfillRequest: StatementSync;
-	releaseRequest: StatementSync;
-	pruneRequests: StatementSync;
-	keepSealed: StatementSync;
-	readKept: StatementSync;
-	pruneKept: StatementSync;
-	watermarks: StatementSync;
-	watermark: StatementSync;
-	advance: StatementSync;
-	held: Record<Source, StatementSync>;
-	nextSeq: Record<Source, StatementSync>;
-	since: Record<Source, StatementSync>;
-};
-
 export class Ledger {
 	readonly origin: string;
 	private readonly db: DatabaseSync;
 	private readonly key: Uint8Array;
 	private readonly takeoverAfterSecs: number;
 	private readonly deliveryBackoffSecs: number;
-	private readonly statements: Statements;
+	private readonly prepared = new Map<string, StatementSync>();
 
 	constructor(
 		path: string,
 		key: Uint8Array,
 		{ takeoverAfterSecs = 600, deliveryBackoffSecs = 30 }: Tuning = {},
 	) {
-		this.db = new DatabaseSync(path);
-		this.db.exec("PRAGMA journal_mode = WAL");
-		this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
-		this.db.exec("PRAGMA foreign_keys = ON");
-		this.migrate();
+		this.db = openLedgerFile(path);
 		this.key = key;
 		this.takeoverAfterSecs = takeoverAfterSecs;
 		this.deliveryBackoffSecs = deliveryBackoffSecs;
@@ -300,173 +148,6 @@ export class Ledger {
 			this.db.prepare("SELECT value FROM meta WHERE key = 'origin'").get() as { value: string }
 		).value;
 		this.resignUnderTheKeyWeHold();
-
-		this.statements = {
-			read: this.db.prepare("SELECT id, payment FROM accepted WHERE id = ? ORDER BY origin, seq"),
-			all: this.db.prepare(
-				"SELECT accepted.id AS id, accepted.payment AS payment FROM accepted JOIN schedule ON schedule.id = accepted.id ORDER BY accepted.id, accepted.origin, accepted.seq",
-			),
-			count: this.db.prepare("SELECT count(*) AS rows FROM schedule"),
-			countFor: this.db.prepare(`
-				SELECT count(DISTINCT accepted.id) AS rows
-				FROM accepted
-				JOIN schedule ON schedule.id = accepted.id
-				WHERE json_extract(accepted.payment, '$.caller') IS ?
-			`),
-			paymentsByIds: this.db.prepare(
-				"SELECT id, payment FROM accepted WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id, origin, seq",
-			),
-			listing: this.db.prepare(
-				"SELECT accepted.id AS id FROM accepted JOIN schedule ON schedule.id = accepted.id GROUP BY accepted.id ORDER BY max(accepted.acceptedAt) DESC LIMIT ?",
-			),
-			factCounts: bySource((source) => this.db.prepare(`SELECT count(*) AS n FROM ${source}`)),
-			insertAccepted: this.db.prepare(
-				"INSERT INTO accepted (origin, seq, id, payment, acceptedAt, expiresAt, mac) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
-			),
-			insertSchedule: this.db.prepare(
-				"INSERT INTO schedule (id, expiresAt, dueAt) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING",
-			),
-			forget: this.db.prepare("DELETE FROM schedule WHERE id = ?"),
-			claim: this.db.prepare(
-				"UPDATE schedule SET dueAt = ? WHERE id IN (SELECT id FROM schedule WHERE dueAt <= ? ORDER BY dueAt LIMIT ?) RETURNING id",
-			),
-			polled: this.db.prepare("UPDATE schedule SET dueAt = ? WHERE id = ?"),
-			nextDue: this.db.prepare(
-				`SELECT min(dueAt) AS dueAt FROM (
-					SELECT min(dueAt) AS dueAt FROM schedule WHERE dueAt IS NOT NULL
-					UNION ALL
-					SELECT min(dueAt) AS dueAt FROM outbox WHERE dueAt IS NOT NULL
-				)`,
-			),
-			justExpired: this.db.prepare(
-				"SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0",
-			),
-			announce: this.db.prepare("UPDATE schedule SET announced = 1 WHERE expiresAt <= ?"),
-			prune: this.db.prepare("DELETE FROM schedule WHERE expiresAt <= ?"),
-			pruneAccepted: this.db.prepare("DELETE FROM accepted WHERE expiresAt <= ?"),
-			unowed: this.db.prepare(`
-				SELECT DISTINCT accepted.id AS id,
-					json_extract(hook.value, '$.url') AS url,
-					paid.settledAt AS settledAt
-				FROM accepted
-				JOIN paid ON paid.id = accepted.id
-				JOIN json_each(accepted.payment, '$.webhooks') AS hook
-				WHERE coalesce(paid.heardAt, paid.settledAt) <= ? AND NOT EXISTS (
-					SELECT 1 FROM outbox
-					WHERE outbox.id = accepted.id AND outbox.url = json_extract(hook.value, '$.url')
-				) AND NOT EXISTS (
-					SELECT 1 FROM delivered
-					WHERE delivered.id = accepted.id AND delivered.url = json_extract(hook.value, '$.url')
-				)
-			`),
-			pruneSettled: this.db.prepare(
-				"DELETE FROM accepted WHERE id IN (SELECT id FROM paid WHERE settledAt <= ?)",
-			),
-			settlement: this.db.prepare("SELECT payment FROM paid WHERE id = ? LIMIT 1"),
-			settledForTrigger: this.db.prepare(
-				"SELECT payment FROM paid WHERE json_extract(payment, '$.trigger') = ? ORDER BY settledAt DESC, seq DESC LIMIT ?",
-			),
-			recentlyPaid: this.db.prepare(
-				"SELECT payment FROM paid ORDER BY settledAt DESC, seq DESC LIMIT ?",
-			),
-			insertPaid: this.db.prepare(
-				"INSERT INTO paid (origin, seq, id, payment, settledAt, mac, heardAt) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
-			),
-			insertOutbox: this.db.prepare(
-				"INSERT INTO outbox (origin, seq, id, url, body, owedAt, mac, dueAt, retryUntil) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
-			),
-			insertDelivered: this.db.prepare(
-				"INSERT INTO delivered (origin, seq, id, url, deliveredAt, mac) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
-			),
-			dueDeliveries: this.db.prepare(
-				`UPDATE outbox SET dueAt = ? WHERE rowid IN (
-					SELECT rowid FROM outbox WHERE dueAt <= ?
-						AND NOT EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url)
-					ORDER BY dueAt LIMIT ?
-				) RETURNING origin, seq, id, url, body`,
-			),
-			attempted: this.db.prepare(
-				"SELECT attempts, owedAt, retryUntil FROM outbox WHERE origin = ? AND seq = ?",
-			),
-			undelivered: this.db.prepare(
-				"UPDATE outbox SET attempts = ?, dueAt = ?, parkedAt = ? WHERE origin = ? AND seq = ?",
-			),
-			parkedDeliveries: this.db.prepare(
-				`SELECT COUNT(*) AS n FROM outbox WHERE dueAt IS NULL
-					AND NOT EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url)`,
-			),
-			deliveryDeadline: this.db.prepare(
-				"SELECT MAX(expiresAt) AS deadline FROM accepted WHERE id = ?",
-			),
-			pruneOutbox: this.db.prepare(
-				`DELETE FROM outbox WHERE (dueAt IS NULL AND coalesce(parkedAt, owedAt) <= ?)
-					OR (owedAt <= ? AND EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url))`,
-			),
-			prunePaid: this.db.prepare(
-				`DELETE FROM paid WHERE settledAt <= ? AND id IN (
-					SELECT id FROM (
-						SELECT id,
-							COALESCE(json_extract(payment, '$.replay'), 0) AS keep,
-							ROW_NUMBER() OVER (
-								PARTITION BY json_extract(payment, '$.trigger')
-								ORDER BY settledAt DESC, seq DESC
-							) AS nth
-						FROM paid
-					) WHERE nth > keep
-				)`,
-			),
-			pruneDelivered: this.db.prepare("DELETE FROM delivered WHERE deliveredAt <= ?"),
-			heldRequest: this.db.prepare(
-				"SELECT fingerprint, paymentId, leaseUntil FROM requests WHERE key = ?",
-			),
-			claimRequest: this.db.prepare(
-				`INSERT INTO requests (key, fingerprint, paymentId, claimedAt, leaseUntil) VALUES (?, ?, NULL, ?, ?)
-					ON CONFLICT(key) DO UPDATE SET claimedAt = excluded.claimedAt, leaseUntil = excluded.leaseUntil`,
-			),
-			fulfillRequest: this.db.prepare("UPDATE requests SET paymentId = ? WHERE key = ?"),
-			releaseRequest: this.db.prepare("DELETE FROM requests WHERE key = ? AND paymentId IS NULL"),
-			pruneRequests: this.db.prepare("DELETE FROM requests WHERE claimedAt <= ?"),
-			keepSealed: this.db.prepare(
-				`INSERT INTO kept (id, caller, sealed, status, settledAt, keptAt)
-					SELECT accepted.id,
-						json_extract(accepted.payment, '$.caller'),
-						json_extract(accepted.payment, '$.sealed'),
-						CASE WHEN paid.id IS NULL THEN 'expired' ELSE 'paid' END,
-						paid.settledAt,
-						?
-					FROM accepted
-					LEFT JOIN paid ON paid.id = accepted.id
-					WHERE json_extract(accepted.payment, '$.sealed') IS NOT NULL
-						AND (accepted.expiresAt <= ? OR paid.settledAt <= ?)
-					ON CONFLICT(id) DO NOTHING`,
-			),
-			readKept: this.db.prepare(
-				"SELECT id, caller, sealed, status, settledAt FROM kept WHERE id = ? LIMIT 1",
-			),
-			pruneKept: this.db.prepare("DELETE FROM kept WHERE keptAt <= ?"),
-			watermarks: this.db.prepare("SELECT source, origin, seq FROM progress"),
-			watermark: this.db.prepare("SELECT seq FROM progress WHERE source = ? AND origin = ?"),
-			advance: this.db.prepare(
-				"INSERT INTO progress (source, origin, seq) VALUES (?, ?, ?) ON CONFLICT(source, origin) DO UPDATE SET seq = max(seq, excluded.seq)",
-			),
-			held: bySource((source) =>
-				this.db.prepare(`SELECT 1 AS held FROM ${source} WHERE origin = ? AND seq = ?`),
-			),
-			nextSeq: bySource((source) =>
-				this.db.prepare(`
-					SELECT max(
-						coalesce((SELECT max(seq) FROM ${source} WHERE origin = ?), 0),
-						coalesce((SELECT seq FROM progress WHERE source = '${source}' AND origin = ?), 0)
-					) + 1 AS seq
-				`),
-			),
-			since: bySource((source) =>
-				this.db.prepare(
-					`SELECT ${COLUMNS[source]} FROM ${source} WHERE origin = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`,
-				),
-			),
-		};
-
 		this.retireTheWorklistWrittenBeforeAccepted();
 	}
 
@@ -483,18 +164,24 @@ export class Ledger {
 			.all() as (Row & { dueAt: number | null })[];
 
 		for (const row of orphans) {
-			this.keep(revive(row), row.dueAt ?? unixNow());
+			this.accept(revive(row), row.dueAt ?? unixNow());
 		}
 
 		this.db.exec("DROP TABLE pending");
 	}
 
 	read(id: string): Payment | null {
-		return groupById(this.statements.read.all(id) as AcceptedRow[])[0] ?? null;
+		return (
+			groupById(
+				this.sql("SELECT id, payment FROM accepted WHERE id = ? ORDER BY origin, seq").all(
+					id,
+				) as AcceptedRow[],
+			)[0] ?? null
+		);
 	}
 
 	count(): number {
-		return (this.statements.count.get() as { rows: number }).rows;
+		return (this.sql("SELECT count(*) AS rows FROM schedule").get() as { rows: number }).rows;
 	}
 
 	/**
@@ -503,11 +190,20 @@ export class Ledger {
 	 * honest way to count someone who will not say who they are
 	 */
 	countFor(caller: string | null): number {
-		return (this.statements.countFor.get(caller) as { rows: number }).rows;
+		return (
+			this.sql(`
+			SELECT count(DISTINCT accepted.id) AS rows
+			FROM accepted
+			JOIN schedule ON schedule.id = accepted.id
+			WHERE json_extract(accepted.payment, '$.caller') IS ?
+		`).get(caller) as { rows: number }
+		).rows;
 	}
 
 	kept(id: string): Kept | null {
-		const row = this.statements.readKept.get(id) as KeptRow | undefined;
+		const row = this.sql(
+			"SELECT id, caller, sealed, status, settledAt FROM kept WHERE id = ? LIMIT 1",
+		).get(id) as KeptRow | undefined;
 		if (row === undefined) {
 			return null;
 		}
@@ -526,14 +222,14 @@ export class Ledger {
 			return [];
 		}
 
-		return groupById(this.statements.paymentsByIds.all(JSON.stringify(ids)) as AcceptedRow[]);
+		return groupById(
+			this.sql(
+				"SELECT id, payment FROM accepted WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id, origin, seq",
+			).all(JSON.stringify(ids)) as AcceptedRow[],
+		);
 	}
 
-	accept(payment: Payment): Taken {
-		return this.keep(payment, unixNow());
-	}
-
-	private keep(payment: Payment, dueAt: number): Taken {
+	accept(payment: Payment, dueAt = unixNow()): Taken {
 		return this.transact(() => {
 			const held = this.read(payment.id);
 			const webhooks = held ? mergedWebhooks(held.webhooks, payment.webhooks) : payment.webhooks;
@@ -556,22 +252,25 @@ export class Ledger {
 		const now = unixNow();
 		const seq = this.nextSeq("accepted");
 
-		return {
+		const fact = {
 			origin: this.origin,
 			seq,
 			id: payment.id,
 			payment: record,
 			acceptedAt: now,
 			expiresAt: payment.expiresAt,
-			mac: this.sign("accepted", [this.origin, seq, payment.id, record, now, payment.expiresAt]),
 		};
+
+		return { ...fact, mac: this.sign("accepted", fact) };
 	}
 
 	private scheduleWatch(id: string, expiresAt: number, dueAt: number): void {
 		if (this.settlement(id)) {
 			return;
 		}
-		this.statements.insertSchedule.run(id, expiresAt, dueAt);
+		this.sql(
+			"INSERT INTO schedule (id, expiresAt, dueAt) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING",
+		).run(id, expiresAt, dueAt);
 	}
 
 	private watchAfter(id: string): number {
@@ -584,36 +283,52 @@ export class Ledger {
 	}
 
 	forget(id: string): void {
-		this.statements.forget.run(id);
+		this.sql("DELETE FROM schedule WHERE id = ?").run(id);
 	}
 
-	claim(limit: number, leaseSecs: number): Payment[] {
+	duePolls(limit: number, leaseSecs: number): Payment[] {
 		const now = unixNow();
-		const due = this.statements.claim.all(now + leaseSecs, now, limit) as { id: string }[];
+		const due = this.sql(
+			"UPDATE schedule SET dueAt = ? WHERE id IN (SELECT id FROM schedule WHERE dueAt <= ? ORDER BY dueAt LIMIT ?) RETURNING id",
+		).all(now + leaseSecs, now, limit) as { id: string }[];
 
 		return this.paymentsFor(due.map((one) => one.id));
 	}
 
 	polled(id: string, dueAt: number | null): void {
-		this.statements.polled.run(dueAt, id);
+		this.sql("UPDATE schedule SET dueAt = ? WHERE id = ?").run(dueAt, id);
 	}
 
 	nextDueAt(): number | null {
-		return (this.statements.nextDue.get() as { dueAt: number | null }).dueAt;
+		return (
+			this.sql(`SELECT min(dueAt) AS dueAt FROM (
+				SELECT min(dueAt) AS dueAt FROM schedule WHERE dueAt IS NOT NULL
+				UNION ALL
+				SELECT min(dueAt) AS dueAt FROM outbox WHERE dueAt IS NOT NULL
+			)`).get() as { dueAt: number | null }
+		).dueAt;
 	}
 
 	settlement(id: string): PublicPayment | null {
-		const row = this.statements.settlement.get(id) as Row | undefined;
+		const row = this.sql("SELECT payment FROM paid WHERE id = ? LIMIT 1").get(id) as
+			| Row
+			| undefined;
 		return row ? asStored<PublicPayment>(row.payment) : null;
 	}
 
 	replay(trigger: string, limit: number): PublicPayment[] {
-		const rows = this.statements.settledForTrigger.all(trigger, limit) as Row[];
+		const rows = this.sql(
+			"SELECT payment FROM paid WHERE json_extract(payment, '$.trigger') = ? ORDER BY settledAt DESC, seq DESC LIMIT ?",
+		).all(trigger, limit) as Row[];
 		return rows.map((row) => asStored<PublicPayment>(row.payment)).reverse();
 	}
 
 	list(limit: number, window: number): PublicPayment[] {
-		const listed = (this.statements.listing.all(limit) as { id: string }[]).map((one) => one.id);
+		const listed = (
+			this.sql(
+				"SELECT accepted.id AS id FROM accepted JOIN schedule ON schedule.id = accepted.id GROUP BY accepted.id ORDER BY max(accepted.acceptedAt) DESC LIMIT ?",
+			).all(limit) as { id: string }[]
+		).map((one) => one.id);
 		const waiting = this.paymentsFor(listed).map(withoutSecrets);
 		const newestFirst = [...waiting, ...this.recentlySettled(window)].sort(
 			(one, other) => other.createdAt - one.createdAt,
@@ -623,30 +338,32 @@ export class Ledger {
 	}
 
 	private recentlySettled(window: number): PublicPayment[] {
-		const rows = this.statements.recentlyPaid.all(window) as Row[];
+		const rows = this.sql("SELECT payment FROM paid ORDER BY settledAt DESC, seq DESC LIMIT ?").all(
+			window,
+		) as Row[];
 		return rows.map((row) => asStored<PublicPayment>(row.payment));
 	}
 
-	settle(pending: Payment, preimage: string): { settled: PublicPayment; facts: Facts } {
-		proves(preimage, pending.paymentHash);
-		const settled: Payment = { ...pending, status: "paid", preimage };
+	settle(watched: Payment, preimage: string): { settled: PublicPayment; facts: Facts } {
+		proves(preimage, watched.paymentHash);
+		const settled: Payment = { ...watched, status: "paid", preimage };
 		const record = JSON.stringify(withoutSecrets(settled));
 		const now = unixNow();
 		const body = JSON.stringify(deliveryToWire(settled, now));
 
 		return this.transact(() => {
 			const seq = this.nextSeq("paid");
-			const paid = {
+			const unsigned = {
 				origin: this.origin,
 				seq,
 				id: settled.id,
 				payment: record,
 				settledAt: now,
-				mac: this.sign("paid", [this.origin, seq, settled.id, record, now]),
 			};
+			const paid = { ...unsigned, mac: this.sign("paid", unsigned) };
 			this.recordPaid(paid);
 
-			const outbox = pending.webhooks.map((hook) => {
+			const outbox = watched.webhooks.map((hook) => {
 				const fact = this.owedFact(settled.id, hook, body, now);
 				this.recordOutbox(fact, 0);
 				return fact;
@@ -663,21 +380,19 @@ export class Ledger {
 
 	dueDeliveries(limit: number, leaseSecs: number): Delivery[] {
 		const now = unixNow();
-		return this.statements.dueDeliveries.all(now + leaseSecs, now, limit) as Delivery[];
+		return this.sql(`UPDATE outbox SET dueAt = ? WHERE rowid IN (
+				SELECT rowid FROM outbox WHERE dueAt <= ?
+					AND NOT EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url)
+				ORDER BY dueAt LIMIT ?
+			) RETURNING origin, seq, id, url, body`).all(now + leaseSecs, now, limit) as Delivery[];
 	}
 
 	delivered(owed: Delivery): Facts {
 		const now = unixNow();
 		return this.transact(() => {
 			const seq = this.nextSeq("delivered");
-			const fact = {
-				origin: this.origin,
-				seq,
-				id: owed.id,
-				url: owed.url,
-				deliveredAt: now,
-				mac: this.sign("delivered", [this.origin, seq, owed.id, owed.url, now]),
-			};
+			const unsigned = { origin: this.origin, seq, id: owed.id, url: owed.url, deliveredAt: now };
+			const fact = { ...unsigned, mac: this.sign("delivered", unsigned) };
 			this.recordDelivered(fact);
 
 			return { delivered: [fact] };
@@ -685,7 +400,9 @@ export class Ledger {
 	}
 
 	undelivered(owed: Delivery): Retry {
-		const tried = this.statements.attempted.get(owed.origin, owed.seq) as Attempted | undefined;
+		const tried = this.sql(
+			"SELECT attempts, owedAt, retryUntil FROM outbox WHERE origin = ? AND seq = ?",
+		).get(owed.origin, owed.seq) as Attempted | undefined;
 		if (!tried) {
 			return "abandoned";
 		}
@@ -694,23 +411,26 @@ export class Ledger {
 		const attempts = tried.attempts + 1;
 		const nextAt = now + this.deliveryBackoffSecs * attempts;
 		const abandoned = nextAt > (tried.retryUntil ?? this.retryUntil(owed.id, tried.owedAt));
-		this.statements.undelivered.run(
-			attempts,
-			abandoned ? null : nextAt,
-			abandoned ? now : null,
-			owed.origin,
-			owed.seq,
-		);
+		this.sql(
+			"UPDATE outbox SET attempts = ?, dueAt = ?, parkedAt = ? WHERE origin = ? AND seq = ?",
+		).run(attempts, abandoned ? null : nextAt, abandoned ? now : null, owed.origin, owed.seq);
 
 		return abandoned ? "abandoned" : "scheduled";
 	}
 
 	parkedDeliveries(): number {
-		return (this.statements.parkedDeliveries.get() as { n: number }).n;
+		return (
+			this.sql(`SELECT COUNT(*) AS n FROM outbox WHERE dueAt IS NULL
+				AND NOT EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url)`).get() as {
+				n: number;
+			}
+		).n;
 	}
 
 	private retryUntil(id: string, owedAt: number): number {
-		const found = this.statements.deliveryDeadline.get(id) as { deadline: number | null };
+		const found = this.sql("SELECT MAX(expiresAt) AS deadline FROM accepted WHERE id = ?").get(
+			id,
+		) as { deadline: number | null };
 
 		return Math.max(owedAt + RETRY_FLOOR_SECS, found.deadline ?? 0);
 	}
@@ -718,7 +438,9 @@ export class Ledger {
 	claimKey(key: string, fingerprint: string, leaseSecs: number): Claim {
 		const now = unixNow();
 		return this.transact<Claim>(() => {
-			const held = this.statements.heldRequest.get(key) as Held | undefined;
+			const held = this.sql(
+				"SELECT fingerprint, paymentId, leaseUntil FROM requests WHERE key = ?",
+			).get(key) as Held | undefined;
 			if (held) {
 				if (held.fingerprint !== fingerprint) {
 					return { state: "mismatch" };
@@ -730,27 +452,35 @@ export class Ledger {
 					return { state: "inflight" };
 				}
 			}
-			this.statements.claimRequest.run(key, fingerprint, now, now + leaseSecs);
+			this.sql(`INSERT INTO requests (key, fingerprint, paymentId, claimedAt, leaseUntil) VALUES (?, ?, NULL, ?, ?)
+				ON CONFLICT(key) DO UPDATE SET claimedAt = excluded.claimedAt, leaseUntil = excluded.leaseUntil`).run(
+				key,
+				fingerprint,
+				now,
+				now + leaseSecs,
+			);
 
 			return { state: "mine" };
 		});
 	}
 
 	fulfillKey(key: string, paymentId: string): void {
-		this.statements.fulfillRequest.run(paymentId, key);
+		this.sql("UPDATE requests SET paymentId = ? WHERE key = ?").run(paymentId, key);
 	}
 
 	releaseKey(key: string): void {
-		this.statements.releaseRequest.run(key);
+		this.sql("DELETE FROM requests WHERE key = ? AND paymentId IS NULL").run(key);
 	}
 
 	factCounts(): Record<Source, number> {
-		return bySource((source) => (this.statements.factCounts[source].get() as { n: number }).n);
+		return bySource(
+			(source) => (this.sql(`SELECT count(*) AS n FROM ${source}`).get() as { n: number }).n,
+		);
 	}
 
 	watermarks(): Watermarks {
 		const marks = bySource<Record<string, number>>(() => ({}));
-		for (const row of this.statements.watermarks.all() as {
+		for (const row of this.sql("SELECT source, origin, seq FROM progress").all() as {
 			source: Source;
 			origin: string;
 			seq: number;
@@ -774,7 +504,9 @@ export class Ledger {
 				if (held <= seen) {
 					continue;
 				}
-				const batch = this.statements.since[source].all(origin, seen, held, GAP_BATCH) as T[];
+				const batch = this.sql(
+					`SELECT ${COLUMNS[source]} FROM ${source} WHERE origin = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`,
+				).all(origin, seen, held, GAP_BATCH) as T[];
 				const cut = batch.length === GAP_BATCH;
 				more ||= cut;
 				through[source][origin] = cut ? (batch.at(-1)?.seq ?? seen) : held;
@@ -817,19 +549,14 @@ export class Ledger {
 			}
 
 			for (const fact of inSeqOrder(facts.outbox ?? [])) {
-				const proof = [fact.origin, fact.seq, fact.id, fact.url, fact.body, fact.owedAt];
-				if (this.known("outbox", fact) || refuses(() => this.verify("outbox", proof, fact.mac))) {
+				if (this.known("outbox", fact) || refuses(() => this.verify("outbox", fact))) {
 					continue;
 				}
 				this.recordOutbox(fact, this.takeoverAt(fact));
 			}
 
 			for (const fact of inSeqOrder(facts.delivered ?? [])) {
-				const proof = [fact.origin, fact.seq, fact.id, fact.url, fact.deliveredAt];
-				if (
-					this.known("delivered", fact) ||
-					refuses(() => this.verify("delivered", proof, fact.mac))
-				) {
+				if (this.known("delivered", fact) || refuses(() => this.verify("delivered", fact))) {
 					continue;
 				}
 				this.recordDelivered(fact);
@@ -847,7 +574,9 @@ export class Ledger {
 		for (const source of SOURCES) {
 			for (const [origin, seq] of Object.entries(through[source] ?? {})) {
 				if (origin !== this.origin && Number.isSafeInteger(seq)) {
-					this.statements.advance.run(source, origin, seq);
+					this.sql(
+						"INSERT INTO progress (source, origin, seq) VALUES (?, ?, ?) ON CONFLICT(source, origin) DO UPDATE SET seq = max(seq, excluded.seq)",
+					).run(source, origin, seq);
 					this.advance(source, origin);
 				}
 			}
@@ -863,20 +592,65 @@ export class Ledger {
 	sweep(graceSecs: number, keepSealedSecs: number): Payment[] {
 		const now = unixNow();
 		const expired = this.paymentsFor(
-			(this.statements.justExpired.all(now) as { id: string }[]).map((one) => one.id),
+			(
+				this.sql("SELECT id FROM schedule WHERE expiresAt <= ? AND announced = 0").all(now) as {
+					id: string;
+				}[]
+			).map((one) => one.id),
 		);
-		this.statements.announce.run(now);
-		this.statements.keepSealed.run(now, now - graceSecs, now - graceSecs);
-		this.statements.pruneKept.run(now - keepSealedSecs);
-		this.statements.prune.run(now - graceSecs);
-		this.statements.pruneAccepted.run(now - graceSecs);
-		this.statements.pruneSettled.run(now - graceSecs);
-		this.statements.pruneOutbox.run(now - graceSecs, now - graceSecs);
-		this.statements.prunePaid.run(now - graceSecs);
-		this.statements.pruneDelivered.run(now - graceSecs);
-		this.statements.pruneRequests.run(now - REQUEST_TTL_SECS);
+		this.sql("UPDATE schedule SET announced = 1 WHERE expiresAt <= ?").run(now);
+		this.sql(`INSERT INTO kept (id, caller, sealed, status, settledAt, keptAt)
+				SELECT accepted.id,
+					json_extract(accepted.payment, '$.caller'),
+					json_extract(accepted.payment, '$.sealed'),
+					CASE WHEN paid.id IS NULL THEN 'expired' ELSE 'paid' END,
+					paid.settledAt,
+					?
+				FROM accepted
+				LEFT JOIN paid ON paid.id = accepted.id
+				WHERE json_extract(accepted.payment, '$.sealed') IS NOT NULL
+					AND (accepted.expiresAt <= ? OR paid.settledAt <= ?)
+				ON CONFLICT(id) DO NOTHING`).run(now, now - graceSecs, now - graceSecs);
+		this.sql("DELETE FROM kept WHERE keptAt <= ?").run(now - keepSealedSecs);
+		this.sql("DELETE FROM schedule WHERE expiresAt <= ?").run(now - graceSecs);
+		this.sql("DELETE FROM accepted WHERE expiresAt <= ?").run(now - graceSecs);
+		this.sql("DELETE FROM accepted WHERE id IN (SELECT id FROM paid WHERE settledAt <= ?)").run(
+			now - graceSecs,
+		);
+		this.sql(`DELETE FROM outbox WHERE (dueAt IS NULL AND coalesce(parkedAt, owedAt) <= ?)
+				OR (owedAt <= ? AND EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url))`).run(
+			now - graceSecs,
+			now - graceSecs,
+		);
+		this.sql(`DELETE FROM paid WHERE settledAt <= ? AND id IN (
+				SELECT id FROM (
+					SELECT id,
+						COALESCE(json_extract(payment, '$.replay'), 0) AS keep,
+						ROW_NUMBER() OVER (
+							PARTITION BY json_extract(payment, '$.trigger')
+							ORDER BY settledAt DESC, seq DESC
+						) AS nth
+					FROM paid
+				) WHERE nth > keep
+			)`).run(now - graceSecs);
+		this.sql("DELETE FROM delivered WHERE deliveredAt <= ?").run(now - graceSecs);
+		this.sql("DELETE FROM requests WHERE claimedAt <= ?").run(now - REQUEST_TTL_SECS);
 
-		for (const missing of this.statements.unowed.all(now - UNOWED_SLACK_SECS) as Missing[]) {
+		for (const missing of this.sql(`
+			SELECT DISTINCT accepted.id AS id,
+				json_extract(hook.value, '$.url') AS url,
+				paid.settledAt AS settledAt
+			FROM accepted
+			JOIN paid ON paid.id = accepted.id
+			JOIN json_each(accepted.payment, '$.webhooks') AS hook
+			WHERE coalesce(paid.heardAt, paid.settledAt) <= ? AND NOT EXISTS (
+				SELECT 1 FROM outbox
+				WHERE outbox.id = accepted.id AND outbox.url = json_extract(hook.value, '$.url')
+			) AND NOT EXISTS (
+				SELECT 1 FROM delivered
+				WHERE delivered.id = accepted.id AND delivered.url = json_extract(hook.value, '$.url')
+			)
+		`).all(now - UNOWED_SLACK_SECS) as Missing[]) {
 			this.owe(missing);
 		}
 
@@ -897,15 +671,9 @@ export class Ledger {
 	private owedFact(id: string, hook: Webhook, body: string, owedAt: number): OutboxFact {
 		const seq = this.nextSeq("outbox");
 
-		return {
-			origin: this.origin,
-			seq,
-			id,
-			url: hook.url,
-			body,
-			owedAt,
-			mac: this.sign("outbox", [this.origin, seq, id, hook.url, body, owedAt]),
-		};
+		const fact = { origin: this.origin, seq, id, url: hook.url, body, owedAt };
+
+		return { ...fact, mac: this.sign("outbox", fact) };
 	}
 
 	close(): void {
@@ -946,19 +714,12 @@ export class Ledger {
 	private resignEveryFact(): void {
 		let resigned = 0;
 		for (const source of SOURCES) {
-			const columns = COLUMNS[source].split(", ");
-			const rows = this.db.prepare(`SELECT ${COLUMNS[source]} FROM ${source}`).all() as Record<
-				string,
-				string | number | null
-			>[];
+			const rows = this.db.prepare(`SELECT ${COLUMNS[source]} FROM ${source}`).all() as Fields[];
 
 			for (const row of rows) {
-				const fields = columns
-					.filter((column) => column !== "mac")
-					.map((column) => row[column] ?? null);
 				this.db
 					.prepare(`UPDATE ${source} SET mac = ? WHERE origin = ? AND seq = ?`)
-					.run(macWith(this.key, source, fields), String(row["origin"]), Number(row["seq"]));
+					.run(this.sign(source, row), String(row["origin"]), Number(row["seq"]));
 				resigned += 1;
 			}
 		}
@@ -967,45 +728,14 @@ export class Ledger {
 		}
 	}
 
-	private migrate(): void {
-		const found = this.schemaVersion();
-		if (found > SCHEMA_VERSION) {
-			throw new Error(
-				`this ledger is at schema ${found} and this build knows ${SCHEMA_VERSION}, so a newer build wrote it`,
-			);
+	private sql(text: string): StatementSync {
+		let prepared = this.prepared.get(text);
+		if (prepared === undefined) {
+			prepared = this.db.prepare(text);
+			this.prepared.set(text, prepared);
 		}
 
-		this.dropOutdatedRequestCache();
-		this.addLocalColumns();
-		this.db.exec(SCHEMA);
-		if (found !== SCHEMA_VERSION) {
-			this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-		}
-	}
-
-	private schemaVersion(): number {
-		return (this.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-	}
-
-	private addLocalColumns(): void {
-		const missing = [
-			["paid", "heardAt"],
-			["outbox", "retryUntil"],
-			["outbox", "parkedAt"],
-		].filter(([table, column]) => {
-			const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-			return columns.length > 0 && !columns.some((one) => one.name === column);
-		});
-		for (const [table, column] of missing) {
-			this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} INTEGER`);
-		}
-	}
-
-	private dropOutdatedRequestCache(): void {
-		const columns = this.db.prepare("PRAGMA table_info(requests)").all() as { name: string }[];
-		if (columns.length > 0 && !columns.some((column) => column.name === "fingerprint")) {
-			this.db.exec("DROP TABLE requests");
-		}
+		return prepared;
 	}
 
 	private transact<T>(work: () => T): T {
@@ -1021,39 +751,34 @@ export class Ledger {
 	}
 
 	private nextSeq(source: Source): number {
-		const held = this.statements.nextSeq[source].get(this.origin, this.origin);
+		const held = this.sql(`
+				SELECT max(
+					coalesce((SELECT max(seq) FROM ${source} WHERE origin = ?), 0),
+					coalesce((SELECT seq FROM progress WHERE source = '${source}' AND origin = ?), 0)
+				) + 1 AS seq
+			`).get(this.origin, this.origin);
 
 		return (held as { seq: number }).seq;
 	}
 
 	private recordAccepted(fact: AcceptedFact): void {
-		this.statements.insertAccepted.run(
-			fact.origin,
-			fact.seq,
-			fact.id,
-			fact.payment,
-			fact.acceptedAt,
-			fact.expiresAt,
-			fact.mac,
-		);
+		this.sql(
+			"INSERT INTO accepted (origin, seq, id, payment, acceptedAt, expiresAt, mac) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
+		).run(fact.origin, fact.seq, fact.id, fact.payment, fact.acceptedAt, fact.expiresAt, fact.mac);
 		this.advance("accepted", fact.origin);
 	}
 
 	private recordPaid(fact: PaidFact): void {
-		this.statements.insertPaid.run(
-			fact.origin,
-			fact.seq,
-			fact.id,
-			fact.payment,
-			fact.settledAt,
-			fact.mac,
-			unixNow(),
-		);
+		this.sql(
+			"INSERT INTO paid (origin, seq, id, payment, settledAt, mac, heardAt) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
+		).run(fact.origin, fact.seq, fact.id, fact.payment, fact.settledAt, fact.mac, unixNow());
 		this.advance("paid", fact.origin);
 	}
 
 	private recordOutbox(fact: OutboxFact, dueAt: number): void {
-		this.statements.insertOutbox.run(
+		this.sql(
+			"INSERT INTO outbox (origin, seq, id, url, body, owedAt, mac, dueAt, retryUntil) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
+		).run(
 			fact.origin,
 			fact.seq,
 			fact.id,
@@ -1068,44 +793,52 @@ export class Ledger {
 	}
 
 	private recordDelivered(fact: DeliveredFact): void {
-		this.statements.insertDelivered.run(
-			fact.origin,
-			fact.seq,
-			fact.id,
-			fact.url,
-			fact.deliveredAt,
-			fact.mac,
-		);
+		this.sql(
+			"INSERT INTO delivered (origin, seq, id, url, deliveredAt, mac) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
+		).run(fact.origin, fact.seq, fact.id, fact.url, fact.deliveredAt, fact.mac);
 		this.advance("delivered", fact.origin);
 	}
 
 	private advance(source: Source, origin: string): void {
 		let mark = this.markOf(source, origin);
-		while (this.statements.held[source].get(origin, mark + 1) !== undefined) {
+		while (
+			this.sql(`SELECT 1 AS held FROM ${source} WHERE origin = ? AND seq = ?`).get(
+				origin,
+				mark + 1,
+			) !== undefined
+		) {
 			mark += 1;
 		}
-		this.statements.advance.run(source, origin, mark);
+		this.sql(
+			"INSERT INTO progress (source, origin, seq) VALUES (?, ?, ?) ON CONFLICT(source, origin) DO UPDATE SET seq = max(seq, excluded.seq)",
+		).run(source, origin, mark);
 	}
 
 	private known(source: Source, fact: { origin: string; seq: number }): boolean {
 		return (
 			fact.seq <= this.markOf(source, fact.origin) ||
-			this.statements.held[source].get(fact.origin, fact.seq) !== undefined
+			this.sql(`SELECT 1 AS held FROM ${source} WHERE origin = ? AND seq = ?`).get(
+				fact.origin,
+				fact.seq,
+			) !== undefined
 		);
 	}
 
 	private markOf(source: Source, origin: string): number {
-		const row = this.statements.watermark.get(source, origin) as { seq: number } | undefined;
+		const row = this.sql("SELECT seq FROM progress WHERE source = ? AND origin = ?").get(
+			source,
+			origin,
+		) as { seq: number } | undefined;
 		return row?.seq ?? 0;
 	}
 
-	private sign(source: Source, fields: (string | number | null)[]): string {
-		return macWith(this.key, source, fields);
+	private sign(source: Source, fact: Fields): string {
+		return macWith(this.key, source, signedFields(source, fact));
 	}
 
-	private verify(source: Source, fields: (string | number | null)[], mac: string): void {
-		const got = Buffer.from(mac, "hex");
-		const want = Buffer.from(macWith(this.key, source, fields), "hex");
+	private verify(source: Source, fact: Fields & { mac: string }): void {
+		const got = Buffer.from(fact.mac, "hex");
+		const want = Buffer.from(this.sign(source, fact), "hex");
 		const holds = want.length === got.length && timingSafeEqual(want, got);
 		if (!holds) {
 			throw new Error(`a ${source} fact arrived without the cluster key`);
@@ -1130,11 +863,7 @@ export class Ledger {
 	}
 
 	private provenAccepted(fact: AcceptedFact): void {
-		this.verify(
-			"accepted",
-			[fact.origin, fact.seq, fact.id, fact.payment, fact.acceptedAt, fact.expiresAt],
-			fact.mac,
-		);
+		this.verify("accepted", fact);
 
 		const payment = asStored<Payment>(fact.payment);
 		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment)) {
@@ -1150,7 +879,7 @@ export class Ledger {
 	}
 
 	private provenPaid(fact: PaidFact): void {
-		this.verify("paid", [fact.origin, fact.seq, fact.id, fact.payment, fact.settledAt], fact.mac);
+		this.verify("paid", fact);
 
 		const payment = asStored<PublicPayment>(fact.payment);
 		if (payment.id !== fact.id || !this.namesItsOwnHash(fact.id, payment)) {
@@ -1185,6 +914,13 @@ function asStored<T extends PublicPayment>(record: string): T {
 	const payment = JSON.parse(record) as T;
 
 	return { ...payment, caller: payment.caller ?? null, replay: payment.replay ?? 0 };
+}
+
+function signedFields(source: Source, fact: Fields): (string | number | null)[] {
+	return COLUMNS[source]
+		.split(", ")
+		.filter((column) => column !== "mac")
+		.map((column) => fact[column] ?? null);
 }
 
 function macWith(key: Uint8Array, source: Source, fields: (string | number | null)[]): string {

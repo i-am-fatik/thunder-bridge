@@ -110,29 +110,29 @@ export class Store {
 	}
 
 	get(id: string): Payment | null {
-		const pending = this.ledger.read(id);
+		const watched = this.ledger.read(id);
 		const settled = this.ledger.settlement(id);
 
-		return settled ? asPayment(settled, pending) : pending;
+		return settled ? asPayment(settled, watched) : watched;
 	}
 
 	paid(id: string, preimage: string): Settled {
-		const pending = this.ledger.read(id);
+		const watched = this.ledger.read(id);
 		const already = this.ledger.settlement(id);
 		if (already) {
 			this.ledger.forget(id);
-			return { payment: asPayment(already, pending), won: false };
+			return { payment: asPayment(already, watched), won: false };
 		}
-		if (!pending) {
+		if (!watched) {
 			throw new Error(`payment ${id} is not on the worklist`);
 		}
 
-		const { settled, facts } = this.ledger.settle(pending, preimage);
+		const { settled, facts } = this.ledger.settle(watched, preimage);
 		announce(this.gossip, { facts, more: false });
 		this.onChange(asPayment(settled));
 		this.onScheduled();
 
-		return { payment: asPayment(settled, pending), won: true };
+		return { payment: asPayment(settled, watched), won: true };
 	}
 
 	replay(trigger: string, limit: number): PublicPayment[] {
@@ -148,7 +148,7 @@ export class Store {
 	}
 
 	duePolls(limit: number, leaseSecs: number): Payment[] {
-		return this.ledger.claim(limit, leaseSecs);
+		return this.ledger.duePolls(limit, leaseSecs);
 	}
 
 	polled(id: string, dueAt: number | null): void {
@@ -208,6 +208,6 @@ function sequenceTotals(marks: Watermarks): Record<Source, number> {
 	return Object.fromEntries(summed) as Record<Source, number>;
 }
 
-function asPayment(settled: PublicPayment, pending: Payment | null = null): Payment {
-	return { ...settled, webhooks: pending?.webhooks ?? [] };
+function asPayment(settled: PublicPayment, watched: Payment | null = null): Payment {
+	return { ...settled, webhooks: watched?.webhooks ?? [] };
 }
