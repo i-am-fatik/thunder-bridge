@@ -118,3 +118,20 @@ test("a stable blob hides what it carries, exactly like a random one", async () 
 	expect(sealed).not.toContain("iamfatik");
 	expect(sealed.startsWith("v2.")).toBe(true);
 });
+
+const HASH = "ab".repeat(32);
+const OTHER_HASH = "cd".repeat(32);
+
+test("a blob sealed for a payment opens beside that payment and beside no other", async () => {
+	const sealed = await seal(SECRET, PLAIN, HASH);
+
+	expect(await unseal(SECRET, sealed, HASH)).toBe(PLAIN);
+	expect(await unseal(SECRET, sealed, HASH.toUpperCase())).toBe(PLAIN);
+	expect(await unseal(SECRET, sealed, OTHER_HASH)).toBeNull();
+	expect(await unseal(SECRET, sealed)).toBeNull();
+});
+
+test("a blob sealed for no payment does not open as though it had been sealed for one", async () => {
+	expect(await unseal(SECRET, await seal(SECRET, PLAIN), HASH)).toBeNull();
+	expect(await unseal(SECRET, SEALED_BEFORE_PADDING, HASH)).toBeNull();
+});

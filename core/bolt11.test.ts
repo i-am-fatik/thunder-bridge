@@ -54,8 +54,9 @@ test("a real alby invoice matches the hash the rust decoder produced", () => {
 });
 
 test("coinos hands out a thirty day expiry", () => {
-	const invoice = decodeInvoice(COINOS_21_SAT).expiresAt;
-	expect(invoice).toBe(1_785_586_932 + 2_592_000);
+	const invoice = decodeInvoice(COINOS_21_SAT);
+	expect(invoice.issuedAt).toBe(1_785_586_932);
+	expect(invoice.expiresAt).toBe(1_785_586_932 + 2_592_000);
 });
 
 test("garbage decodes to an invoice that says nothing", () => {
@@ -64,6 +65,7 @@ test("garbage decodes to an invoice that says nothing", () => {
 			paymentHash: null,
 			descriptionHash: null,
 			amountMsat: null,
+			issuedAt: null,
 			expiresAt: null,
 		});
 	}
@@ -82,7 +84,13 @@ test("a preimage proves only the hash it hashes to", () => {
 	expect(preimageMatchesHash("", ZERO_PREIMAGE_HASH)).toBe(false);
 });
 
-const NOTHING = { paymentHash: null, descriptionHash: null, amountMsat: null, expiresAt: null };
+const NOTHING = {
+	paymentHash: null,
+	descriptionHash: null,
+	amountMsat: null,
+	issuedAt: null,
+	expiresAt: null,
+};
 
 test("one character changed anywhere fails the checksum, so the invoice says nothing", () => {
 	const at = SPEC_25M.indexOf("pp5") + 10;

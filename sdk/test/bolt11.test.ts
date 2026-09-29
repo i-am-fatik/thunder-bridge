@@ -11,6 +11,7 @@ const NOTHING_DECODED = {
   paymentHash: null,
   descriptionHash: null,
   amountMsat: null,
+  issuedAt: null,
   expiresAt: null,
 };
 
@@ -25,6 +26,7 @@ describe("decodeInvoice", () => {
       paymentHash: PAYMENT_HASH,
       descriptionHash: DESCRIPTION_HASH,
       amountMsat: AMOUNT_MSAT,
+      issuedAt: 0,
       expiresAt: EXPIRES_AT,
     });
   });
@@ -35,6 +37,7 @@ describe("decodeInvoice", () => {
       paymentHash: PAYMENT_HASH,
       descriptionHash: DESCRIPTION_HASH,
       amountMsat: null,
+      issuedAt: 0,
       expiresAt: EXPIRES_AT,
     });
   });
@@ -49,6 +52,7 @@ describe("decodeInvoice", () => {
       paymentHash: PAYMENT_HASH,
       descriptionHash: null,
       amountMsat: AMOUNT_MSAT,
+      issuedAt: 0,
       expiresAt: EXPIRES_AT,
     });
   });
@@ -84,6 +88,7 @@ describe("decodeInvoice", () => {
       paymentHash: PAYMENT_HASH,
       descriptionHash: DESCRIPTION_HASH,
       amountMsat: AMOUNT_MSAT,
+      issuedAt: 0,
       expiresAt: EXPIRES_AT,
     });
   });
@@ -108,12 +113,14 @@ describe("decodeInvoice", () => {
       paymentHash: PAYMENT_HASH,
       descriptionHash: null,
       amountMsat: AMOUNT_MSAT,
+      issuedAt: 0,
       expiresAt: EXPIRES_AT,
     });
     expect(decodeInvoice(truncated(invoice, dataWords >> 1))).toEqual({
       paymentHash: null,
       descriptionHash: null,
       amountMsat: AMOUNT_MSAT,
+      issuedAt: null,
       expiresAt: null,
     });
   });

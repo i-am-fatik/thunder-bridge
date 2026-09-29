@@ -29,6 +29,7 @@ export interface Invoice {
 	paymentHash: string | null;
 	descriptionHash: string | null;
 	amountMsat: number | null;
+	issuedAt: number | null;
 	expiresAt: number | null;
 }
 
@@ -39,16 +40,26 @@ export interface Invoice {
 export function decodeInvoice(bolt11: string): Invoice {
 	const parts = splitBech32(bolt11);
 	if (parts === null) {
-		return { paymentHash: null, descriptionHash: null, amountMsat: null, expiresAt: null };
+		return {
+			paymentHash: null,
+			descriptionHash: null,
+			amountMsat: null,
+			issuedAt: null,
+			expiresAt: null,
+		};
 	}
 
 	const tagged = taggedFields(parts.words);
+	const issuedAt = issuedAtOf(parts.words);
+	const expiry = tagged.get(EXPIRY_TAG);
 
 	return {
 		paymentHash: hexTag(tagged, PAYMENT_HASH_TAG, PAYMENT_HASH_WORDS),
 		descriptionHash: hexTag(tagged, DESCRIPTION_HASH_TAG, DESCRIPTION_HASH_WORDS),
 		amountMsat: amountFromHrp(parts.hrp),
-		expiresAt: expiryOf(parts.words, tagged),
+		issuedAt,
+		expiresAt:
+			issuedAt === null ? null : issuedAt + (expiry ? readNumber(expiry) : DEFAULT_EXPIRY_SECS),
 	};
 }
 
@@ -157,17 +168,12 @@ function hexTag(fields: TaggedFields, tag: number, expectedWords: number): strin
 	return bytesToHex(wordsToBytes(words));
 }
 
-function expiryOf(words: number[], fields: TaggedFields): number | null {
+function issuedAtOf(words: number[]): number | null {
 	if (words.length < TIMESTAMP_WORDS + SIGNATURE_WORDS) {
 		return null;
 	}
 
-	const expiry = fields.get(EXPIRY_TAG);
-
-	return (
-		readNumber(words.slice(0, TIMESTAMP_WORDS)) +
-		(expiry ? readNumber(expiry) : DEFAULT_EXPIRY_SECS)
-	);
+	return readNumber(words.slice(0, TIMESTAMP_WORDS));
 }
 
 function amountFromHrp(hrp: string): number | null {

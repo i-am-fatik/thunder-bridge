@@ -8,15 +8,23 @@ const MAX_PLAIN_BYTES = 3000;
 const SIZE_CLASSES = [256, 1024, MAX_PLAIN_BYTES];
 const END_OF_TEXT = 0x80;
 const INFO = new TextEncoder().encode("thunder-bridge/sealed");
-const BOUND_TO_VERSION = new TextEncoder().encode(VERSION);
 
 /**
  * Encrypt what the watcher needs and the gateway must not have. The gateway
  * stores the result and hands it back untouched, so anything readable you put
  * in `sealed` is something you told it, which is what blind mode exists to avoid
  */
-export async function seal(secret: string, plaintext: string): Promise<string> {
-	return await sealUnder(secret, plaintext, crypto.getRandomValues(new Uint8Array(IV_BYTES)));
+export async function seal(
+	secret: string,
+	plaintext: string,
+	paymentHash?: string,
+): Promise<string> {
+	return await sealUnder(
+		secret,
+		plaintext,
+		crypto.getRandomValues(new Uint8Array(IV_BYTES)),
+		boundTo(paymentHash),
+	);
 }
 
 /**
@@ -32,22 +40,19 @@ export async function sealStable(secret: string, plaintext: string): Promise<str
 		nonce[at] = Number.parseInt(derived.slice(at * 2, at * 2 + 2), 16);
 	}
 
-	return await sealUnder(secret, plaintext, nonce);
+	return await sealUnder(secret, plaintext, nonce, boundTo(undefined));
 }
 
 async function sealUnder(
 	secret: string,
 	plaintext: string,
 	iv: Uint8Array<ArrayBuffer>,
+	additionalData: Uint8Array<ArrayBuffer>,
 ): Promise<string> {
 	const body = padToClass(plaintext);
 	const key = await keyFor(secret);
 	const cipher = new Uint8Array(
-		await crypto.subtle.encrypt(
-			{ name: "AES-GCM", iv, additionalData: BOUND_TO_VERSION },
-			key,
-			body,
-		),
+		await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData }, key, body),
 	);
 	const joined = new Uint8Array(iv.length + cipher.length);
 	joined.set(iv);
@@ -61,10 +66,15 @@ async function sealUnder(
  * on the way, or is not one of ours. A secret too short to be a key throws,
  * because that is your bug rather than someone else's input
  */
-export async function unseal(secret: string, sealed: string): Promise<string | null> {
+export async function unseal(
+	secret: string,
+	sealed: string,
+	paymentHash?: string,
+): Promise<string | null> {
 	const key = await keyFor(secret);
 	const padded = sealed.startsWith(`${VERSION}.`);
-	if (!padded && !sealed.startsWith(`${UNPADDED_VERSION}.`)) {
+	const unbound = !padded && sealed.startsWith(`${UNPADDED_VERSION}.`);
+	if (!padded && (!unbound || paymentHash !== undefined)) {
 		return null;
 	}
 
@@ -79,7 +89,7 @@ export async function unseal(secret: string, sealed: string): Promise<string | n
 				{
 					name: "AES-GCM",
 					iv: joined.slice(0, IV_BYTES),
-					additionalData: padded ? BOUND_TO_VERSION : undefined,
+					additionalData: padded ? boundTo(paymentHash) : undefined,
 				},
 				key,
 				joined.slice(IV_BYTES),
@@ -100,6 +110,12 @@ export function refuseAWeakSecret(secret: string): void {
 	if (secret.length < MIN_SECRET_CHARS) {
 		throw new Error(`the sealing secret needs ${MIN_SECRET_CHARS} characters of randomness`);
 	}
+}
+
+function boundTo(paymentHash: string | undefined): Uint8Array<ArrayBuffer> {
+	return new TextEncoder().encode(
+		paymentHash === undefined ? VERSION : `${VERSION}|${paymentHash.toLowerCase()}`,
+	);
 }
 
 function padToClass(plaintext: string): Uint8Array<ArrayBuffer> {
