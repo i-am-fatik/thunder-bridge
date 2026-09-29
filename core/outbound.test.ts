@@ -164,6 +164,20 @@ test("credentials do not travel to a second origin", async () => {
 	expect(sent[1]?.headers).toEqual({});
 });
 
+test("credentials do not travel to a second origin however their names are spelled", async () => {
+	const sent: Sent[] = [];
+	const { send } = answering((url, options) => {
+		sent.push(options);
+		return url === ENTRY ? redirect(ELSEWHERE, 303) : new Response("done");
+	});
+	await ask(send, ENTRY, {
+		method: "POST",
+		headers: { Authorization: "Bearer secret", Cookie: "a=1", "Content-Type": "text/plain" },
+		body: "{}",
+	});
+	expect(sent[1]?.headers).toEqual({});
+});
+
 test("credentials do travel to another path on the same origin", async () => {
 	const sent: Sent[] = [];
 	const { send } = answering((url, options) => {

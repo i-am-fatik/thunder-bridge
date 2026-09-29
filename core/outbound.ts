@@ -119,17 +119,19 @@ async function answerOf(response: Response): Promise<Answer> {
 }
 
 function withoutBody(sent: Sent): Sent {
-	const headers = { ...sent.headers };
-	delete headers["content-type"];
+	const headers = Object.fromEntries(
+		Object.entries(sent.headers ?? {}).filter(([name]) => name.toLowerCase() !== "content-type"),
+	);
 
 	return { ...sent, method: "GET", headers, body: undefined };
 }
 
 function withoutCredentials(sent: Sent): Sent {
-	const headers = { ...sent.headers };
-	for (const named of CREDENTIALS) {
-		delete headers[named];
-	}
+	const headers = Object.fromEntries(
+		Object.entries(sent.headers ?? {}).filter(
+			([name]) => !CREDENTIALS.includes(name.toLowerCase()),
+		),
+	);
 
 	return { ...sent, headers };
 }
