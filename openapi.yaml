@@ -344,7 +344,7 @@ paths:
         "502":
           $ref: "#/components/responses/upstream_unreachable"
         "503":
-          $ref: "#/components/responses/at_capacity"
+          $ref: "#/components/responses/host_busy"
 
   /incoming-payments/{id}:
     parameters:
@@ -396,8 +396,14 @@ paths:
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
+        "403":
+          description: |
+            This instance keeps a list of `CLIENT_KEYS`, and a socket that names no caller
+            could be anyone's, so it opens only through `/ws/tickets/{ticket}`.
         "503":
-          description: This instance is draining, so open the socket against another one.
+          description: |
+            This instance is draining, or holds as many sockets as `MAX_SOCKETS` allows, so
+            open the socket against another one.
         "404":
           $ref: "#/components/responses/not_found"
 
@@ -415,11 +421,16 @@ paths:
 
         What it does see is the URL itself, which it stores in its ledger and replicates to its
         peers, so whatever you put in that path or query the operator can read. The bank rail's
-        own client puts the order reference, the amount in minor units and the currency there,
-        because the endpoint being polled needs them, and on that rail the gateway therefore
-        does learn the amount. Keep out of the URL anything that should stay unseen and put it
-        in `sealed`, which the gateway stores and hands back untouched without being able to
-        read it.
+        own client seals the account, the amount, the currency and the reference into one blob
+        in that query, which only its own endpoint opens. Keep out of the URL anything that
+        should stay unseen and put it in `sealed`, which the gateway stores and hands back
+        untouched without being able to read it.
+
+        `verify_url` may instead be `agent:` followed by the signing key of the caller asking.
+        Nothing is fetched then: the gateway asks that caller over the agent socket it holds
+        open through `/ws/tickets/{ticket}`, which is how a till or a phone with no public host
+        answers for its own payments. An agent address naming any other key, or sent unsigned,
+        is refused `400`.
 
         Nothing here is verified on your behalf, because there is nothing to verify against:
         you resolved the address, so the origin proof is yours to have run already.
@@ -502,7 +513,7 @@ paths:
         "429":
           $ref: "#/components/responses/too_many_pending"
         "503":
-          $ref: "#/components/responses/at_capacity"
+          $ref: "#/components/responses/host_busy"
 
   /ws-tickets:
     post:
@@ -515,8 +526,10 @@ paths:
         URL instead and the secret moves into this request body, which is not logged. The
         ticket does not make the secret stronger, it keeps it out of logs.
 
-        Name exactly one of `trigger_secret` or `payment_id`. The ticket is bound to that one
-        subject, so a leaked ticket grants one subscription to one thing.
+        Name exactly one of `trigger_secret`, `payment_id` or `agent`. The ticket is bound to
+        that one subject, so a leaked ticket grants one subscription to one thing. `agent: true`
+        asks for the signing caller's own agent socket, so it needs a signed request and answers
+        `404` to an unsigned one.
 
         Two independent checks. On a gateway with `GATEWAY_TOKEN` the bearer must be right,
         like every other route. In both modes the body must name something you already hold:
@@ -524,8 +537,10 @@ paths:
         the capability for that payment. A public gateway therefore mints with no bearer.
 
         Tickets are signed, not stored, so any instance sharing the cluster key reads a
-        ticket another one minted. Single use is not enforced: within the minute it lives, a
-        replayed ticket buys its holder the subscription they already had the secret for.
+        ticket another one minted. A ticket opens one socket: the instance that opens it
+        remembers it until it would have expired and refuses it a second time. Another
+        instance does not know it was used, so across a cluster a replayed ticket still buys
+        at most one socket per instance within its minute.
       requestBody:
         required: true
         content:
@@ -572,20 +587,28 @@ paths:
         Behaves exactly as the path the ticket stands in for: a trigger ticket streams that
         trigger, replay first, and a payment ticket follows that one payment.
 
+        An agent ticket opens the caller's agent socket instead. The gateway sends
+        `{"ask": "...", "payment_hash": "..."}` for each due payment addressed to that caller,
+        and the caller answers `{"ask": "...", "settled": true, "preimage": "..."}` or
+        `{"ask": "...", "settled": false}` with the same `ask`. Every socket the caller holds
+        open is asked at once, the first preimage that hashes to the payment settles it, and a
+        socket that misses a ping is closed at the next one.
+
         Use this rather than the direct paths whenever a secret in a URL is a worry. The
         direct paths stay for a microcontroller, where one hardcoded URL and a dumb reconnect
         loop beats a POST and a JSON parse before every connect.
 
         A ticket carries its own authority, so this path takes no bearer even on a private
-        gateway. It stays usable until it expires rather than being consumed by opening, and
-        a minute is short enough that minting one per connection is the only sane habit.
+        gateway. Opening a socket with it spends it, so mint one per connection.
       responses:
         "101":
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
         "503":
-          description: This instance is draining, so open the socket against another one.
+          description: |
+            This instance is draining, or holds as many sockets as `MAX_SOCKETS` allows, so
+            open the socket against another one.
 
   /ws/triggers/{secret}:
     parameters:
@@ -616,8 +639,14 @@ paths:
           description: Switching protocols. Every frame is one `incoming_payment` as JSON.
         "401":
           $ref: "#/components/responses/unauthorized"
+        "403":
+          description: |
+            This instance keeps a list of `CLIENT_KEYS`, so a trigger opens only through
+            `/ws/tickets/{ticket}`, whose ticket a listed key has to sign for.
         "503":
-          description: This instance is draining, so open the socket against another one.
+          description: |
+            This instance is draining, or holds as many sockets as `MAX_SOCKETS` allows, so
+            open the socket against another one.
 
   /quotes:
     post:
@@ -906,6 +935,12 @@ components:
         addresses, a different amount, or a different webhook answers 409
         `idempotency-key-reused` instead of the earlier payment.
 
+        A key belongs to the caller who signed the request, so the same key from two
+        signing keys is two keys: nobody else's payment is replayed to you and nobody can
+        squat a key you are about to use. Keys from unsigned requests share one space, as
+        their payments do. The key is claimed before your share of `MAX_PENDING` is
+        counted, so a retry of a request that took your last slot still gets its payment.
+
         Keys are held for 24 hours and then dropped, which is shorter than a payment
         lives. A retry after that mints a second invoice, so a key is a retry window and
         not a permanent handle. If the payment a key names has already been pruned, the
@@ -1180,8 +1215,9 @@ components:
             releases is only accepted when it hashes to this.
         verify_url:
           type: string
-          format: uri
-          description: The recipient's LUD-21 endpoint, a public https URL.
+          description: |
+            The recipient's LUD-21 endpoint, a public https URL, or `agent:` followed by the
+            caller's own 64 hex character signing key when the caller answers over a socket.
         expires_at:
           type: string
           format: date-time
@@ -1213,6 +1249,12 @@ components:
         payment_id:
           type: string
           description: A payment id this gateway issued. An unknown one is a 404, not a ticket.
+        agent:
+          type: boolean
+          enum: [true]
+          description: |
+            The signing caller's own agent socket, on which the gateway asks about that
+            caller's payments addressed `agent:` and the caller answers. Needs a signed request.
         replay:
           type: integer
           minimum: 0
@@ -1479,11 +1521,19 @@ components:
           schema:
             $ref: "#/components/schemas/problem"
 
-    at_capacity:
+    host_busy:
       description: |
-        The cluster is already watching as many payments as `MAX_PENDING` allows. Every
-        instance holds every payment, so this is a ceiling on the cluster's worklist rather
-        than on one machine, and it clears as payments settle or expire.
+        This gateway is already asking the host the request names as often as that host
+        allows. The GET and the challenge a registration sends, and a webhook's challenge,
+        take the host's next turn from the same budget polls use, and a registration whose
+        turn is more than a few seconds off is turned away rather than queued, so a loop of
+        registrations cannot outrun the pace every honest poll keeps. Try again after
+        `Retry-After`.
+      headers:
+        Retry-After:
+          description: Seconds to wait before asking again.
+          schema:
+            type: integer
       content:
         application/problem+json:
           schema:

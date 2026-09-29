@@ -71,14 +71,17 @@ paths:
       summary: Quote the price, or mint the invoice for a quote already given
       description: |
         Without `to` this answers the payRequest. It calls your `amountMsat()` once, quotes
-        your address list through the gateway, and returns the first address that answers and
-        accepts the amount, along with that wallet's own LUD-06 metadata string byte for byte.
+        your address list, through the gateway or by itself when the trigger is blind, and
+        returns the first address that answers and accepts the amount, along with that
+        wallet's own LUD-06 metadata string byte for byte. A quote naming an address you did
+        not list is refused, so a gateway cannot put its own address in front of your payers.
         `minSendable` and `maxSendable` are both the price, so the payer's wallet offers no
         amount field and the payment is exactly what you asked for.
 
         With `to` this is the callback. The signature is checked first, and a request that was
         not signed by this service is refused before anything is minted, which is what stops a
-        stranger making your endpoint mint invoices on wallets of their choosing. The invoice
+        stranger making your endpoint mint invoices on wallets of their choosing. An address
+        you have since taken off the list is refused too, signed or not. The invoice
         then comes from the recipient's own wallet, never from this service and never from the
         gateway, and `verify` on the answer points at that recipient's LUD-21 endpoint.
 
@@ -200,48 +203,35 @@ paths:
       operationId: verifyBankTransfer
       summary: Say whether the transfer landed, and release the preimage when it did
       description: |
-        Mounted wherever you passed `verifyUrl` to `bankTransfer`, which puts what to look for
-        in the query and signs it. The gateway polls this exactly as it polls a wallet's LUD-21
-        endpoint, and it cannot tell the difference, which is the whole point.
+        Mounted wherever you passed `verifyUrl` to `bankTransfer`, which seals what to look for
+        into the query. The gateway polls this exactly as it polls a wallet's LUD-21 endpoint,
+        and it cannot tell the difference, which is the whole point.
 
-        A query this service did not sign is refused. Without that check the endpoint would
-        answer "did anyone send you this amount with this note" to whoever asked, which is a
-        bank statement handed out one question at a time.
+        A query this service did not seal is refused, and so is one sealed for another
+        account. Without that check the endpoint would answer "did anyone send you this amount
+        with this note" to whoever asked, which is a bank statement handed out one question at
+        a time.
 
-        The preimage is an HMAC of the reference, the amount and the currency under a secret
-        only this service holds, so the gateway can check it hashes to what it was given and
-        still cannot produce it. Nothing is stored between calls.
+        A credit pays when its amount and currency match exactly and the reference stands as a
+        whole word in what the payer wrote, across every field the bank puts a note in, so
+        noise around it is fine. A credit that also names another reference shaped like it, a
+        second order number of the same kind, pays neither.
+
+        The preimage is an HMAC of the account, the amount, the currency, the expiry and the
+        reference under a secret only this service holds, so the gateway can check it hashes to
+        what it was given and still cannot produce it, and a second order under the same
+        reference is another payment. Nothing is stored between calls.
       parameters:
-        - name: ref
+        - name: q
           in: query
           required: true
           description: |
-            What the payer had to leave on the transfer. Matched as a substring against every
-            field the bank puts a note in, so noise around it is fine.
+            One blob sealed by `bankTransfer` under the rail secret, naming the account, the
+            amount in minor units, the currency, the expiry and the reference. Padded to one
+            size class, so its length says nothing about what it carries.
           schema:
             type: string
-        - name: minor
-          in: query
-          required: true
-          description: The price in the smallest unit of the currency, so 48055 is 480.55 CZK.
-          schema:
-            type: integer
-            minimum: 1
-        - name: cc
-          in: query
-          required: true
-          description: The three letter currency code the credit has to be in.
-          schema:
-            type: string
-            minLength: 3
-            maxLength: 3
-        - name: sig
-          in: query
-          required: true
-          description: Hex HMAC-SHA256 over `<ref>|<minor>|<cc>`, minted by `bankTransfer`.
-          schema:
-            type: string
-            pattern: "^[0-9a-f]{64}$"
+            pattern: "^v2\\."
       responses:
         "200":
           description: |
@@ -258,7 +248,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/unsettled"
         "403":
-          description: The signature does not hold, so this service never minted the question.
+          description: The blob does not open under this service's secret, or was sealed for another account, so it never asked the question.
           content:
             application/json:
               schema:
