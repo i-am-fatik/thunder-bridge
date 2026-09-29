@@ -1145,6 +1145,30 @@ test("an agent ticket is minted for the caller that asked for it, and for nobody
 	app.stop();
 });
 
+test("a draining instance closes the agent sockets it holds, so the device reconnects elsewhere", async () => {
+	const app = await running();
+	const asked = JSON.stringify({ agent: true });
+	const minted = await fetch(`http://127.0.0.1:${app.service.at}/ws-tickets`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+		},
+		body: asked,
+	});
+	const { ticket } = (await minted.json()) as { ticket: string };
+	const socket = new WebSocket(`ws://127.0.0.1:${app.service.at}/ws/tickets/${ticket}`);
+	await new Promise((ready) => socket.addEventListener("open", ready, { once: true }));
+	const closed = new Promise((gone) => socket.addEventListener("close", gone, { once: true }));
+
+	await app.service.stop();
+
+	expect(
+		await Promise.race([closed.then(() => "closed"), settled().then(() => "still open")]),
+	).toBe("closed");
+	app.stop();
+});
+
 test("a ticket names one subject, so asking for an agent and a payment at once is refused", async () => {
 	const app = await running();
 	const asked = JSON.stringify({ agent: true, payment_id: "whatever" });

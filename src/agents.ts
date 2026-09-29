@@ -9,6 +9,8 @@ const ANSWER_MS = 10_000;
 /** Every socket a caller is holding open right now, by the key it speaks as */
 export type Agents = Map<string, Set<WebSocket>>;
 
+const unanswered = new WeakSet<WebSocket>();
+
 /**
  * Hold one caller's socket for as long as it lives. A caller answers from as
  * many devices as it has open, so the sockets are a set and the last one to
@@ -28,6 +30,20 @@ export function attend(socket: WebSocket, caller: string, agents: Agents): void 
 
 	socket.on("close", leave);
 	socket.on("error", leave);
+	socket.on("pong", () => unanswered.delete(socket));
+}
+
+export function keepAlive(agents: Agents): void {
+	for (const held of agents.values()) {
+		for (const socket of held) {
+			if (unanswered.has(socket)) {
+				socket.terminate();
+				continue;
+			}
+			unanswered.add(socket);
+			socket.ping();
+		}
+	}
 }
 
 /**
@@ -40,41 +56,61 @@ export async function askAnAgent(
 	caller: string,
 	paymentHash: string,
 ): Promise<Settlement | null> {
-	const [socket] = agents.get(caller) ?? [];
-	if (socket === undefined) {
+	const held = [...(agents.get(caller) ?? [])];
+	if (held.length === 0) {
 		return null;
 	}
 
 	const ask = bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
-	const answered = new Promise<Answer | null>((resolve) => {
-		const hear = (raw: unknown): void => {
-			const answer = answerTo(ask, raw);
-			if (answer === null) {
-				return;
-			}
+	const answered = new Promise<Answer[]>((resolve) => {
+		const heard: Answer[] = [];
+		const listening = held.map((socket) => {
+			const hear = (raw: unknown): void => {
+				const answer = answerTo(ask, raw);
+				if (answer === null) {
+					return;
+				}
 
-			socket.off("message", hear);
+				socket.off("message", hear);
+				heard.push(answer);
+				if (heard.length === held.length || proves(answer, paymentHash)) {
+					done();
+				}
+			};
+
+			return { socket, hear };
+		});
+		const done = (): void => {
 			clearTimeout(timer);
-			resolve(answer);
+			for (const { socket, hear } of listening) {
+				socket.off("message", hear);
+			}
+			resolve(heard);
 		};
-		const timer = setTimeout(() => {
-			socket.off("message", hear);
-			resolve(null);
-		}, ANSWER_MS);
+		const timer = setTimeout(done, ANSWER_MS);
 
-		socket.on("message", hear);
+		for (const { socket, hear } of listening) {
+			socket.on("message", hear);
+		}
 	});
 
-	socket.send(JSON.stringify({ ask, payment_hash: paymentHash }));
-	const answer = await answered;
-	if (answer === null) {
-		return null;
+	for (const socket of held) {
+		socket.send(JSON.stringify({ ask, payment_hash: paymentHash }));
 	}
-	if (answer.preimage !== null && !preimageMatchesHash(answer.preimage, paymentHash)) {
+	const answers = await answered;
+	const proven = answers.find((answer) => proves(answer, paymentHash));
+	if (proven) {
+		return { preimage: proven.preimage, pace: null, ceiling: null };
+	}
+	if (answers.some((answer) => answer.preimage !== null)) {
 		throw new Error(`the agent answered a preimage that does not hash to ${paymentHash}`);
 	}
 
-	return { preimage: answer.preimage, pace: null, ceiling: null };
+	return answers.length === 0 ? null : { preimage: null, pace: null, ceiling: null };
+}
+
+function proves(answer: Answer, paymentHash: string): boolean {
+	return answer.preimage !== null && preimageMatchesHash(answer.preimage, paymentHash);
 }
 
 type Answer = { preimage: string | null };

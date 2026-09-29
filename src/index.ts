@@ -16,7 +16,7 @@ import type { Send } from "../core/outbound.ts";
 import { pinnedToTheAddressWeVerified } from "../core/pinned.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { agentAddressed } from "../core/url.ts";
-import { type Agents, attend } from "./agents.ts";
+import { type Agents, attend, keepAlive } from "./agents.ts";
 import { Cluster } from "./cluster.ts";
 import { allowed, bearer, daysToSecs, positive, secret, secsToMs, whole } from "./env.ts";
 import { Ledger } from "./ledger.ts";
@@ -335,6 +335,7 @@ export async function start(
 			follower.answered = false;
 			socket.ping();
 		}
+		keepAlive(agents);
 	}, PING_INTERVAL_MS);
 
 	const sweeper = setInterval(() => {
@@ -388,6 +389,11 @@ export async function start(
 			await Promise.race([inFlight, sleep(drainTimeoutMs, undefined, { ref: false })]);
 			for (const socket of followers.keys()) {
 				socket.close();
+			}
+			for (const held of agents.values()) {
+				for (const socket of held) {
+					socket.close();
+				}
 			}
 			upgrades.close();
 			server.closeAllConnections();

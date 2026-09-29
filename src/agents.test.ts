@@ -1,13 +1,22 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "vitest";
 
-import { type Agents, askAnAgent, attend } from "./agents.ts";
+import { type Agents, askAnAgent, attend, keepAlive } from "./agents.ts";
 
 type Heard = (said?: unknown) => void;
 
 class FakeSocket {
 	private readonly listeners = new Map<string, Heard[]>();
 	readonly sent: string[] = [];
+	pinged = 0;
+
+	ping(): void {
+		this.pinged += 1;
+	}
+
+	terminate(): void {
+		this.fire("close");
+	}
 
 	on(event: string, listener: Heard): this {
 		this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener]);
@@ -183,4 +192,49 @@ test("the listener leaves with its answer, so one socket serves ask after ask", 
 	);
 
 	expect((await second)?.preimage).toBe(PREIMAGE);
+});
+
+test("every device a caller holds open is asked, and the one that saw the money answers", async () => {
+	const { agents, socket } = answering();
+	const second = new FakeSocket();
+	attend(second as never, CALLER, agents);
+
+	const answered = askAnAgent(agents, CALLER, HASH);
+	socket.fire("message", JSON.stringify({ ask: socket.asked().ask, settled: false }));
+	second.fire(
+		"message",
+		JSON.stringify({ ask: second.asked().ask, settled: true, preimage: PREIMAGE }),
+	);
+
+	expect((await answered)?.preimage).toBe(PREIMAGE);
+});
+
+test("a device gone quiet does not hold up the one that answers with the preimage", async () => {
+	const { agents } = answering();
+	const second = new FakeSocket();
+	attend(second as never, CALLER, agents);
+	const started = Date.now();
+
+	const answered = askAnAgent(agents, CALLER, HASH);
+	second.fire(
+		"message",
+		JSON.stringify({ ask: second.asked().ask, settled: true, preimage: PREIMAGE }),
+	);
+
+	expect((await answered)?.preimage).toBe(PREIMAGE);
+	expect(Date.now() - started).toBeLessThan(1000);
+});
+
+test("a socket that does not answer a ping is let go at the next one, and one that does is kept", () => {
+	const { agents, socket } = answering();
+	const second = new FakeSocket();
+	attend(second as never, CALLER, agents);
+
+	keepAlive(agents);
+	expect([socket.pinged, second.pinged]).toEqual([1, 1]);
+	second.fire("pong");
+	keepAlive(agents);
+
+	expect([...(agents.get(CALLER) ?? [])]).toEqual([second]);
+	expect(second.pinged).toBe(2);
 });
