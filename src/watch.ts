@@ -134,6 +134,7 @@ async function notify(outbound: Outbound, owed: Delivery): Promise<boolean> {
 			method: "POST",
 			headers: await signedHeaders(owed.body, outbound.webhookKey),
 			body: owed.body,
+			staysOnOrigin: true,
 		});
 		if (!answer.ok) {
 			log.warn(`webhook for ${owed.id} rejected with ${answer.status}`);
@@ -162,6 +163,7 @@ async function consents(outbound: Outbound, url: string, type: string): Promise<
 			method: "POST",
 			headers: await signedHeaders(body, outbound.webhookKey),
 			body,
+			staysOnOrigin: true,
 		});
 		if (!answer.ok) {
 			log.warn(`${url} answered a ${type} with ${answer.status}`);

@@ -41,8 +41,10 @@ import {
 } from "./problem.ts";
 import { Store } from "./store.ts";
 import {
+	type Budget,
 	confirmVerify,
 	confirmWebhook,
+	spend,
 	tick,
 	unixNow,
 	WATCH_HORIZON_SECS,
@@ -158,6 +160,7 @@ type Serving = {
 	verifyChallenge: boolean;
 	maxReplay: number;
 	send: Send;
+	budget: Budget;
 };
 
 export async function start(
@@ -183,6 +186,13 @@ export async function start(
 	store: Store,
 ): Promise<Service> {
 	const agents: Agents = new Map();
+	const budget: Budget = {
+		perSecond: pollsPerSecond,
+		perTick: workPerTick,
+		nextAt: new Map(),
+		pace: new Map(),
+		ceiling: new Map(),
+	};
 	const serving: Serving = {
 		token: token === "" ? null : token,
 		key,
@@ -194,18 +204,13 @@ export async function start(
 		verifyChallenge,
 		maxReplay,
 		send,
+		budget,
 	};
 	const watcher: Watcher = {
 		store,
 		eagerDelayMs,
 		send,
-		budget: {
-			perSecond: pollsPerSecond,
-			perTick: workPerTick,
-			nextAt: new Map(),
-			pace: new Map(),
-			ceiling: new Map(),
-		},
+		budget,
 		webhookKey: serving.webhookKey,
 		agents,
 	};
@@ -643,6 +648,9 @@ async function create(
 	if (store.full(caller)) {
 		return tooMany(caller, store.info().maxPending);
 	}
+	if (asked.webhook && !(await spend(serving.budget, hostOf(asked.webhook.url)))) {
+		return askedEnough(asked.webhook.url);
+	}
 	if (asked.webhook && !(await confirmWebhook(serving, asked.webhook))) {
 		return unconfirmedWebhook(asked.webhook.url);
 	}
@@ -828,12 +836,21 @@ async function watchOnly(
 		if (serving.verifyHosts && !serving.verifyHosts.has(hostOf(asked.verifyUrl))) {
 			return refusedVerifyHost(asked.verifyUrl);
 		}
+		if (!(await spend(serving.budget, hostOf(asked.verifyUrl)))) {
+			return askedEnough(asked.verifyUrl);
+		}
 		if (!(await speaksVerify(serving.send, asked.verifyUrl))) {
 			return unconfirmedVerify(asked.verifyUrl);
+		}
+		if (serving.verifyChallenge && !(await spend(serving.budget, hostOf(asked.verifyUrl)))) {
+			return askedEnough(asked.verifyUrl);
 		}
 		if (serving.verifyChallenge && !(await confirmVerify(serving, asked.verifyUrl))) {
 			return unconsentedVerify(asked.verifyUrl);
 		}
+	}
+	if (asked.webhook && !(await spend(serving.budget, hostOf(asked.webhook.url)))) {
+		return askedEnough(asked.webhook.url);
 	}
 	if (asked.webhook && !(await confirmWebhook(serving, asked.webhook))) {
 		return unconfirmedWebhook(asked.webhook.url);
@@ -1109,6 +1126,21 @@ function unconsentedVerify(url: string): Response {
 		title: "The verify URL did not agree to be polled",
 		detail: `${url} has to answer the challenge with the nonce it was given before this gateway will poll it, so a caller cannot aim it at a host that never asked for the traffic. Serve it with the client's own verify endpoint, or run the gateway with VERIFY_CHALLENGE=0 if every host its callers name is one you know`,
 	});
+}
+
+function askedEnough(url: string): Response {
+	return new Response(
+		JSON.stringify({
+			type: "about:blank",
+			status: 503,
+			title: "Service Unavailable",
+			detail: `this gateway is already asking ${hostOf(url)} as often as it allows, so try again in a few seconds`,
+		}),
+		{
+			status: 503,
+			headers: { "content-type": "application/problem+json", "retry-after": "5" },
+		},
+	);
 }
 
 function unconfirmedWebhook(url: string): Response {

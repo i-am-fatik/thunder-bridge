@@ -65,6 +65,19 @@ test("a redirect to another public server is followed and its answer comes back"
 	expect(seen).toEqual([ENTRY, ELSEWHERE]);
 });
 
+test("a request told to stay on its origin follows a redirect on it and refuses one off it", async () => {
+	const onIt = answering((url) =>
+		url === ENTRY ? redirect("https://93.184.216.34/moved") : new Response("done"),
+	);
+	expect((await ask(onIt.send, ENTRY, { staysOnOrigin: true })).body).toBe("done");
+
+	const offIt = answering(() => redirect(ELSEWHERE));
+	await expect(ask(offIt.send, ENTRY, { staysOnOrigin: true })).rejects.toThrow(
+		/redirected off its own origin/,
+	);
+	expect(offIt.seen).toEqual([ENTRY]);
+});
+
 test("a server that keeps redirecting is given up on", async () => {
 	const { send, seen } = answering(() => redirect(ELSEWHERE));
 	await expect(ask(send, ENTRY)).rejects.toThrow(/redirected more than 2 times/);

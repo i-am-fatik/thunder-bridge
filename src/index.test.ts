@@ -1249,6 +1249,79 @@ test("a wallet cannot be pointed at, because it never agreed to be polled", asyn
 	}
 });
 
+test("a registration takes its turns at the verify host the way a poll does", async () => {
+	const app = await runningWith({ pollsPerSecond: 0.5 });
+	const heard: { what: string; at: number }[] = [];
+	app.outbound.send = async (url, sent) => {
+		heard.push({ what: `${sent.method ?? "GET"} ${url}`, at: Date.now() });
+		const challenged = nonceOffered(sent);
+		return Response.json(challenged === null ? { settled: false } : { nonce: challenged });
+	};
+
+	try {
+		const watched = await fetch(`http://127.0.0.1:${app.service.at}/watched-payments`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ ...WATCHABLE, payment_hash: PAYMENT_HASH }),
+		});
+
+		expect(watched.status).toBe(201);
+		expect(heard.map((one) => one.what)).toEqual([
+			`GET ${WATCHABLE.verify_url}`,
+			`POST ${WATCHABLE.verify_url}`,
+		]);
+		expect(heard[1]!.at - heard[0]!.at).toBeGreaterThanOrEqual(1900);
+	} finally {
+		app.stop();
+	}
+});
+
+test("a registration whose turn at the verify host is too far off is turned away for now", async () => {
+	const app = await runningWith({ pollsPerSecond: 0.1 });
+	const seen: string[] = [];
+	const restore = verifySpeakingButSilentOnTheChallenge(app, seen);
+
+	try {
+		const refused = await fetch(`http://127.0.0.1:${app.service.at}/watched-payments`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ ...WATCHABLE, payment_hash: PAYMENT_HASH }),
+		});
+
+		expect(refused.status).toBe(503);
+		expect(refused.headers.get("retry-after")).toBe("5");
+		expect(seen).toEqual([`GET ${WATCHABLE.verify_url}`]);
+		expect(app.store.get(paymentId(CLUSTER_KEY, PAYMENT_HASH))).toBeNull();
+	} finally {
+		restore();
+		app.stop();
+	}
+});
+
+test("a webhook challenge takes its turn at the webhook's host too", async () => {
+	const app = await runningWith({ pollsPerSecond: 0.1, verifyChallenge: false });
+	const seen: string[] = [];
+	const restore = verifySpeakingButSilentOnTheChallenge(app, seen);
+
+	try {
+		const refused = await fetch(`http://127.0.0.1:${app.service.at}/watched-payments`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				...WATCHABLE,
+				payment_hash: PAYMENT_HASH,
+				webhook: { url: "https://coinos.io/hooks/mine" },
+			}),
+		});
+
+		expect(refused.status).toBe(503);
+		expect(seen).toEqual([`GET ${WATCHABLE.verify_url}`]);
+	} finally {
+		restore();
+		app.stop();
+	}
+});
+
 test("an instance whose callers are all known can be told to stop asking", async () => {
 	const app = await runningWithoutTheVerifyChallenge();
 	const seen: string[] = [];

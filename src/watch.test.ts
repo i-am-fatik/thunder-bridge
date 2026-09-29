@@ -449,6 +449,33 @@ test("an endpoint that asks for a pace is polled at it, and one that does not ke
 	expect(parked[1]?.dueAt).toBe(unixNow() + 60);
 });
 
+test("a poll is not carried off the origin that agreed to be polled by a redirect", async () => {
+	const wire = intercepting(
+		() =>
+			new Response(null, { status: 302, headers: { location: "https://victim.example/verify" } }),
+	);
+	const { parked, handed, watcher } = queueing(wire.send, [payment()], settlesAs(true));
+
+	await tick(watcher);
+
+	expect(wire.calls.map((call) => call.url)).toEqual([VERIFY_URL]);
+	expect(handed).toEqual([]);
+	expect(parked).toHaveLength(1);
+});
+
+test("a webhook is not carried off the origin that answered its challenge by a redirect", async () => {
+	const wire = intercepting(
+		() => new Response(null, { status: 307, headers: { location: "https://victim.example/hook" } }),
+	);
+	const { done, failed, watcher } = owing(wire.send, [owed()]);
+
+	await tick(watcher);
+
+	expect(wire.calls.map((call) => call.url)).toEqual([HOOK_URL]);
+	expect(done).toEqual([]);
+	expect(failed).toEqual([HOOK_URL]);
+});
+
 test("a host that asks to be left alone is put off rather than waited on, so the tick moves on", async () => {
 	const wire = intercepting(() => verified(false));
 	const { parked, watcher } = queueing(
@@ -579,6 +606,19 @@ test("a challenge is signed with the gateway's own key, so a receiver can tell w
 	expect(
 		await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
 	).toBe(true);
+});
+
+test("a challenge answered from another origin a redirect led to is no consent at all", async () => {
+	const wire = intercepting((call) =>
+		call.url === HOOK_URL
+			? new Response(null, { status: 307, headers: { location: "https://elsewhere.example/hook" } })
+			: echoing(call),
+	);
+
+	expect(
+		await confirmWebhook({ send: wire.send, webhookKey: GATEWAY_KEY }, { url: HOOK_URL }),
+	).toBe(false);
+	expect(wire.calls.map((call) => call.url)).toEqual([HOOK_URL]);
 });
 
 test("a challenge answered wrongly leaves the webhook unconfirmed, whichever way it is wrong", async () => {

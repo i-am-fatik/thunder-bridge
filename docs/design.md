@@ -417,6 +417,16 @@ Credentials do not travel across an origin, and a redirect that does not say
 where to is refused rather than retried, both because the next caller of this
 helper will not think about either.
 
+Consent is given by an origin, so everything sent on the strength of it stays on
+that origin. A verify poll, a verify or webhook challenge and a webhook delivery
+follow a redirect only to another path of the same origin, and a redirect off it
+fails the request, because otherwise a host that answered the challenge could
+hand every later poll to one that never did. The two requests a registration
+makes before anything is watched take their turns at the host the way polls do,
+and a registration whose turn is more than a few seconds off is answered 503
+with a `retry-after`, so a loop of registrations cannot outrun the pace every
+honest poll keeps.
+
 ## What a caller may send
 
 A request body is read up to 64 KiB and refused past it, twice over: once on

@@ -1,5 +1,5 @@
 import { decodeInvoice, preimageMatchesHash } from "./bolt11.ts";
-import { ask, BODY_LIMIT_BYTES, type Send } from "./outbound.ts";
+import { ask, BODY_LIMIT_BYTES, type Send, type Sent } from "./outbound.ts";
 import { NoWalletAvailable, type WalletFailure, WalletRefused } from "./refusal.ts";
 import { sha256Hex } from "./sha256.ts";
 import { publicHttps } from "./url.ts";
@@ -217,7 +217,7 @@ export async function checkSettled(
 	verifyUrl: string,
 	paymentHash: string,
 ): Promise<Settlement> {
-	const answer = await answeredJson<Verification>(send, verifyUrl);
+	const answer = await answeredJson<Verification>(send, verifyUrl, { staysOnOrigin: true });
 	const asked = {
 		pace: paceAskedFor(answer.headers),
 		ceiling: ceilingAskedFor(answer.headers),
@@ -234,7 +234,9 @@ export async function checkSettled(
 
 export async function speaksVerify(send: Send, url: string): Promise<boolean> {
 	try {
-		return typeof (await answeredJson<Verification>(send, url)).said.settled === "boolean";
+		const answer = await answeredJson<Verification>(send, url, { staysOnOrigin: true });
+
+		return typeof answer.said.settled === "boolean";
 	} catch {
 		return false;
 	}
@@ -381,15 +383,15 @@ function isNothingButAHost(domain: string): boolean {
 }
 
 async function fetchJson<T>(send: Send, url: string, deadline?: AbortSignal): Promise<T> {
-	return (await answeredJson<T>(send, url, deadline)).said;
+	return (await answeredJson<T>(send, url, { deadline })).said;
 }
 
 async function answeredJson<T>(
 	send: Send,
 	url: string,
-	deadline?: AbortSignal,
+	sent: Pick<Sent, "deadline" | "staysOnOrigin">,
 ): Promise<{ said: T; headers: Headers }> {
-	const answer = await ask(send, url, { headers: { accept: "application/json" }, deadline });
+	const answer = await ask(send, url, { headers: { accept: "application/json" }, ...sent });
 	if (!answer.ok) {
 		throw new Error(`${url} answered ${answer.status}`);
 	}

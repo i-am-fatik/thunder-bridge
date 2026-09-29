@@ -14,6 +14,7 @@ export type Sent = {
 	headers?: Record<string, string>;
 	body?: string;
 	deadline?: AbortSignal;
+	staysOnOrigin?: boolean;
 };
 
 export type Answer = {
@@ -54,6 +55,9 @@ export async function ask(send: Send, url: string, sent: Sent = {}): Promise<Ans
 		await response.body?.cancel();
 
 		const next = new URL(location, target).toString();
+		if (sent.staysOnOrigin && !sameOrigin(target, next)) {
+			throw new Error(`${target} redirected off its own origin, to ${next}`);
+		}
 		carried = KEEPS_THE_METHOD.includes(response.status) ? carried : withoutBody(carried);
 		carried = sameOrigin(target, next) ? carried : withoutCredentials(carried);
 		target = next;
