@@ -156,24 +156,32 @@ export interface Provable {
 }
 
 /**
- * A report `carriesProof` has already accepted, so the preimage is there and the
- * status is settled. Nothing downstream of the check needs a null guard
+ * A report `agreesWithItself` has already accepted, so the preimage is there and
+ * the status is settled. Nothing downstream of the check needs a null guard
  */
-export type Proven<T extends Provable> = T & { status: "paid"; preimage: string };
+export type SelfConsistent<T extends Provable> = T & { status: "paid"; preimage: string };
 
 /**
- * Whether a report proves what it claims: it says paid, and it carries a preimage
+ * What `SelfConsistent` was called before 2.2.0
+ *
+ * @deprecated Use `SelfConsistent`, which says the report was checked against itself and nothing else
+ */
+export type Proven<T extends Provable> = SelfConsistent<T>;
+
+/**
+ * Whether a report agrees with itself: it says paid, and it carries a preimage
  * that hashes to the payment hash it itself names. Where an invoice comes with it,
  * the invoice's own hash has to agree too.
  *
  * A payment, a settlement delivered to a webhook and a frame off a trigger all
- * answer this, because all three carry those fields and no other question about
- * one matters.
+ * answer this, because all three carry those fields.
  *
- * It asks nobody anything, so it costs no round trip and is not a proof of
- * arrival. Only `proveSettlement` asks the recipient
+ * It asks nobody anything and holds the report against nothing you hold, so a
+ * gateway that invents a preimage and names its hash passes it. Checking against
+ * the hash you hold is what `payment` and `settled` do, and only
+ * `proveSettlement` asks the recipient
  */
-export function carriesProof<T extends Provable>(report: T): report is Proven<T> {
+export function agreesWithItself<T extends Provable>(report: T): report is SelfConsistent<T> {
   if (report.status !== "paid" || report.preimage === null) {
     return false;
   }
@@ -186,6 +194,13 @@ export function carriesProof<T extends Provable>(report: T): report is Proven<T>
 
   return preimageMatchesHash(report.preimage, report.paymentHash);
 }
+
+/**
+ * What `agreesWithItself` was called before 2.2.0
+ *
+ * @deprecated Use `agreesWithItself`, because it proves nothing beyond the report itself
+ */
+export const carriesProof = agreesWithItself;
 
 /**
  * The most an operator may add over the recipient's own amount, in millisatoshi.

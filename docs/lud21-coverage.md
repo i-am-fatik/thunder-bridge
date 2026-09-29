@@ -65,8 +65,8 @@ so they are unmeasured rather than refused.
 ## Your own wallet needs none of this
 
 Every list above is about a recipient reached at an address somebody else hosts.
-A recipient who owns the wallet does not need one: `nwcRail` mints over NIP-47
-and `nwcVerifyEndpoint` answers the LUD-21 shape from `lookup_invoice`, so ZEUS
+A recipient who owns the wallet does not need one: `rails.nwc` mints over NIP-47
+and `serve.nwcVerify` answers the LUD-21 shape from `lookup_invoice`, so ZEUS
 Pay, Wallet of Satoshi and every other name on the refused list is watchable
 through a connection string instead of through its address. The preimage then
 comes from the recipient's own node rather than from a hosted service, which is

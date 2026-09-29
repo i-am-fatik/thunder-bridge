@@ -100,7 +100,7 @@ before anything is watched: it has to answer the LUD-21 shape, and then it has t
 answer a challenge of its own. Speaking the protocol is what every real wallet
 does and says nothing about wanting this gateway's traffic, so the last hop
 belongs on your side. Serve
-[`serve.verify`](sdk) or `serve.bankVerify`, which answer the
+[`serve.lightningVerify`](sdk) or `serve.bankVerify`, which answer the
 challenge for you and ask the wallet themselves, and a wallet then throttles the
 abuser's own host rather than this instance's address, which its every other
 client shares. A `verify_url` the gateway found itself while minting is never
@@ -205,8 +205,8 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   not, and their users are refused at creation. Which wallets work is in
   [docs/lud21-coverage.md](docs/lud21-coverage.md), re-measured against live
   wallets on the first of each month rather than read off anyone's changelog.
-- **Unless you own the wallet, in which case use NWC instead.** `nwcRail` mints on
-  a wallet of your own over NIP-47 and serves the gateway a `nwcVerifyEndpoint` of
+- **Unless you own the wallet, in which case use NWC instead.** `rails.nwc` mints on
+  a wallet of your own over NIP-47 and serves the gateway a `serve.nwcVerify` endpoint of
   yours, so a recipient with no LUD-21 address anywhere is watched anyway and the
   preimage comes from their own node rather than from a hosted address service.
   The gateway still speaks nothing but https, and the connection never reaches it.

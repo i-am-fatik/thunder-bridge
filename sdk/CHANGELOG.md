@@ -15,6 +15,25 @@ releases a version number once it has been published.
 
 ## Unreleased
 
+### Added
+
+- `gateway.rails.nwc(config)` and `gateway.serve.nwcVerify(config)`, so the NWC rail
+  and its verify endpoint sit beside every other rail and endpoint. The main entry
+  now carries the NIP-47 code, about 18 KB more. `nwcConnection` and the wallet calls
+  stay in `thunder-bridge/nwc`, and `NwcConnection`, `NwcRailConfig` and
+  `NwcVerifyConfig` are exported from the main entry too.
+- `gateway.serve.lightningVerify`, the name `serve.verify` should have had beside
+  `bankVerify` and `nwcVerify`.
+- `agreesWithItself` and `SelfConsistent<T>`, names for what `carriesProof` and
+  `Proven<T>` always did: hold a report against itself and against nothing you hold.
+- The README says which call checks what, from the hash you hold down to the
+  report alone.
+
+### Deprecated
+
+- `carriesProof`, `Proven`, `serve.verify`, and `nwcRail` and `nwcVerifyEndpoint`
+  from `thunder-bridge/nwc`. Each still works as before and goes in 3.0.
+
 ### Changed
 
 - A signed request names the gateway it is sent to and carries a nonce in

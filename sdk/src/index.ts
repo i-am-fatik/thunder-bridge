@@ -32,6 +32,7 @@ export {
 } from "./errors.js";
 export type { GatewaysOptions } from "./gateways.js";
 export { Gateways } from "./gateways.js";
+export type { NwcConnection, NwcRailConfig, NwcVerifyConfig } from "./nwc.js";
 export type {
   BankRailConfig,
   BlindLightningRailConfig,
@@ -67,8 +68,9 @@ export type {
   WalletReason,
   WatchedPayment,
 } from "./types.js";
-export type { Provable, Proven, WrapAllowance } from "./verify.js";
+export type { Provable, Proven, SelfConsistent, WrapAllowance } from "./verify.js";
 export {
+  agreesWithItself,
   carriesProof,
   proveOrigin,
   proveSettlement,

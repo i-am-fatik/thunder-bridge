@@ -8,6 +8,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 
 | Export | Kind | What it is |
 |---|---|---|
+| [`agreesWithItself`](#thunder-bridge-function-agreeswithitself) | function | Whether a report agrees with itself: it says paid, and it carries a preimage that hashes to the payment hash it itself names |
 | [`Amount`](#thunder-bridge-type-amount) | type | What a payment is worth |
 | [`AmountError`](#thunder-bridge-class-amounterror) | class | Thrown when a price cannot be held exactly |
 | [`AmountFault`](#thunder-bridge-type-amountfault) | type | Why an amount was refused |
@@ -16,7 +17,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`BankRailConfig`](#thunder-bridge-interface-bankrailconfig) | interface | A bank rail: the account the money lands in, and where its arrival is read back from |
 | [`BankVerifyConfig`](#thunder-bridge-interface-bankverifyconfig) | interface | The endpoint the gateway polls for a bank transfer, answering off your own statement |
 | [`BlindLightningRailConfig`](#thunder-bridge-interface-blindlightningrailconfig) | interface | The same rail with the invoice resolved here, so the gateway is told neither address nor amount |
-| [`carriesProof`](#thunder-bridge-function-carriesproof) | function | Whether a report proves what it claims: it says paid, and it carries a preimage that hashes to the payment hash it itself names |
+| [`carriesProof`](#thunder-bridge-const-carriesproof) | const | What `agreesWithItself` was called before 2.2.0 |
 | [`Charge`](#thunder-bridge-interface-charge) | interface | Who is paid and how much |
 | [`CreateOptions`](#thunder-bridge-interface-createoptions) | interface | What a mint carries beyond the charge: a retry key, and which trigger it joins |
 | [`decodeInvoice`](#thunder-bridge-function-decodeinvoice) | function | Read a BOLT11 invoice without trusting anyone for its contents, an undecodable string or a BOLT12 offer yields an invoice with every field null |
@@ -42,6 +43,9 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`msat`](#thunder-bridge-function-msat) | function | An exact number of millisatoshi, for a price already in the smallest unit |
 | [`Msat`](#thunder-bridge-type-msat) | type | A whole number of millisatoshi that came from `sats`, `msat` or `fiat`, and could not have come from anywhere else |
 | [`NoWalletAvailableError`](#thunder-bridge-class-nowalletavailableerror) | class | Thrown when no wallet on your list could issue a provable invoice, `wallets` says why each refused |
+| [`NwcConnection`](#thunder-bridge-interface-nwcconnection) | interface | A wallet reachable over NIP-47, as its `nostr+walletconnect://` URI describes it |
+| [`NwcRailConfig`](#thunder-bridge-interface-nwcrailconfig) | interface | A Lightning rail minting on a wallet of your own over NIP-47, bound once per shop |
+| [`NwcVerifyConfig`](#thunder-bridge-interface-nwcverifyconfig) | interface | The endpoint the gateway polls for an NWC payment, answering off your own wallet |
 | [`Order`](#thunder-bridge-interface-order) | interface | What a shop knows about a sale before any rail exists |
 | [`Payment`](#thunder-bridge-type-payment) | type | A payment as the gateway reports it, of either sort |
 | [`PaymentRequest`](#thunder-bridge-interface-paymentrequest) | interface | One payment asked for: the invoice to show, the QR to draw it with, and one way to find out it was paid |
@@ -52,7 +56,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`Priced`](#thunder-bridge-interface-priced) | interface | A charge with its price settled, which is what a proof compares the gateway's answer against |
 | [`ProblemError`](#thunder-bridge-class-problemerror) | class | An RFC 9457 problem document the gateway answered with |
 | [`Provable`](#thunder-bridge-interface-provable) | interface | The least a report has to carry for its own proof to be checkable |
-| [`Proven`](#thunder-bridge-type-proven) | type | A report `carriesProof` has already accepted, so the preimage is there and the status is settled |
+| [`Proven`](#thunder-bridge-type-proven) | type | What `SelfConsistent` was called before 2.2.0 |
 | [`proveOrigin`](#thunder-bridge-function-proveorigin) | function | Prove the invoice really is the one the recipient issued for what you asked, before the payer ever sees it, both fetches go straight to the recipient's own server and none of them goes back to the gateway |
 | [`proveSettlement`](#thunder-bridge-function-provesettlement) | function | Prove the money arrived by asking the recipient's own server, not the gateway, returns the preimage when the recipient says it settled and null when it says it has not, and runs the full origin proof first because a verify url the gateway made up would otherwise answer for itself |
 | [`proveWrapped`](#thunder-bridge-function-provewrapped) | function | Prove a wrapping operator's invoice is the recipient's own payment in disguise, so paying it can only settle by the operator paying the recipient |
@@ -66,6 +70,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`Resolved`](#thunder-bridge-type-resolved) | type | An invoice a lightning address issued, with everything needed to watch and to prove it |
 | [`sats`](#thunder-bridge-function-sats) | function | A whole number of satoshi, so `sats(21)` is 21000 millisatoshi |
 | [`seal`](#thunder-bridge-function-seal) | function | Encrypt what the watcher needs and the gateway must not have |
+| [`SelfConsistent`](#thunder-bridge-type-selfconsistent) | type | A report `agreesWithItself` has already accepted, so the preimage is there and the status is settled |
 | [`Send`](#thunder-bridge-type-send) | type | Carries one request to an address ask() already verified, so nothing resolves the name again |
 | [`Serve`](#thunder-bridge-class-serve) | class | Everything one gateway lets you mount, in one place so a caller never has to know which handler needs the gateway and which does not |
 | [`Settlement`](#thunder-bridge-interface-settlement) | interface | What a delivery carries |
@@ -88,6 +93,24 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`wrapFeeCeiling`](#thunder-bridge-function-wrapfeeceiling) | function | The most an operator may add over the recipient's own amount, in millisatoshi |
 | [`WrapRefusalCode`](#thunder-bridge-type-wraprefusalcode) | type | The way a wrapping operator was caught out |
 | [`WrapRefusedError`](#thunder-bridge-class-wraprefusederror) | class | Thrown when a wrapped invoice does not bind to the recipient's |
+
+### <a id="thunder-bridge-function-agreeswithitself"></a>agreesWithItself
+
+```ts
+function agreesWithItself<T extends Provable>(report: T): report is SelfConsistent<T>
+```
+
+Whether a report agrees with itself: it says paid, and it carries a preimage
+that hashes to the payment hash it itself names. Where an invoice comes with it,
+the invoice's own hash has to agree too.
+
+A payment, a settlement delivered to a webhook and a frame off a trigger all
+answer this, because all three carry those fields.
+
+It asks nobody anything and holds the report against nothing you hold, so a
+gateway that invents a preimage and names its hash passes it. Checking against
+the hash you hold is what `payment` and `settled` do, and only
+[`proveSettlement`](#thunder-bridge-function-provesettlement) asks the recipient
 
 ### <a id="thunder-bridge-type-amount"></a>Amount
 
@@ -251,22 +274,13 @@ interface BlindLightningRailConfig extends LightningRailConfig {
 
 The same rail with the invoice resolved here, so the gateway is told neither address nor amount
 
-### <a id="thunder-bridge-function-carriesproof"></a>carriesProof
+### <a id="thunder-bridge-const-carriesproof"></a>carriesProof
 
 ```ts
-function carriesProof<T extends Provable>(report: T): report is Proven<T>
+carriesProof = agreesWithItself
 ```
 
-Whether a report proves what it claims: it says paid, and it carries a preimage
-that hashes to the payment hash it itself names. Where an invoice comes with it,
-the invoice's own hash has to agree too.
-
-A payment, a settlement delivered to a webhook and a frame off a trigger all
-answer this, because all three carry those fields and no other question about
-one matters.
-
-It asks nobody anything, so it costs no round trip and is not a proof of
-arrival. Only [`proveSettlement`](#thunder-bridge-function-provesettlement) asks the recipient
+What [`agreesWithItself`](#thunder-bridge-function-agreeswithitself) was called before 2.2.0
 
 ### <a id="thunder-bridge-interface-charge"></a>Charge
 
@@ -482,6 +496,14 @@ interface GatewaysOptions extends ThunderBridgeOptions {
    * than finding out when the one that took it goes away
    */
   onRefused?: (baseUrl: string, refusal: unknown) => void;
+
+  /**
+   * Called for a gateway caught lying about the payment while you waited on it,
+   * with its url and what gave it away. The wait goes on at the others, because
+   * one gateway that lies is what watching at several is for, so this is how you
+   * learn which one to stop trusting rather than never hearing of it
+   */
+  onCaught?: (baseUrl: string, cheat: GatewayCheatError) => void;
 }
 ```
 
@@ -732,6 +754,72 @@ Thrown when no wallet on your list could issue a provable invoice, `wallets` say
 |---|---|
 | <a id="thunder-bridge-class-nowalletavailableerror-wallets"></a>`readonly wallets: WalletFailure[];` |  |
 
+### <a id="thunder-bridge-interface-nwcconnection"></a>NwcConnection
+
+```ts
+interface NwcConnection {
+  /** The wallet service's public key, which is what its answers have to be signed by */
+  walletPubkey: string;
+
+  /** Where to reach it, tried in order until one answers */
+  relays: string[];
+
+  /** Our own private key on this connection, and the only thing that authorises it */
+  secret: string;
+}
+```
+
+A wallet reachable over NIP-47, as its `nostr+walletconnect://` URI describes it
+
+### <a id="thunder-bridge-interface-nwcrailconfig"></a>NwcRailConfig
+
+```ts
+interface NwcRailConfig extends RailConfig {
+  /** The wallet that mints, which never leaves this process */
+  connection: NwcConnection;
+
+  /**
+   * What to charge for one order, the order's own price converted at `rate` by
+   * default. Give it a function and the price is whatever you say
+   */
+  amount?: (order: Order) => Amount;
+
+  /** Where the default conversion gets its rate, the median of four venues by default */
+  rate?: Ticker;
+
+  /** Where `nwcVerifyEndpoint` is mounted, and the secret the hash is sealed with */
+  verifyThrough: { endpoint: string; secret: string };
+
+  /** What the payer's wallet shows, the order's reference by default */
+  description?: (order: Order) => string;
+
+  /** Sealed before the gateway sees it, the way the blind Lightning rail does */
+  sealed?: { secret: string; data: (order: Order) => unknown };
+}
+```
+
+A Lightning rail minting on a wallet of your own over NIP-47, bound once per shop
+
+### <a id="thunder-bridge-interface-nwcverifyconfig"></a>NwcVerifyConfig
+
+```ts
+interface NwcVerifyConfig {
+  /** The wallet this endpoint speaks for. It never leaves this process */
+  connection: NwcConnection;
+
+  /** The secret the payment hash was sealed with, and nothing else uses it */
+  secret: string;
+
+  /** How often the gateway should ask, in seconds, sent as `Cache-Control: max-age`, `5` by default */
+  pollEverySecs?: number;
+
+  /** How long one `lookup_invoice` may take before the wallet counts as unreachable, `10_000` by default */
+  askTimeoutMs?: number;
+}
+```
+
+The endpoint the gateway polls for an NWC payment, answering off your own wallet
+
 ### <a id="thunder-bridge-interface-order"></a>Order
 
 ```ts
@@ -911,11 +999,10 @@ The least a report has to carry for its own proof to be checkable
 ### <a id="thunder-bridge-type-proven"></a>Proven
 
 ```ts
-type Proven<T extends Provable> = T & { status: "paid"; preimage: string };
+type Proven<T extends Provable> = SelfConsistent<T>;
 ```
 
-A report [`carriesProof`](#thunder-bridge-function-carriesproof) has already accepted, so the preimage is there and the
-status is settled. Nothing downstream of the check needs a null guard
+What [`SelfConsistent`](#thunder-bridge-type-selfconsistent) was called before 2.2.0
 
 ### <a id="thunder-bridge-function-proveorigin"></a>proveOrigin
 
@@ -1030,6 +1117,7 @@ what deleted that field
 | <a id="thunder-bridge-class-rails-lightning"></a>`lightning(config: LightningRailConfig): Rail` | Lightning, with the gateway minting against a priority list of addresses |
 | <a id="thunder-bridge-class-rails-blindlightning"></a>`blindLightning(config: BlindLightningRailConfig): Rail` | Lightning, with the invoice resolved here so the gateway is told neither the address nor the amount |
 | <a id="thunder-bridge-class-rails-bank"></a>`bank(config: BankRailConfig): Rail` | A bank transfer, proved the way a Lightning payment is |
+| <a id="thunder-bridge-class-rails-nwc"></a>`nwc(config: NwcRailConfig): Rail` | Lightning against a wallet of your own over NIP-47, for a wallet that has no LUD-21 address to be watched at |
 | <a id="thunder-bridge-class-rails-transfer"></a>`transfer(params: BankTransferParams): Promise<BankTransfer>` | One bank transfer without building a rail first, for a shop that asks for them one at a time rather than beside another payment method |
 
 ### <a id="thunder-bridge-interface-range"></a>Range
@@ -1104,6 +1192,15 @@ Encrypt what the watcher needs and the gateway must not have. The gateway
 stores the result and hands it back untouched, so anything readable you put
 in `sealed` is something you told it, which is what blind mode exists to avoid
 
+### <a id="thunder-bridge-type-selfconsistent"></a>SelfConsistent
+
+```ts
+type SelfConsistent<T extends Provable> = T & { status: "paid"; preimage: string };
+```
+
+A report [`agreesWithItself`](#thunder-bridge-function-agreeswithitself) has already accepted, so the preimage is there and
+the status is settled. Nothing downstream of the check needs a null guard
+
 ### <a id="thunder-bridge-type-send"></a>Send
 
 ```ts
@@ -1127,16 +1224,19 @@ Everything one gateway lets you mount, in one place so a caller never has to
 know which handler needs the gateway and which does not. Most of these took it
 as a config field before, and reaching them through the gateway deleted it.
 
-`verify` and `bankVerify` need nothing from the gateway and are here anyway,
-because a reader looking for a handler should find every handler in one list
+`lightningVerify`, `bankVerify` and `nwcVerify` need nothing from the gateway and
+are here anyway, because a reader looking for a handler should find every handler
+in one list
 
 | Member | What it does |
 |---|---|
 | <a id="thunder-bridge-class-serve-lnurlpay"></a>`lnurlPay(config: TriggerConfig): Handler` | An LNURL-pay endpoint of your own, standing in front of a priority list of addresses, so a printed QR points at your domain and never expires |
 | <a id="thunder-bridge-class-serve-watchticket"></a>`watchTicket(config: WatchTicketConfig): Handler` | Trades the watch secret for a one minute socket ticket, refusing anyone without it |
 | <a id="thunder-bridge-class-serve-publicwatchticket"></a>`publicWatchTicket(config: WatchTicketConfig): Handler` | Mints a socket ticket for anybody who asks, which makes the trigger's whole stream public, preimages included |
-| <a id="thunder-bridge-class-serve-verify"></a>`verify(config: LightningVerifyConfig): Handler` | A verify endpoint of your own that asks the recipient's wallet for you, so the gateway polls you and never the wallet |
+| <a id="thunder-bridge-class-serve-lightningverify"></a>`lightningVerify(config: LightningVerifyConfig): Handler` | A verify endpoint of your own that asks the recipient's wallet for you, so the gateway polls you and never the wallet |
+| <a id="thunder-bridge-class-serve-verify"></a>`verify(config: LightningVerifyConfig): Handler` | What `lightningVerify` was called before 2.2.0 |
 | <a id="thunder-bridge-class-serve-bankverify"></a>`bankVerify(config: BankVerifyConfig): Handler` | The verify endpoint a bank rail is polled at, answering off your own statement |
+| <a id="thunder-bridge-class-serve-nwcverify"></a>`nwcVerify(config: NwcVerifyConfig): Handler` | The verify endpoint an NWC rail is polled at, asking your own wallet over NIP-47, so the gateway never learns the connection, the relay or the wallet |
 | <a id="thunder-bridge-class-serve-webhook"></a>`webhook(handlers: WebhookHandlers): Handler` | The whole webhook route: it answers the gateway's challenge, checks the signature against the key the gateway publishes, refuses a settlement that proves nothing, and calls you once for the one that does |
 | <a id="thunder-bridge-class-serve-readsettlement"></a>`async readSettlement(request: Request, options?: WebhookOptions): Promise<Settlement \| null>` | Verify a delivery and read the settlement out of it, null when it is not believable |
 | <a id="thunder-bridge-class-serve-readpayment"></a>`async readPayment(request: Request, options?: WebhookOptions): Promise<Payment \| null>` | Verify a delivery and read the payment out of it, null when it is not believable |
@@ -1440,7 +1540,7 @@ interface WebhookHandlers {
    * A settlement that proves itself: it says paid and its preimage hashes to the
    * payment hash it names. This is the only callback a shop needs
    */
-  onSettled?: (settlement: Proven<Settlement>) => void | Promise<void>;
+  onSettled?: (settlement: SelfConsistent<Settlement>) => void | Promise<void>;
 
   /**
    * A delivery that carries no proof, so an expiry. Left unset, the handler
@@ -2116,11 +2216,11 @@ This is the whole plugin seam: a bank is a function of this shape, and
 | [`nwcInvoice`](#thunder-bridge-nwc-function-nwcinvoice) | function | Mint an invoice on the connected wallet, decoded so the caller need not trust its word |
 | [`NwcInvoice`](#thunder-bridge-nwc-interface-nwcinvoice) | interface | A minted invoice and everything needed to watch it |
 | [`nwcPay`](#thunder-bridge-nwc-function-nwcpay) | function | Pay an invoice and keep the preimage the network handed back |
-| [`nwcRail`](#thunder-bridge-nwc-function-nwcrail) | function | Sell for Lightning against a wallet of your own over NIP-47, for a wallet that has no LUD-21 address to be watched at |
+| [`nwcRail`](#thunder-bridge-nwc-const-nwcrail) | const | The NWC rail as a free function, which is how it was reached before 2.2.0 |
 | [`NwcRailConfig`](#thunder-bridge-nwc-interface-nwcrailconfig) | interface | A Lightning rail minting on a wallet of your own over NIP-47, bound once per shop |
 | [`nwcSettlement`](#thunder-bridge-nwc-function-nwcsettlement) | function | The preimage the wallet released for this hash, null while it has released none |
 | [`NwcVerifyConfig`](#thunder-bridge-nwc-interface-nwcverifyconfig) | interface | The endpoint the gateway polls for an NWC payment, answering off your own wallet |
-| [`nwcVerifyEndpoint`](#thunder-bridge-nwc-function-nwcverifyendpoint) | function | A verify endpoint of your own that asks your wallet over NIP-47, so the gateway polls you and never learns the connection, the relay, or which wallet it is |
+| [`nwcVerifyEndpoint`](#thunder-bridge-nwc-const-nwcverifyendpoint) | const | The NWC verify endpoint as a free function, which is how it was reached before 2.2.0 |
 | [`nwcVerifyUrl`](#thunder-bridge-nwc-function-nwcverifyurl) | function | The URL to hand the gateway, with the payment hash sealed inside it |
 
 ### <a id="thunder-bridge-nwc-function-askwallet"></a>askWallet
@@ -2225,19 +2325,13 @@ learns it, which is what makes delivery provable to a recipient publishing no
 LUD-21 of their own. A preimage that does not hash to the invoice's own hash is
 a lie rather than a receipt, so it throws instead of being passed on
 
-### <a id="thunder-bridge-nwc-function-nwcrail"></a>nwcRail
+### <a id="thunder-bridge-nwc-const-nwcrail"></a>nwcRail
 
 ```ts
-function nwcRail(gateway: ThunderBridge, config: NwcRailConfig): Rail
+nwcRail = railOverNwc
 ```
 
-Sell for Lightning against a wallet of your own over NIP-47, for a wallet that
-has no LUD-21 address to be watched at. Your node mints the invoice and releases
-the preimage, so the proof comes from one hop nearer than any hosted address can
-manage, and the gateway sees a hash and a URL of yours.
-
-This rail lives here rather than on `gateway.rails` because NIP-47 needs the
-nostr crypto in this module, and a browser showing a QR should not download it
+The NWC rail as a free function, which is how it was reached before 2.2.0
 
 ### <a id="thunder-bridge-nwc-interface-nwcrailconfig"></a>NwcRailConfig
 
@@ -2292,23 +2386,13 @@ interface NwcVerifyConfig {
 
 The endpoint the gateway polls for an NWC payment, answering off your own wallet
 
-### <a id="thunder-bridge-nwc-function-nwcverifyendpoint"></a>nwcVerifyEndpoint
+### <a id="thunder-bridge-nwc-const-nwcverifyendpoint"></a>nwcVerifyEndpoint
 
 ```ts
-function nwcVerifyEndpoint(
-  config: NwcVerifyConfig,
-): (request: Request) => Promise<Response>
+nwcVerifyEndpoint = verifyOverNwc
 ```
 
-A verify endpoint of your own that asks your wallet over NIP-47, so the gateway
-polls you and never learns the connection, the relay, or which wallet it is.
-
-[`nwcVerifyUrl`](#thunder-bridge-nwc-function-nwcverifyurl) seals the payment hash into the query with your secret, which is
-what stops a stranger driving your wallet through this handler. It answers the
-LUD-21 shape the gateway already speaks, so nothing on that side changes.
-
-A wallet it cannot reach answers `502` rather than "not settled", because those
-are different claims and only one of them is true.
+The NWC verify endpoint as a free function, which is how it was reached before 2.2.0
 
 ### <a id="thunder-bridge-nwc-function-nwcverifyurl"></a>nwcVerifyUrl
 
@@ -2321,4 +2405,4 @@ async function nwcVerifyUrl(
 ```
 
 The URL to hand the gateway, with the payment hash sealed inside it. Point it at
-wherever [`nwcVerifyEndpoint`](#thunder-bridge-nwc-function-nwcverifyendpoint) is mounted
+wherever [`nwcVerifyEndpoint`](#thunder-bridge-nwc-const-nwcverifyendpoint) is mounted

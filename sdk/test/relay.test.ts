@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkSettled } from "../../core/lnurl.js";
 import { seal } from "../../core/sealed.js";
+import type { ThunderBridge } from "../src/client";
 import { lightningVerifyEndpoint, relayedVerifyUrl } from "../src/relay";
+import { Serve } from "../src/serving";
 
 vi.mock("node:dns/promises", () => ({
   Resolver: function everyHostResolvesPublic() {
@@ -131,5 +133,25 @@ describe("lightningVerifyEndpoint", () => {
     );
 
     expect(await checkSettled(throughFetch, url, HASH)).toEqual({ preimage: PREIMAGE, pace: 5, ceiling: null });
+  });
+});
+
+describe("the handler on gateway.serve", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is lightningVerify, and verify still answers the same for callers older than 2.2.0", async () => {
+    const serve = new Serve({} as ThunderBridge);
+    const asked = walletSaying({ settled: true, preimage: PREIMAGE });
+
+    for (const handler of [
+      serve.lightningVerify({ secret: SECRET, send: throughFetch }),
+      serve.verify({ secret: SECRET, send: throughFetch }),
+    ]) {
+      const answer = await handler(new Request(await relayed()));
+      expect(await answer.json()).toEqual({ settled: true, preimage: PREIMAGE });
+    }
+    expect(asked.length).toBe(2);
   });
 });

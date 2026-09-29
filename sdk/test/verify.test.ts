@@ -4,7 +4,7 @@ import type { GatewayCheatCode } from "../src/errors";
 import { GatewayCheatError, UnverifiedRecipientError } from "../src/errors";
 import type { MintedPayment, Priced } from "../src/types";
 import { preimageMatchesHash } from "../../core/bolt11.js";
-import { carriesProof, proveOrigin, proveSettlement } from "../src/verify";
+import { agreesWithItself, carriesProof, proveOrigin, proveSettlement } from "../src/verify";
 import { bolt11 } from "./encode";
 
 const ADDRESS = "fatik@agora.gripe";
@@ -357,37 +357,42 @@ describe("the SSRF guard", () => {
   });
 });
 
-describe("isProvablyPaid", () => {
+describe("agreesWithItself", () => {
   it("is true for a paid payment whose preimage hashes to the payment hash", () => {
-    expect(carriesProof(payment({ status: "paid", preimage: PREIMAGE }))).toBe(true);
+    expect(agreesWithItself(payment({ status: "paid", preimage: PREIMAGE }))).toBe(true);
   });
 
   it("is false for a paid payment whose preimage hashes to something else", () => {
-    expect(carriesProof(payment({ status: "paid", preimage: "00".repeat(32) }))).toBe(false);
+    expect(agreesWithItself(payment({ status: "paid", preimage: "00".repeat(32) }))).toBe(false);
   });
 
   it("is false for a paid payment that reports no preimage", () => {
-    expect(carriesProof(payment({ status: "paid", preimage: null }))).toBe(false);
+    expect(agreesWithItself(payment({ status: "paid", preimage: null }))).toBe(false);
   });
 
   it("is false for a pending payment even when a matching preimage is somehow present", () => {
-    expect(carriesProof(payment({ status: "pending", preimage: PREIMAGE }))).toBe(false);
+    expect(agreesWithItself(payment({ status: "pending", preimage: PREIMAGE }))).toBe(false);
   });
 
   it("is false for an expired payment even when a matching preimage is somehow present", () => {
-    expect(carriesProof(payment({ status: "expired", preimage: PREIMAGE }))).toBe(false);
+    expect(agreesWithItself(payment({ status: "expired", preimage: PREIMAGE }))).toBe(false);
   });
 
   it("is false for a paid payment whose preimage is not hexadecimal", () => {
-    expect(carriesProof(payment({ status: "paid", preimage: "zz".repeat(32) }))).toBe(false);
+    expect(agreesWithItself(payment({ status: "paid", preimage: "zz".repeat(32) }))).toBe(false);
   });
 
   it("is false for a paid payment whose preimage has an odd number of hex digits", () => {
-    expect(carriesProof(payment({ status: "paid", preimage: PREIMAGE.slice(1) }))).toBe(false);
+    expect(agreesWithItself(payment({ status: "paid", preimage: PREIMAGE.slice(1) }))).toBe(false);
   });
 
   it("is false for a paid payment whose preimage is empty", () => {
-    expect(carriesProof(payment({ status: "paid", preimage: "" }))).toBe(false);
+    expect(agreesWithItself(payment({ status: "paid", preimage: "" }))).toBe(false);
+  });
+
+  it("still answers under the name it had before 2.2.0", () => {
+    expect(carriesProof(payment({ status: "paid", preimage: PREIMAGE }))).toBe(true);
+    expect(carriesProof(payment({ status: "paid", preimage: "00".repeat(32) }))).toBe(false);
   });
 });
 

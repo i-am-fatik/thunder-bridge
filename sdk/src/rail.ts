@@ -7,6 +7,7 @@ import { type Amount, amountNow, type Msat, msat } from "./amount.js";
 import { type BankTransfer, type BankTransferParams, bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { NoWalletAvailableError } from "./errors.js";
+import { type NwcRailConfig, nwcRail } from "./nwc.js";
 import { medianOf, msatFor, type Ticker } from "./price.js";
 import { toLightningUri } from "./qr.js";
 import { relayedVerifyUrl } from "./relay.js";
@@ -310,6 +311,16 @@ export class Rails {
   /** A bank transfer, proved the way a Lightning payment is */
   bank(config: BankRailConfig): Rail {
     return bankRail(this.gateway, config);
+  }
+
+  /**
+   * Lightning against a wallet of your own over NIP-47, for a wallet that has no
+   * LUD-21 address to be watched at. Your node mints the invoice and releases the
+   * preimage, so the proof comes from one hop nearer than any hosted address can
+   * manage, and the gateway sees a hash and a URL of yours
+   */
+  nwc(config: NwcRailConfig): Rail {
+    return nwcRail(this.gateway, config);
   }
 
   /**

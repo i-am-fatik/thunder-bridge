@@ -34,7 +34,7 @@ so the same wallet on another domain can answer differently.
 A refusal happens at creation rather than leaving a payment pending until a
 watcher gives up, so a recipient finds out before a payer sees a QR code.
 
-If your recipient is on a refused name, `nwcRail` from `thunder-bridge/nwc` is the way round it: your own
+If your recipient is on a refused name, `gateway.rails.nwc` is the way round it: your own
 wallet answers over NIP-47 instead of over an address, and the gateway watches the
 hash exactly the same. [docs/lud21-coverage.md](../docs/lud21-coverage.md) is the
 measured list rather than a reading of changelogs, last surveyed 2026-08-12. Read
@@ -137,16 +137,16 @@ preimage, and which side does the checking.
 | the gateway is told | a hash, an expiry and your URL, with the wallet's sealed inside |
 | the invoice is checked by | nobody needs to, you resolved the address yourself |
 | the gateway probes first | `speaksVerify`: a GET on the URL, then a signed POST nonce it must echo |
-| the gateway polls | your `serve.verify` endpoint, once `relayThrough` is set. Leave it off and the gateway polls the wallet directly, as on the minted rail |
+| the gateway polls | your `serve.lightningVerify` endpoint, once `relayThrough` is set. Leave it off and the gateway polls the wallet directly, as on the minted rail |
 | `settled` comes from | your endpoint, which unseals, asks the wallet and relays the answer |
 | the pace is set by | you, `pollEverySecs` |
 
-| `nwcRail` | your own wallet mints it, over NIP-47 `make_invoice` |
+| `rails.nwc` | your own wallet mints it, over NIP-47 `make_invoice` |
 |---|---|
 | the gateway is told | a hash and your URL, with the hash sealed inside |
 | the invoice is checked by | nobody, it is your wallet |
 | the gateway probes first | the same GET and signed nonce |
-| the gateway polls | your `nwcVerifyEndpoint` |
+| the gateway polls | your `serve.nwcVerify` endpoint |
 | `settled` comes from | `lookup_invoice`, refused unless the wallet's own key signed it |
 | the pace is set by | you, `pollEverySecs` |
 
@@ -203,7 +203,7 @@ without saying whether either invoice was paid.
   concluding the invoice went unpaid. The body still reads `settled: false`, and the
   status is what separates "could not ask" from "asked, and no"
 
-**`nwcRail`**
+**`rails.nwc`**
 
 - an NWC connection to your own wallet, and the nostr relays behind it
 - **scope the connection to `make_invoice` and `lookup_invoice`, never
@@ -268,7 +268,7 @@ Four sharp edges, worth reading before you build:
   proving an invoice belongs to an address never proves the address belongs to
   whoever you think it does.
 
-`carriesProof` is the one to be careful with: it asks only whether a report holds
+`agreesWithItself` is the one to be careful with: it asks only whether a report holds
 together, so a gateway that generates a preimage, hashes it and builds an invoice
 around that hash passes it. If a payment matters, ask the recipient with
 `prove` on the payment request or with `proveSettlement`. The full argument, including the five
@@ -308,13 +308,16 @@ const rail = gateway.rails.lightning({ paidTo: "iamfatik@blink.sv", amount: () =
   `payments`, `settled`, `firstSettled`, `follow`, `ticket`, `nameFor` and
   `webhookKey`, all on the instance
 - **what you mount** is on `gateway.serve`: an LNURL-pay endpoint, the two ticket
-  endpoints, the verify endpoints for Lightning and for a bank, the webhook route,
-  and the readers under it
+  endpoints, the verify endpoints `lightningVerify`, `bankVerify` and `nwcVerify`, the
+  webhook route, and the readers under it
 - **one call per sale** is on `gateway.rails`: `lightning`, `blindLightning`,
-  `bank`, and `transfer` for a bank transfer on its own
+  `bank`, `nwc`, and `transfer` for a bank transfer on its own. What the NWC rail
+  needs to reach your wallet, `nwcConnection` and the wallet calls, stays in
+  `thunder-bridge/nwc`
 - **the proofs** are free functions, deliberately, because a proof you cannot run
   without the thing being audited is not a proof: `proveOrigin`, `proveSettlement`,
-  `proveWrapped`, `carriesProof`, `decodeInvoice`, `preimageMatchesHash`
+  `proveWrapped`, `decodeInvoice`, `preimageMatchesHash`. `agreesWithItself` sits
+  beside them and proves less, as the table below says
 - **a payment reads without an assertion.** `Payment` is `MintedPayment |
   WatchedPayment`, so checking `kind` is what makes the address, the amount and the
   invoice non-null. The gateway writes those three together or writes none of them,
@@ -323,6 +326,20 @@ const rail = gateway.rails.lightning({ paidTo: "iamfatik@blink.sv", amount: () =
 
 What your service answers once those handlers are mounted is written out in
 [`openapi.yaml`](openapi.yaml), shipped with this package.
+
+### Which call checks what
+
+There are several ways to hear that a payment settled because there are several
+places to hear it from. They do not check the same thing, and the difference is
+what you may act on without asking anyone else.
+
+| You hear it through | What the claim is checked against |
+| --- | --- |
+| `payment`, `settled`, `firstSettled`, `paid()` on a `requestPayment`, and `Gateways.settled` | the `{ id, paymentHash }` you hold. Another payment, another hash, or a preimage that does not hash to yours throws `GatewayCheatError` |
+| `serve.webhook`, `serve.readSettlement`, `serve.readPayment` | the gateway's key, the timestamp, the URL it was sent to, and the preimage against the hash in the same body. Find your order by that hash before you act, which is what makes a pair the gateway invented find nothing |
+| `payments`, `follow` | the report itself. An entry claiming paid whose preimage does not hash to its own hash is left out of `payments` and reaches `follow`'s `onError` rather than `onPayment` |
+| `agreesWithItself` | the report itself, and nothing you hold, so a gateway that invents a preimage and names its hash passes it |
+| `proveSettlement` | the recipient's own verify URL, after the origin proof, so the gateway is not asked at all |
 
 ## Errors
 
@@ -437,7 +454,7 @@ that proves nothing gets a `202` and no callback, because acting on an unproven
 claim is the one thing this refuses to do. Pass `onUnproven` when an expiry is news
 you want.
 
-`onSettled` is handed a `Proven<Settlement>`, so the preimage is a `string` rather
+`onSettled` is handed a `SelfConsistent<Settlement>`, so the preimage is a `string` rather
 than something to coerce: the check the route already ran is what narrows it.
 
 `gateway.serve.readSettlement` and `gateway.serve.readPayment` are the same checks

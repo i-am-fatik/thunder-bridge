@@ -26,7 +26,7 @@ import type {
   SocketTicket,
   WalletFailure,
 } from "./types.js";
-import { carriesProof, proveOrigin } from "./verify.js";
+import { agreesWithItself, proveOrigin } from "./verify.js";
 import {
   createRequestBody,
   mintedFromWire,
@@ -419,7 +419,7 @@ export class ThunderBridge {
       ? body.payments
           .map(paymentFromWire)
           .filter((one): one is Payment => one !== null)
-          .filter((one) => one.status !== "paid" || carriesProof(one))
+          .filter((one) => one.status !== "paid" || agreesWithItself(one))
       : null;
     if (listed === null || typeof body?.settled_scanned !== "number") {
       throw new ProblemError({
@@ -890,7 +890,7 @@ export class ThunderBridge {
     if (other) {
       throw new GatewayCheatError("hash_mismatch", payment.id);
     }
-    if (payment.status === "paid" && !carriesProof(payment)) {
+    if (payment.status === "paid" && !agreesWithItself(payment)) {
       throw new GatewayCheatError("preimage_mismatch", payment.id);
     }
 

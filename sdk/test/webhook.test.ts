@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { deliverySigned } from "../../core/delivery.js";
 import { type SigningKey, signingKeyFromSeed } from "../../core/ed25519.js";
 import type { MintedPayment } from "../src/types";
-import { carriesProof } from "../src/verify";
+import { agreesWithItself } from "../src/verify";
 import {
   answerWebhookChallenge,
   readPayment,
@@ -315,7 +315,7 @@ describe("a delivery in the shape the gateway sends now", () => {
   it("proves itself, because the preimage is checked against the hash it names", async () => {
     const settled = await readSettlement(await delivery(SETTLED), await published());
 
-    expect(settled && carriesProof(settled)).toBe(true);
+    expect(settled && agreesWithItself(settled)).toBe(true);
   });
 
   it("reads as nothing when the preimage hashes to something else, as a bad signature does", async () => {

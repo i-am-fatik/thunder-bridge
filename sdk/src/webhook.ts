@@ -1,7 +1,7 @@
 import { deliverySigned } from "../../core/delivery.js";
 import { verifyHex } from "../../core/ed25519.js";
 import type { Payment, Settlement } from "./types.js";
-import { carriesProof } from "./verify.js";
+import { agreesWithItself } from "./verify.js";
 import { paymentFromWire, settlementFromWire } from "./wire.js";
 
 const SIGNATURE_HEADER = "x-signature-v2";
@@ -127,7 +127,7 @@ async function believable(
 }
 
 function proved<T extends Payment | Settlement>(read: T | null): T | null {
-  return read !== null && read.status === "paid" && !carriesProof(read) ? null : read;
+  return read !== null && read.status === "paid" && !agreesWithItself(read) ? null : read;
 }
 
 function decoded<T>(body: string, from: (wire: unknown) => T | null): T | null {

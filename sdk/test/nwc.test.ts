@@ -18,8 +18,13 @@ import {
   nwcVerifyEndpoint,
   nwcVerifyUrl,
 } from "../src/nwc";
-import {  } from "../src/rail";
+import {
+  nwcRail as deprecatedNwcRail,
+  nwcVerifyEndpoint as deprecatedNwcVerifyEndpoint,
+} from "../src/entry/nwc";
 import { nwcRail } from "../src/nwc";
+import { Rails } from "../src/rail";
+import { Serve } from "../src/serving";
 
 const WALLET_KEY = "11".repeat(32);
 const CLIENT_KEY = "22".repeat(32);
@@ -386,6 +391,19 @@ describe("the verify endpoint", () => {
     expect((await askedFor(MOUNT)).status).toBe(400);
   });
 
+  it("is what gateway.serve.nwcVerify mounts, beside every other verify endpoint", async () => {
+    relaySpeaking({ answer: () => ({ result: { preimage: PREIMAGE } }) });
+    const handler = new Serve({} as ThunderBridge).nwcVerify({
+      connection: nwcConnection(uriFor()),
+      secret: SEALING_SECRET,
+      askTimeoutMs: 40,
+    });
+
+    const answer = await handler(new Request(await nwcVerifyUrl(MOUNT, HASH, SEALING_SECRET)));
+
+    expect(await answer.json()).toEqual({ settled: true, preimage: PREIMAGE });
+  });
+
   it("seals a different url every time, so one cannot be recognised by another", async () => {
     const once = await nwcVerifyUrl(MOUNT, HASH, SEALING_SECRET);
     const twice = await nwcVerifyUrl(MOUNT, HASH, SEALING_SECRET);
@@ -419,6 +437,24 @@ describe("the rail", () => {
     expect(leg.scan).toBe(INVOICE_1000);
     expect(leg.rail).toBe("lightning");
     expect(String(watched[0]?.verifyUrl).startsWith(`${MOUNT}?h=`)).toBe(true);
+  });
+
+  it("is the rail gateway.rails.nwc hands out, beside every other rail", async () => {
+    relaySpeaking({ answer: () => ({ result: { invoice: INVOICE_1000 } }) });
+    const watched: Record<string, unknown>[] = [];
+    const leg = await new Rails(gatewayTaking(watched)).nwc({
+      connection: nwcConnection(uriFor()),
+      amount: () => msat(1000),
+      verifyThrough: { endpoint: MOUNT, secret: SEALING_SECRET },
+    })(order);
+
+    expect(leg.scan).toBe(INVOICE_1000);
+    expect(String(watched[0]?.verifyUrl).startsWith(`${MOUNT}?h=`)).toBe(true);
+  });
+
+  it("still answers under the names thunder-bridge/nwc exported before 2.2.0", () => {
+    expect(deprecatedNwcRail).toBe(nwcRail);
+    expect(deprecatedNwcVerifyEndpoint).toBe(nwcVerifyEndpoint);
   });
 
   it("tells the gateway nothing about the wallet it just used", async () => {

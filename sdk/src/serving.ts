@@ -1,5 +1,6 @@
 import { type BankVerifyConfig, bankVerifyEndpoint } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
+import { type NwcVerifyConfig, nwcVerifyEndpoint } from "./nwc.js";
 import { type LightningVerifyConfig, lightningVerifyEndpoint } from "./relay.js";
 import {
   lnurlPayEndpoint,
@@ -9,7 +10,7 @@ import {
   watchTicketEndpoint,
 } from "./trigger.js";
 import type { Payment, Settlement } from "./types.js";
-import { carriesProof, type Proven } from "./verify.js";
+import { agreesWithItself, type SelfConsistent } from "./verify.js";
 import {
   answerWebhookChallenge,
   DEFAULT_TOLERANCE_SECS,
@@ -28,7 +29,7 @@ export interface WebhookHandlers {
    * A settlement that proves itself: it says paid and its preimage hashes to the
    * payment hash it names. This is the only callback a shop needs
    */
-  onSettled?: (settlement: Proven<Settlement>) => void | Promise<void>;
+  onSettled?: (settlement: SelfConsistent<Settlement>) => void | Promise<void>;
 
   /**
    * A delivery that carries no proof, so an expiry. Left unset, the handler
@@ -62,8 +63,9 @@ export interface WebhookHandlers {
  * know which handler needs the gateway and which does not. Most of these took it
  * as a config field before, and reaching them through the gateway deleted it.
  *
- * `verify` and `bankVerify` need nothing from the gateway and are here anyway,
- * because a reader looking for a handler should find every handler in one list
+ * `lightningVerify`, `bankVerify` and `nwcVerify` need nothing from the gateway and
+ * are here anyway, because a reader looking for a handler should find every handler
+ * in one list
  */
 export class Serve {
   constructor(private readonly gateway: ThunderBridge) {}
@@ -93,13 +95,30 @@ export class Serve {
    * A verify endpoint of your own that asks the recipient's wallet for you, so
    * the gateway polls you and never the wallet
    */
-  verify(config: LightningVerifyConfig): Handler {
+  lightningVerify(config: LightningVerifyConfig): Handler {
     return lightningVerifyEndpoint(config);
+  }
+
+  /**
+   * What `lightningVerify` was called before 2.2.0
+   *
+   * @deprecated Use `lightningVerify`, beside `bankVerify` and `nwcVerify`
+   */
+  verify(config: LightningVerifyConfig): Handler {
+    return this.lightningVerify(config);
   }
 
   /** The verify endpoint a bank rail is polled at, answering off your own statement */
   bankVerify(config: BankVerifyConfig): Handler {
     return bankVerifyEndpoint(config);
+  }
+
+  /**
+   * The verify endpoint an NWC rail is polled at, asking your own wallet over
+   * NIP-47, so the gateway never learns the connection, the relay or the wallet
+   */
+  nwcVerify(config: NwcVerifyConfig): Handler {
+    return nwcVerifyEndpoint(config);
   }
 
   /**
@@ -199,7 +218,7 @@ function onceWhileReplayable(
 }
 
 async function acted(settlement: Settlement, handlers: WebhookHandlers): Promise<Response> {
-  if (carriesProof(settlement)) {
+  if (agreesWithItself(settlement)) {
     await handlers.onSettled?.(settlement);
 
     return new Response("ok");

@@ -38,7 +38,7 @@ front of a payer is the recipient's own invoice for the right amount. They say
 nothing about whether anybody paid it, and the two answers to that are not the
 same answer.
 
-`carriesProof` asks whether a report contradicts itself: a `paid`
+`agreesWithItself` asks whether a report contradicts itself: a `paid`
 status, a preimage, and a `bolt11` whose payment hash that preimage opens. All
 three values arrive from the gateway in one message, so this is internal
 consistency and nothing more. A gateway that generates a preimage, hashes it and
@@ -50,7 +50,7 @@ ties `verifyUrl` to the recipient's own callback origin, then reads that url.
 `null` means the recipient's own server is not claiming the money arrived,
 whatever the gateway says.
 
-Use `carriesProof` to throw out a record that is obviously wrong. Use
+Use `agreesWithItself` to throw out a record that is obviously wrong. Use
 `proveSettlement` before you part with anything.
 
 Every read and every wait is checked against more than itself, though.
@@ -100,7 +100,7 @@ declare const gateway: ThunderBridge;
 
 const RELAY_SECRET = process.env.RELAY_SECRET as string;
 
-export const serveVerify = gateway.serve.verify({
+export const serveVerify = gateway.serve.lightningVerify({
   secret: RELAY_SECRET,
   pollEverySecs: 5,
 });
@@ -129,23 +129,23 @@ letting the gateway poll the wallet.
 
 ### A wallet with no LUD-21 address at all
 
-`nwcRail` is the same arrangement with the far side swapped. Your wallet answers
+`rails.nwc` is the same arrangement with the far side swapped. Your wallet answers
 over [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) instead of
 over an address, so a recipient whose provider publishes no `verify` - or publishes
 one with no preimage, which is worse - is watchable anyway.
 
 ```ts
 import { ThunderBridge } from "thunder-bridge";
-import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "thunder-bridge/nwc";
+import { nwcConnection } from "thunder-bridge/nwc";
 
 declare const gateway: ThunderBridge;
 
 const NWC_SECRET = process.env.NWC_SECRET as string;
 const connection = nwcConnection(process.env.NWC_URI as string);
 
-export const serveVerify = nwcVerifyEndpoint({ connection, secret: NWC_SECRET });
+export const serveVerify = gateway.serve.nwcVerify({ connection, secret: NWC_SECRET });
 
-export const rail = nwcRail(gateway, {
+export const rail = gateway.rails.nwc({
   connection,
   amount: (order) => order.amountMinor * 40,
   verifyThrough: { endpoint: "https://shop.example/verify/nwc", secret: NWC_SECRET },
@@ -232,7 +232,7 @@ The trust boundary is stated once, in
 [the README](../sdk/README.md#who-you-still-have-to-trust): which of the three
 parties is constrained by what, plus the colluding custodian, the first-hop-only
 host guard, the cold read that is only as pinned as its creation, and why
-`carriesProof` is not evidence. It lives there rather than here because it is the
+`agreesWithItself` is not evidence. It lives there rather than here because it is the
 first thing a caller needs and the README is what npm hands them.
 
 ## Webhooks in full

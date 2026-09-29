@@ -502,10 +502,7 @@ export interface NwcRailConfig extends RailConfig {
  * Sell for Lightning against a wallet of your own over NIP-47, for a wallet that
  * has no LUD-21 address to be watched at. Your node mints the invoice and releases
  * the preimage, so the proof comes from one hop nearer than any hosted address can
- * manage, and the gateway sees a hash and a URL of yours.
- *
- * This rail lives here rather than on `gateway.rails` because NIP-47 needs the
- * nostr crypto in this module, and a browser showing a QR should not download it
+ * manage, and the gateway sees a hash and a URL of yours
  */
 export function nwcRail(gateway: ThunderBridge, config: NwcRailConfig): Rail {
   return async (order) => {
