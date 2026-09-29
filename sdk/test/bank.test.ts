@@ -308,6 +308,26 @@ describe("bankVerifyEndpoint", () => {
     vi.unstubAllGlobals();
   });
 
+  it("tells its caller a transfer landed while the gateway says nothing at all", async () => {
+    const transfer = await asked();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("the gateway has gone quiet");
+      }),
+    );
+
+    const answer = (await (await verified(statementOf(credit()), transfer.verifyUrl)).json()) as {
+      settled: boolean;
+      preimage: string;
+    };
+
+    expect(answer.settled).toBe(true);
+    expect(createHash("sha256").update(Buffer.from(answer.preimage, "hex")).digest("hex")).toBe(
+      transfer.paymentHash,
+    );
+  });
+
   it("says nothing settled while the statement is empty", async () => {
     const transfer = await asked();
     const answer = await verified(statementOf(), transfer.verifyUrl);

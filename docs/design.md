@@ -485,3 +485,15 @@ This service deliberately ships no verifier of its own. A proof you fetch from
 the party being audited is not a proof, so the checks live in the client, in
 [sdk/](../sdk), which runs them against the recipient's own server before the
 payer sees a QR code.
+
+The gateway itself is trusted to speak and for nothing it says. A client running
+every check cannot be made to mark a payment paid that nobody paid, to show an
+invoice the recipient did not issue for this order, or to take one invoice for two
+orders, because every settlement is checked against a hash the client held before
+the report arrived and every blob opens only beside its own payment. What a gateway
+can still do is stay silent or answer late, and read what minting hands it, the
+address and the amount. No check catches a message that was never sent, so the
+answer to silence is a second source: `prove()` asks the recipient's own server
+about a minted payment, a bank transfer is read off the caller's own verify endpoint
+and statement, and a payment watched at a second gateway run by somebody else is
+reported by whichever of the two speaks.
