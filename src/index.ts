@@ -645,20 +645,12 @@ async function create(
 	if (asked.replay > serving.maxReplay) {
 		return tooManyToKeep(serving.maxReplay);
 	}
-	if (store.full(caller)) {
-		return tooMany(caller, store.info().maxPending);
-	}
-	if (asked.webhook && !(await spend(serving.budget, hostOf(asked.webhook.url)))) {
-		return askedEnough(asked.webhook.url);
-	}
-	if (asked.webhook && !(await confirmWebhook(serving, asked.webhook))) {
-		return unconfirmedWebhook(asked.webhook.url);
-	}
 
-	const key = request.headers.get("idempotency-key");
+	const offered = request.headers.get("idempotency-key");
+	const key = offered === null || offered === "" ? null : keyOf(caller, offered);
 	const claim = key ? store.claim(key, fingerprint(asked), CLAIM_LEASE_SECS) : null;
 	if (claim?.state === "done") {
-		return replay(store, claim.paymentId);
+		return replay(store, claim.paymentId, caller);
 	}
 	if (claim?.state === "inflight") {
 		return conflict(REQUEST_IN_FLIGHT, "A request with this Idempotency-Key is still running");
@@ -668,16 +660,26 @@ async function create(
 	}
 
 	try {
+		if (store.full(caller)) {
+			return tooMany(caller, store.info().maxPending);
+		}
+		if (asked.webhook && !(await spend(serving.budget, hostOf(asked.webhook.url)))) {
+			return askedEnough(asked.webhook.url);
+		}
+		if (asked.webhook && !(await confirmWebhook(serving, asked.webhook))) {
+			return unconfirmedWebhook(asked.webhook.url);
+		}
+
 		const payment = await mint(asked, store, serving.send, caller);
+		if (payment === null) {
+			return tooMany(caller, store.info().maxPending);
+		}
 		if (key) {
 			store.fulfill(key, payment.id);
 		}
 
 		return json(paymentToWire(payment), 201);
 	} catch (error: unknown) {
-		if (key) {
-			store.release(key);
-		}
 		if (!(error instanceof NoWalletAvailable)) {
 			throw error;
 		}
@@ -687,7 +689,15 @@ async function create(
 			title: "No wallet could issue a provable invoice",
 			wallets: error.wallets,
 		});
+	} finally {
+		if (key) {
+			store.release(key);
+		}
 	}
+}
+
+function keyOf(caller: string | null, offered: string): string {
+	return caller === null ? offered : `${caller}.${offered}`;
 }
 
 async function mint(
@@ -695,8 +705,11 @@ async function mint(
 	store: Store,
 	send: Send,
 	caller: string | null,
-): Promise<Payment> {
+): Promise<Payment | null> {
 	const resolved = await resolve(send, asked.addresses, asked.amountMsat);
+	if (store.full(caller)) {
+		return null;
+	}
 
 	return store.insert({
 		lnAddress: resolved.address,
@@ -716,9 +729,9 @@ async function mint(
 	});
 }
 
-function replay(store: Store, paymentId: string): Response {
+function replay(store: Store, paymentId: string, caller: string | null): Response {
 	const payment = store.get(paymentId);
-	if (!payment) {
+	if (!payment || !belongsTo(payment, caller)) {
 		return gone("the payment this Idempotency-Key created has already been pruned");
 	}
 
@@ -854,6 +867,9 @@ async function watchOnly(
 	}
 	if (asked.webhook && !(await confirmWebhook(serving, asked.webhook))) {
 		return unconfirmedWebhook(asked.webhook.url);
+	}
+	if (store.full(caller)) {
+		return tooMany(caller, store.info().maxPending);
 	}
 
 	const watched = store.insert({

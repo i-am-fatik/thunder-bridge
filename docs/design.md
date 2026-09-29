@@ -258,6 +258,14 @@ answers 409 rather than the earlier payment. Keys are held 24 hours, shorter tha
 a payment lives, and are not gossiped, so two concurrent requests hitting two
 different instances are still two invoices.
 
+A key belongs to the caller who signed the request, so the same key from two
+callers is two keys, and an order reference used as one hands nobody else's
+payment back and lets nobody squat it. Keys from unsigned callers share one space,
+as their payments do. The key is claimed before the cap is counted, so a retry of
+a request that took the caller's last slot is answered with its payment rather
+than 429, and the cap is counted again just before the payment is stored, because
+two requests can pass the first count while their wallets are still answering.
+
 ## The BOLT11 decoder is hand-rolled
 
 Bech32 in a few pages, no library. It is pinned to the spec vector plus two real

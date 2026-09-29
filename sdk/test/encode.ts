@@ -86,7 +86,7 @@ function checksum(hrp: string, data: number[]): number[] {
   for (const value of [...expanded, ...data, 0, 0, 0, 0, 0, 0]) {
     const top = check >>> 25;
     check = ((check & 0x1ffffff) << 5) ^ value;
-    for (let i = 0; i < 5; i++) if ((top >> i) & 1) check ^= GENERATOR[i];
+    for (let i = 0; i < 5; i++) if ((top >> i) & 1) check ^= GENERATOR[i]!;
   }
   const mod = check ^ 1;
   return Array.from({ length: 6 }, (_, i) => (mod >>> (5 * (5 - i))) & 31);

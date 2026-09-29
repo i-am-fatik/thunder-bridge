@@ -9,6 +9,8 @@ import { expect, test, vi } from "vitest";
 
 import { callerKey, paymentNamedBy, signedAs } from "../core/caller.ts";
 import type { Send, Sent } from "../core/outbound.ts";
+import { sha256Hex } from "../core/sha256.ts";
+import { bolt11 } from "../sdk/test/encode.ts";
 import { type Options, type Service, start } from "./index.ts";
 import { paymentId } from "./ledger.ts";
 import type { UnsavedPayment } from "./payment.ts";
@@ -244,6 +246,124 @@ test("an Idempotency-Key is claimed before the invoice is minted, not after", as
 	expect(((await swapped.json()) as Problem)["type"]).toBe(KEY_REUSED);
 
 	app.stop();
+});
+
+const MINTABLE = { ln_addresses: ["charter@coinos.io"], incoming_amount: MSAT_21K };
+
+function walletMinting(app: App): () => void {
+	const was = app.outbound.send;
+	const metadata = '[["text/plain","Paying charter@coinos.io"]]';
+	app.outbound.send = async (url) => {
+		if (url === "https://coinos.io/.well-known/lnurlp/charter") {
+			return Response.json({
+				tag: "payRequest",
+				callback: "https://coinos.io/api/lnurl/pay/charter",
+				metadata,
+				minSendable: 1_000,
+				maxSendable: 100_000_000,
+			});
+		}
+		const asked = /^https:\/\/coinos\.io\/api\/lnurl\/pay\/charter\?amount=(\d+)$/.exec(url);
+		if (asked) {
+			return Response.json({
+				pr: bolt11({
+					paymentHash: PAYMENT_HASH,
+					amountMsat: Number(asked[1]),
+					descriptionHash: sha256Hex(metadata),
+				}),
+				verify: "https://coinos.io/api/lnurl/verify/minted",
+			});
+		}
+
+		return Response.json({ settled: false });
+	};
+
+	return () => {
+		app.outbound.send = was;
+	};
+}
+
+async function postAs(app: App, body: unknown, key: string, secret: string): Promise<Response> {
+	const sent = JSON.stringify(body);
+
+	return await fetch(`http://127.0.0.1:${app.service.at}/incoming-payments`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			"idempotency-key": key,
+			...(await speaking(secret, "POST", "/incoming-payments", sent)),
+		},
+		body: sent,
+	});
+}
+
+test("an Idempotency-Key names a payment only to the caller who presented it", async () => {
+	const app = await running();
+	const restore = walletMinting(app);
+	try {
+		const alices = await postAs(app, MINTABLE, "order-17", OWNER);
+		expect(alices.status).toBe(201);
+		const mallorys = await postAs(app, MINTABLE, "order-17", STRANGER);
+		expect(mallorys.status).toBe(201);
+		expect(((await mallorys.json()) as Problem)["id"]).not.toBe(
+			((await alices.json()) as Problem)["id"],
+		);
+
+		const squatted = await postAs(
+			app,
+			{ ...MINTABLE, incoming_amount: OTHER_AMOUNT.incoming_amount },
+			"order-18",
+			STRANGER,
+		);
+		expect(squatted.status).toBe(201);
+		expect((await postAs(app, MINTABLE, "order-18", OWNER)).status).toBe(201);
+	} finally {
+		restore();
+		app.stop();
+	}
+});
+
+test("a retry of a create that took the caller's last slot still gets its payment back", async () => {
+	const app = await runningWith({ maxPending: 1 });
+	const restore = walletMinting(app);
+	try {
+		const first = await postAs(app, MINTABLE, "order-18", OWNER);
+		expect(first.status).toBe(201);
+
+		const retried = await postAs(app, MINTABLE, "order-18", OWNER);
+
+		expect(retried.status).toBe(201);
+		expect(((await retried.json()) as Problem)["id"]).toBe(((await first.json()) as Problem)["id"]);
+	} finally {
+		restore();
+		app.stop();
+	}
+});
+
+test("two creates racing past the cap while their wallets answer do not both land", async () => {
+	const app = await runningWith({ maxPending: 1 });
+	const restore = walletMinting(app);
+	const minting = app.outbound.send;
+	app.outbound.send = async (...asked) => {
+		await new Promise((later) => setTimeout(later, 200));
+		return await minting(...asked);
+	};
+	try {
+		const raced = await Promise.all([
+			postAs(app, MINTABLE, "order-19", OWNER),
+			postAs(
+				app,
+				{ ...MINTABLE, incoming_amount: OTHER_AMOUNT.incoming_amount },
+				"order-20",
+				OWNER,
+			),
+		]);
+
+		expect(raced.map((answer) => answer.status).sort()).toEqual([201, 429]);
+	} finally {
+		restore();
+		app.stop();
+	}
 });
 
 test("a create that mints nothing hands its key back so the retry is not stuck", async () => {
@@ -1318,6 +1438,31 @@ test("a webhook challenge takes its turn at the webhook's host too", async () =>
 		expect(seen).toEqual([`GET ${WATCHABLE.verify_url}`]);
 	} finally {
 		restore();
+		app.stop();
+	}
+});
+
+test("two watches racing past the cap while their verify host answers do not both land", async () => {
+	const app = await runningWith({ maxPending: 1 });
+	app.outbound.send = async (_url, sent) => {
+		await new Promise((later) => setTimeout(later, 200));
+		const challenged = nonceOffered(sent);
+		return Response.json(challenged === null ? { settled: false } : { nonce: challenged });
+	};
+
+	try {
+		const raced = await Promise.all(
+			[PAYMENT_HASH, WATCHED_HASH].map((hash) =>
+				fetch(`http://127.0.0.1:${app.service.at}/watched-payments`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ ...WATCHABLE, payment_hash: hash }),
+				}),
+			),
+		);
+
+		expect(raced.map((answer) => answer.status).sort()).toEqual([201, 429]);
+	} finally {
 		app.stop();
 	}
 });
