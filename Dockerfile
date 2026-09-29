@@ -7,6 +7,7 @@ COPY tools/doors.ts ./tools/doors.ts
 RUN npm ci
 COPY core ./core
 COPY src ./src
+COPY sdk/test/encode.ts ./sdk/test/encode.ts
 COPY openapi.yaml ./
 RUN npm test && npx tsc --noEmit \
 	&& rm -rf core/*.test.ts src/*.test.ts src/testing.ts vitest.config.ts \
