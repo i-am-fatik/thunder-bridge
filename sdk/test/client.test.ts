@@ -589,6 +589,17 @@ describe("createQuote", () => {
     });
   });
 
+  it("refuses a quote naming an address nobody asked for, since that address would be paid", async () => {
+    stubFetch(gatewayQuotes({ ln_address: "mallory@evil.example" }));
+
+    const rejection = await new ThunderBridge(GATEWAY)
+      .quote({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) })
+      .catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(GatewayCheatError);
+    expect((rejection as GatewayCheatError).code).toBe("address_not_requested");
+  });
+
   it("never contacts the recipient, because a quote mints nothing there is to verify", async () => {
     const calls = stubFetch(gatewayQuotes());
 

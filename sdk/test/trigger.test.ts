@@ -124,6 +124,15 @@ describe("the payRequest half", () => {
     expect(callback.searchParams.get("sig")).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("refuses a gateway that quotes an address it was never told to pay, so it cannot pay itself", async () => {
+    stubFetch(gatewayServing({ ln_address: "mallory@evil.example" }));
+
+    const offer = await payRequest(endpoint());
+
+    expect(offer["status"]).toBe("ERROR");
+    expect(offer).not.toHaveProperty("callback");
+  });
+
   it("calls the price function once per payRequest, so a fiat peg can move between them", async () => {
     stubFetch(gatewayServing());
     const prices = [21_000, 42_000];
@@ -247,6 +256,15 @@ describe("the callback half", () => {
     expect(refused["reason"]).toContain("not signed here");
   });
 
+  it("refuses a signed callback for an address the trigger no longer pays", async () => {
+    stubFetch(gatewayServing());
+    const callback = (await payRequest(endpoint())).callback;
+
+    const answer = await (await endpoint({ paidTo: [FALLBACK] })(new Request(callback))).json();
+
+    expect(answer).toEqual({ status: "ERROR", reason: `${WINNER} is not paid through this trigger` });
+  });
+
   it("refuses a raised amount", async () => {
     stubFetch(gatewayServing());
     const handler = endpoint();
@@ -288,16 +306,6 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
 
   function recipientAndBlindGateway(): Routes {
     return {
-      [`${GATEWAY}/quotes`]: () =>
-        jsonResponse({
-          ln_address: WINNER,
-          amount: amount(AMOUNT_MSAT),
-          fee: amount(0),
-          min_amount: amount(1_000),
-          max_amount: amount(100_000_000),
-          metadata: METADATA,
-          refusals: [],
-        }),
       "https://coinos.io/.well-known/lnurlp/alice": () =>
         jsonResponse({
           tag: "payRequest",
@@ -341,6 +349,16 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
     expect(body).not.toHaveProperty("incoming_amount");
     expect(JSON.stringify(body)).not.toContain(WINNER);
     expect(JSON.stringify(body)).not.toContain(String(AMOUNT_MSAT));
+  });
+
+  it("quotes the list itself, so the gateway is told neither the addresses nor the amount", async () => {
+    const calls = stubFetch(recipientAndBlindGateway());
+
+    const offer = await payRequest(endpoint({ blind: true }));
+
+    expect(offer["metadata"]).toBe(METADATA);
+    expect(new URL(offer.callback).searchParams.get("to")).toBe(WINNER);
+    expect(calls.filter((call) => call.url.startsWith(GATEWAY))).toEqual([]);
   });
 
   it("asks the blind watch to keep settlements too, since the socket is the same either way", async () => {

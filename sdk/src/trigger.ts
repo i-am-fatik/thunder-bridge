@@ -1,5 +1,5 @@
 import { equalInConstantTime, hmacHex } from "../../core/hmac.js";
-import { resolve } from "../../core/lnurl.js";
+import { quote, resolve } from "../../core/lnurl.js";
 import type { Send } from "../../core/outbound.js";
 import { pinnedToTheAddressWeVerified } from "../../core/pinned.js";
 import { seal } from "../../core/sealed.js";
@@ -184,23 +184,45 @@ export function publicWatchTicketEndpoint(
 
 async function offer(gateway: ThunderBridge, config: TriggerConfig, url: URL): Promise<Response> {
   const { least, most } = await spread(config.amount);
-  const quote = await gateway.quote({ paidTo: config.paidTo, amount: msat(least) });
+  const winner = await quoted(gateway, config, least);
 
   const nonce = randomNonce();
   const callback = new URL(config.baseUrl ?? `${url.origin}${url.pathname}`);
-  callback.searchParams.set("to", quote.lnAddress);
+  callback.searchParams.set("to", winner.address);
   callback.searchParams.set("least", String(least));
   callback.searchParams.set("most", String(most));
   callback.searchParams.set("n", nonce);
-  callback.searchParams.set("sig", await sign(config.secret, quote.lnAddress, least, most, nonce));
+  callback.searchParams.set("sig", await sign(config.secret, winner.address, least, most, nonce));
 
   return Response.json({
     tag: "payRequest",
     callback: callback.toString(),
-    metadata: quote.metadata,
+    metadata: winner.metadata,
     minSendable: least,
     maxSendable: most,
   });
+}
+
+async function quoted(
+  gateway: ThunderBridge,
+  config: TriggerConfig,
+  amountMsat: number,
+): Promise<{ address: string; metadata: string }> {
+  if (config.blind) {
+    const { won } = await quote(
+      config.send ?? pinnedToTheAddressWeVerified,
+      listed(config.paidTo),
+      amountMsat,
+    );
+
+    return won;
+  }
+  const { lnAddress, metadata } = await gateway.quote({
+    paidTo: config.paidTo,
+    amount: msat(amountMsat),
+  });
+
+  return { address: lnAddress, metadata };
 }
 
 async function spread(amount: Amount | Range): Promise<{ least: number; most: number }> {
@@ -232,6 +254,9 @@ async function mint(
   const expected = await sign(config.secret, address, least, most, nonce);
   if (!equalInConstantTime(signature, expected)) {
     return refuse("this callback was not signed here");
+  }
+  if (!listed(config.paidTo).some((one) => one.toLowerCase() === address.toLowerCase())) {
+    return refuse(`${address} is not paid through this trigger`);
   }
 
   const asked = url.searchParams.get("amount");
@@ -308,6 +333,10 @@ async function mintBlind(
   }
 
   return { bolt11: resolved.bolt11, verifyUrl: resolved.verifyUrl };
+}
+
+function listed(paidTo: string | string[]): string[] {
+  return typeof paidTo === "string" ? [paidTo] : paidTo;
 }
 
 function alreadyWatched(refused: unknown): boolean {

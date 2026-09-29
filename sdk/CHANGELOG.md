@@ -64,6 +64,16 @@ verify query and its preimage both changed, and an in-flight transfer raised by
   message carries, and an amount past `Number.MAX_SAFE_INTEGER`. Those two bounds are
   what let the verify query be one length.
 
+### Fixed
+
+- `serve.lnurlPay` served whatever address the gateway quoted, so a gateway could
+  name its own and be paid by everyone scanning the QR. `gateway.quote` now throws
+  `GatewayCheatError` with `address_not_requested` for an address that is not on
+  `paidTo`, and a signed callback for an address the trigger no longer lists is
+  refused. A `blind` trigger quotes the list itself, so the gateway learns neither
+  the addresses nor the amount at payRequest, and one with minting off still
+  serves it.
+
 ## 1.5.0
 
 One gateway to start from. Seventy-two callable exports became twenty-one on the main

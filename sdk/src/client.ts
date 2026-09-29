@@ -322,7 +322,8 @@ export class ThunderBridge {
    * it for one, and asking mints it
    */
   async quote(charge: Charge): Promise<Quote> {
-    const sent = quoteRequestBody(await priced(charge));
+    const asked = await priced(charge);
+    const sent = quoteRequestBody(asked);
     const response = await fetch(`${this.baseUrl}/quotes`, {
       method: "POST",
       headers: await this.sending("/quotes", sent),
@@ -338,6 +339,9 @@ export class ThunderBridge {
         status: response.status,
         title: "The gateway answered with something that is not a quote",
       });
+    }
+    if (!asked.paidTo.some((address) => address.toLowerCase() === quote.lnAddress.toLowerCase())) {
+      throw new GatewayCheatError("address_not_requested", "");
     }
     return quote;
   }
