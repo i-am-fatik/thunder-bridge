@@ -282,7 +282,9 @@ That is fairness, not a defence. A keypair costs nothing to make, so the same st
 comes back under a new one. Two things actually stop them, and both are lists rather
 than counters. `CLIENT_KEYS` names the client keys this instance serves and refuses
 everybody else with 403, which on an instance whose clients you know is the whole
-answer. `GATEWAY_TOKEN` turns every route except `/health`, `/ready`, `/openapi.yaml`,
+answer. It holds for sockets too: with a list set, a socket opens only on a ticket,
+and only a listed key can sign for one. A ticket opens one socket, and `MAX_SOCKETS`
+caps how many the instance holds at once. `GATEWAY_TOKEN` turns every route except `/health`, `/ready`, `/openapi.yaml`,
 `/docs` and `/webhook-key` into a bearer route.
 
 An instance genuinely open to strangers wants a limiter in front of it, which is not in

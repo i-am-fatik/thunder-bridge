@@ -1410,6 +1410,19 @@ describe("followTrigger with tickets", () => {
     stop();
   });
 
+  it("trades for a ticket whenever it signs, since a gateway that knows its clients opens nothing else", async () => {
+    minting();
+    const stop = new ThunderBridge(GATEWAY, { verify: false, secret: "rail_signing_7c1e4b2a9d" }).follow(
+      WATCH_SECRET,
+      { onPayment: () => {} },
+    );
+
+    await vi.waitFor(() =>
+      expect(theSocket().url).toBe(`wss://gateway.example.net/ws/tickets/${TICKET}`),
+    );
+    stop();
+  });
+
   it("asks for the ticket with the secret in the body, where logs do not reach", async () => {
     const calls = minting();
     const stop = new ThunderBridge(GATEWAY, { verify: false }).follow(WATCH_SECRET, {

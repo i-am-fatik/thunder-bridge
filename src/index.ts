@@ -14,6 +14,7 @@ import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.ts";
 import type { Send } from "../core/outbound.ts";
 import { pinnedToTheAddressWeVerified } from "../core/pinned.ts";
+import { sha256Hex } from "../core/sha256.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { agentAddressed } from "../core/url.ts";
 import { type Agents, attend, keepAlive } from "./agents.ts";
@@ -139,6 +140,7 @@ export type Options = {
 	drainTimeoutMs?: number;
 	keepSealedSecs?: number;
 	maxReplay?: number;
+	maxSockets?: number;
 	send?: Send;
 };
 
@@ -181,6 +183,7 @@ export async function start(
 		drainTimeoutMs = 10_000,
 		keepSealedSecs = 90 * 86_400,
 		maxReplay = 100,
+		maxSockets = 10_000,
 		send = pinnedToTheAddressWeVerified,
 	}: Options,
 	store: Store,
@@ -226,6 +229,9 @@ export async function start(
 	const vitals = (): Vitals => (draining ? "draining" : stalled() ? "stalled" : "serving");
 
 	const followers = new Map<WebSocket, Follower>();
+	const spentTickets = new Map<string, number>();
+	const socketsOpen = (): number =>
+		followers.size + [...agents.values()].reduce((all, held) => all + held.size, 0);
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
 	const server = createServer((incoming, outgoing) => {
 		void respond(incoming, store, serving, vitals()).then((answer) => reply(answer, outgoing));
@@ -241,10 +247,11 @@ export async function start(
 		if (socket.destroyed) {
 			return;
 		}
-		if (permits === null) {
+		if (permits === null || spentTickets.has(permits.jti)) {
 			refuseUpgrade(socket);
 			return;
 		}
+		spentTickets.set(permits.jti, unixNow() + TICKET_TTL_SECS);
 
 		upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
 			if (permits.kind === "trigger") {
@@ -261,7 +268,7 @@ export async function start(
 	};
 
 	server.on("upgrade", (incoming, socket, head) => {
-		if (draining) {
+		if (draining || socketsOpen() >= maxSockets) {
 			refuseUpgrade(socket, "503 Service Unavailable");
 			return;
 		}
@@ -273,8 +280,12 @@ export async function start(
 			return;
 		}
 
-		if (token !== null && !bearerMatches(incoming, token)) {
+		if (serving.token !== null && !bearerMatches(incoming, serving.token)) {
 			refuseUpgrade(socket);
+			return;
+		}
+		if (serving.clientKeys !== null) {
+			refuseUpgrade(socket, "403 Forbidden");
 			return;
 		}
 
@@ -336,6 +347,11 @@ export async function start(
 			socket.ping();
 		}
 		keepAlive(agents);
+		for (const [jti, expiresAt] of spentTickets) {
+			if (expiresAt <= unixNow()) {
+				spentTickets.delete(jti);
+			}
+		}
 	}, PING_INTERVAL_MS);
 
 	const sweeper = setInterval(() => {
@@ -486,7 +502,7 @@ function bearerMatches(incoming: IncomingMessage, token: string): boolean {
 	const offered = incoming.headers.authorization ?? "";
 	const bearer = offered.startsWith(BEARER) ? offered.slice(BEARER.length) : "";
 
-	return equalInConstantTime(bearer, token);
+	return equalInConstantTime(sha256Hex(bearer), sha256Hex(token));
 }
 
 function refuseUpgrade(socket: Duplex, status = "401 Unauthorized"): void {
@@ -1215,6 +1231,7 @@ if (import.meta.main) {
 			drainTimeoutMs: secsToMs(positive("DRAIN_TIMEOUT_SECS")),
 			keepSealedSecs: daysToSecs(positive("KEEP_SEALED_DAYS")),
 			maxReplay: whole("MAX_REPLAY"),
+			maxSockets: positive("MAX_SOCKETS"),
 		},
 		store,
 	);

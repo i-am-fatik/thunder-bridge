@@ -73,6 +73,10 @@ verify query and its preimage both changed, and an in-flight transfer raised by
   refused. A `blind` trigger quotes the list itself, so the gateway learns neither
   the addresses nor the amount at payRequest, and one with minting off still
   serves it.
+- A client given a `secret` trades for a socket ticket before every `follow` and
+  `waitFor`, as one given a `token` already did. A gateway keeping `CLIENT_KEYS`
+  now opens no socket without a ticket, and the trigger secret stops travelling in
+  a socket URL whenever the client signs.
 
 ## 1.5.0
 

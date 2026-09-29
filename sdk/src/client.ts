@@ -92,7 +92,7 @@ export interface WaitOptions {
 
   /**
    * Mint a short-lived ticket and put that in the socket URL instead of the
-   * payment id. Implied by `token`. The id stays readable inside the ticket,
+   * payment id. Implied by `token` and by `secret`. The id stays readable inside the ticket,
    * what changes is that a URL out of a log stops opening anything after a
    * minute
    */
@@ -165,7 +165,7 @@ export interface FollowOptions {
   /**
    * Mint a short-lived ticket and put that in the socket URL instead of the
    * secret, one per connection. Keeps the secret out of access logs, at the cost
-   * of a POST before each connect. Implied by `token`. Leave it off for a
+   * of a POST before each connect. Implied by `token` and by `secret`. Leave it off for a
    * microcontroller, where one hardcoded URL and a dumb reconnect loop is the
    * whole point
    */
@@ -808,7 +808,7 @@ export class ThunderBridge {
   }
 
   private needsTicket(asked?: boolean): boolean {
-    return asked === true || this.token !== null;
+    return asked === true || this.token !== null || this.secret !== null;
   }
 
   private async wsTicket(

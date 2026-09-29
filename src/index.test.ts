@@ -996,6 +996,47 @@ test("an instance keeping a list of client keys serves nobody else, on any route
 	app.stop();
 });
 
+test("an instance keeping a list of client keys lets no socket in that a ticket did not open", async () => {
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+	const app = await runningWith({ clientKeys: new Set([owner]) });
+	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+
+	const direct = new WebSocket(
+		`ws://127.0.0.1:${app.service.at}/ws/incoming-payments/${created["id"]}`,
+	);
+	const refused = await new Promise((ended) => {
+		direct.addEventListener("open", () => ended("opened"), { once: true });
+		direct.addEventListener("error", () => ended("refused"), { once: true });
+	});
+
+	expect(refused).toBe("refused");
+	app.stop();
+});
+
+test("a ticket opens one socket, and a second socket on the same ticket is refused", async () => {
+	const app = await running();
+	const ticket = await ticketFor(app, { trigger_secret: "one-socket-only" });
+
+	const first = await openedWith(app, ticket);
+	const second = await openedWith(app, ticket);
+
+	expect(first.readyState).toBe(WebSocket.OPEN);
+	expect(second.readyState).not.toBe(WebSocket.OPEN);
+	first.close();
+	app.stop();
+});
+
+test("an instance holding as many sockets as it will is refused the next one", async () => {
+	const app = await runningWith({ maxSockets: 1 });
+	const first = await openedWith(app, await ticketFor(app, { trigger_secret: "first" }));
+	const second = await openedWith(app, await ticketFor(app, { trigger_secret: "second" }));
+
+	expect(first.readyState).toBe(WebSocket.OPEN);
+	expect(second.readyState).not.toBe(WebSocket.OPEN);
+	first.close();
+	app.stop();
+});
+
 test("a watch that named its caller is handed back to that caller and to nobody else", async () => {
 	const app = await running();
 
