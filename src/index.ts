@@ -8,7 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { type WebSocket, WebSocketServer } from "ws";
 import { hexToBytes } from "../core/bytes.ts";
-import { callerOf } from "../core/caller.ts";
+import { callerOf, TOLERANCE_SECS } from "../core/caller.ts";
 import { type SigningKey, signingKeyFromSeed } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.ts";
@@ -131,6 +131,7 @@ export type Options = {
 	mints?: boolean;
 	token?: string | null;
 	clientKeys?: Set<string> | null;
+	publicHosts?: Set<string> | null;
 	verifyHosts?: Set<string> | null;
 	verifyChallenge?: boolean;
 	eagerDelayMs?: number;
@@ -156,6 +157,8 @@ type Serving = {
 	key: Uint8Array;
 	keepSealedSecs: number;
 	clientKeys: Set<string> | null;
+	publicHosts: Set<string> | null;
+	spentNonces: Map<string, number>;
 	mints: boolean;
 	webhookKey: SigningKey;
 	verifyHosts: Set<string> | null;
@@ -174,6 +177,7 @@ export async function start(
 		mints = false,
 		token = null,
 		clientKeys = null,
+		publicHosts = null,
 		verifyHosts = null,
 		verifyChallenge = true,
 		eagerDelayMs = 5_000,
@@ -201,6 +205,8 @@ export async function start(
 		key,
 		keepSealedSecs,
 		clientKeys,
+		publicHosts,
+		spentNonces: new Map(),
 		mints,
 		webhookKey: await webhookSigningKey(key),
 		verifyHosts,
@@ -347,9 +353,11 @@ export async function start(
 			socket.ping();
 		}
 		keepAlive(agents);
-		for (const [jti, expiresAt] of spentTickets) {
-			if (expiresAt <= unixNow()) {
-				spentTickets.delete(jti);
+		for (const spent of [spentTickets, serving.spentNonces]) {
+			for (const [once, expiresAt] of spent) {
+				if (expiresAt <= unixNow()) {
+					spent.delete(once);
+				}
 			}
 		}
 	}, PING_INTERVAL_MS);
@@ -574,7 +582,7 @@ async function route(
 	}
 
 	const request = await asRequest(incoming);
-	const caller = await callerFor(request);
+	const caller = await callerFor(request, serving);
 	if (!accepted(caller, serving.clientKeys)) {
 		return unknownCaller();
 	}
@@ -640,15 +648,29 @@ function belongsTo(payment: Payment, caller: string | null): boolean {
 	return payment.caller === null || payment.caller === caller;
 }
 
-async function callerFor(request: Request): Promise<string | null> {
+async function callerFor(request: Request, serving: Serving): Promise<string | null> {
 	const asked = new URL(request.url);
+	const host = request.headers.get("host")?.toLowerCase() ?? "";
 
 	return await callerOf(
 		request.headers,
 		request.method,
 		`${asked.pathname}${asked.search}`,
 		await request.clone().text(),
+		{
+			host: serving.publicHosts === null || serving.publicHosts.has(host) ? host : "",
+			fresh: (caller, nonce) => spentOnce(serving.spentNonces, `${caller}.${nonce}`),
+		},
 	);
+}
+
+function spentOnce(spent: Map<string, number>, once: string): boolean {
+	if (spent.has(once)) {
+		return false;
+	}
+	spent.set(once, unixNow() + 2 * TOLERANCE_SECS);
+
+	return true;
 }
 
 async function create(
@@ -1222,6 +1244,7 @@ if (import.meta.main) {
 			mints: process.env["MINTING"] === "1",
 			token: bearer("GATEWAY_TOKEN"),
 			clientKeys: allowed("CLIENT_KEYS"),
+			publicHosts: allowed("PUBLIC_HOSTS"),
 			verifyHosts: allowed("VERIFY_HOSTS"),
 			verifyChallenge: process.env["VERIFY_CHALLENGE"] !== "0",
 			eagerDelayMs: secsToMs(positive("POLL_INTERVAL_SECS")),

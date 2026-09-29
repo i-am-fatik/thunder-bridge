@@ -854,7 +854,9 @@ export class ThunderBridge {
   private async reading(method: string, path: string, body = ""): Promise<Record<string, string>> {
     return {
       ...(this.token === null ? {} : { authorization: `Bearer ${this.token}` }),
-      ...(this.secret === null ? {} : await signedAs(await this.speaking(), method, path, body)),
+      ...(this.secret === null
+        ? {}
+        : await signedAs(await this.speaking(), method, path, body, new URL(this.baseUrl).host)),
     };
   }
 

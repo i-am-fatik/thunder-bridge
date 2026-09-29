@@ -1,7 +1,7 @@
 import { msat } from "../src/amount";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { callerKey, callerOf, paymentNamedBy } from "../../core/caller.js";
+import { callerKey, callerOf, type Hearing, paymentNamedBy } from "../../core/caller.js";
 import { ThunderBridge } from "../src/client";
 import {
   GatewayCheatError,
@@ -123,6 +123,10 @@ function gatewayQuotes(overrides: Record<string, unknown> = {}): Routes {
 
 function postedBody(calls: FetchCall[]): Record<string, unknown> {
   return JSON.parse(String(calls[0].init?.body)) as Record<string, unknown>;
+}
+
+function heardAt(host: string): Hearing {
+  return { host, fresh: () => true };
 }
 
 function headersOf(call: FetchCall): Record<string, string> {
@@ -2221,8 +2225,22 @@ describe("a client that names itself", () => {
         "POST",
         "/incoming-payments",
         String(call?.init?.body ?? ""),
+        heardAt("gateway.example.net"),
       ),
     ).toBe((await callerKey(SECRET)).publicKeyHex);
+  });
+
+  it("signs for the gateway it talks to, so another gateway cannot be handed the request", async () => {
+    const calls = stubFetch({
+      [`${GATEWAY}/incoming-payments?limit=10`]: () =>
+        jsonResponse({ payments: [], settled_scanned: 0 }),
+    });
+
+    await new ThunderBridge(GATEWAY, { secret: SECRET }).payments(10);
+
+    expect(
+      await callerOf(headersOf(calls[0]), "GET", "/incoming-payments?limit=10", "", heardAt("other.example")),
+    ).toBeNull();
   });
 
   it("signs a read over the path it reads, query string included", async () => {
@@ -2233,10 +2251,13 @@ describe("a client that names itself", () => {
 
     await new ThunderBridge(GATEWAY, { secret: SECRET }).payments(10);
 
-    expect(await callerOf(headersOf(calls[0]), "GET", "/incoming-payments?limit=10", "")).toBe(
-      (await callerKey(SECRET)).publicKeyHex,
-    );
-    expect(await callerOf(headersOf(calls[0]), "GET", "/incoming-payments", "")).toBeNull();
+    const gateway = heardAt("gateway.example.net");
+    expect(
+      await callerOf(headersOf(calls[0]), "GET", "/incoming-payments?limit=10", "", gateway),
+    ).toBe((await callerKey(SECRET)).publicKeyHex);
+    expect(
+      await callerOf(headersOf(calls[0]), "GET", "/incoming-payments", "", heardAt("gateway.example.net")),
+    ).toBeNull();
   });
 
   it("carries the secret nowhere, only what it proves", async () => {

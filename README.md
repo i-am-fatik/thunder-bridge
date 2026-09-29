@@ -125,6 +125,7 @@ standard's camelCase, and there is no authorization server.
 | `CLUSTER_KEY` | required | 32 bytes of hex, the swarm topic and the right to write a fact |
 | `MINTING` | off | `1` turns on `POST /incoming-payments` and `POST /quotes`. Off, the gateway only watches invoices a client minted itself, which is the only way the operator never sees an address or an amount |
 | `CLIENT_KEYS` | none | comma-separated client public keys this instance serves, and it serves nobody else. Unset serves everybody |
+| `PUBLIC_HOSTS` | none | comma-separated hosts, with a port where it is not the default, that a signed request may name as this gateway. Unset believes the `Host` header, which is enough behind a proxy that routes by host and not enough where anybody can reach the instance directly |
 | `KEEP_SEALED_DAYS` | `90` | how long a sealed blob outlives the payment it belonged to, after which it goes too |
 | `PORT` | `3000` | listen port, Railway sets this for you |
 | `HOST` | `0.0.0.0` | interface to bind. `127.0.0.1` keeps the gateway off the network, for a reverse proxy on the same host |
@@ -231,6 +232,13 @@ port with `railway domain --port 8080`, and never set `PORT` yourself.
   stranger coming back under a new key, though. `CLIENT_KEYS` does, by serving a named
   list and nobody else, and that is the whole defence on an instance whose clients are
   known. An instance open to strangers still wants a limiter in front of it.
+- **A signature names the gateway it was made for and is spent once.** A client signs
+  the host it talks to and a nonce along with the method, the path, the body and the
+  time, so a request captured on its way to one gateway proves nothing at another, and
+  sent a second time it is answered as nobody's. Each instance holds the nonces it saw
+  for ten minutes and shares them with nobody, so a replay sent to a second instance
+  behind the same host is still believed there once. A client older than 2.2.0 signs
+  neither and is still believed for its five minutes.
 - **An unsigned caller is anonymous, and anonymous callers share one share.** Signing
   is what makes a payment yours to read, so a caller that signs nothing gets a payment
   any holder of the id can read, and its watches count against the one share every

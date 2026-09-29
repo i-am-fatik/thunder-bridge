@@ -15,6 +15,13 @@ releases a version number once it has been published.
 
 ## Unreleased
 
+### Changed
+
+- A signed request names the gateway it is sent to and carries a nonce in
+  `x-nonce`, so a request captured on its way to one gateway proves nothing at
+  another and is refused the second time. A gateway older than 2.2.0 does not read
+  this signature, so upgrade the gateway before a client that signs.
+
 ### Fixed
 
 - `serve.webhook` acts on each settlement once for as long as a delivery of it

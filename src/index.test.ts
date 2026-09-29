@@ -47,7 +47,11 @@ const nothingAnswers: Send = async (url) => {
 	throw new Error(`${url} has nothing answering it in this test`);
 };
 
-async function running(token: string | null = null, drainTimeoutMs = 10_000): Promise<App> {
+async function running(
+	token: string | null = null,
+	drainTimeoutMs = 10_000,
+	more: Partial<Options> = {},
+): Promise<App> {
 	const opened = openStore();
 	const outbound = { send: nothingAnswers };
 	const service = await start(
@@ -59,6 +63,7 @@ async function running(token: string | null = null, drainTimeoutMs = 10_000): Pr
 			token,
 			eagerDelayMs: 3000,
 			drainTimeoutMs,
+			...more,
 		},
 		opened.store,
 	);
@@ -291,7 +296,7 @@ async function postAs(app: App, body: unknown, key: string, secret: string): Pro
 		headers: {
 			"content-type": "application/json",
 			"idempotency-key": key,
-			...(await speaking(secret, "POST", "/incoming-payments", sent)),
+			...(await speaking(app, secret, "POST", "/incoming-payments", sent)),
 		},
 		body: sent,
 	});
@@ -844,7 +849,7 @@ async function postWatch(app: App, body: unknown, secret: string | null = null):
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
-				...(secret === null ? {} : await speaking(secret, "POST", "/watched-payments", sent)),
+				...(secret === null ? {} : await speaking(app, secret, "POST", "/watched-payments", sent)),
 			},
 			body: sent,
 		});
@@ -854,19 +859,20 @@ async function postWatch(app: App, body: unknown, secret: string | null = null):
 }
 
 async function speaking(
+	app: App,
 	secret: string,
 	method: string,
 	path: string,
 	body: string,
 ): Promise<Record<string, string>> {
-	return await signedAs(await callerKey(secret), method, path, body);
+	return await signedAs(await callerKey(secret), method, path, body, `127.0.0.1:${app.service.at}`);
 }
 
 async function readAs(app: App, id: string, secret: string | null): Promise<Response> {
 	const path = `/incoming-payments/${id}`;
 
 	return await fetch(`http://127.0.0.1:${app.service.at}${path}`, {
-		headers: secret === null ? {} : await speaking(secret, "GET", path, ""),
+		headers: secret === null ? {} : await speaking(app, secret, "GET", path, ""),
 	});
 }
 
@@ -1107,7 +1113,7 @@ test("a ticket is not minted for a payment that belongs to somebody else", async
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
-			...(await speaking(STRANGER, "POST", "/ws-tickets", asked)),
+			...(await speaking(app, STRANGER, "POST", "/ws-tickets", asked)),
 		},
 		body: asked,
 	});
@@ -1117,7 +1123,7 @@ test("a ticket is not minted for a payment that belongs to somebody else", async
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
-			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+			...(await speaking(app, OWNER, "POST", "/ws-tickets", asked)),
 		},
 		body: asked,
 	});
@@ -1125,6 +1131,58 @@ test("a ticket is not minted for a payment that belongs to somebody else", async
 
 	app.stop();
 });
+
+test("a signed request sent a second time word for word is answered as nobody's", async () => {
+	const app = await running();
+	const created = (await (await postWatch(app, WATCHABLE, OWNER)).json()) as Problem;
+	const asked = JSON.stringify({ payment_id: created["id"] });
+	const headers = {
+		"content-type": "application/json",
+		...(await speaking(app, OWNER, "POST", "/ws-tickets", asked)),
+	};
+	const tickets = `http://127.0.0.1:${app.service.at}/ws-tickets`;
+
+	const first = await fetch(tickets, { method: "POST", headers, body: asked });
+	const replayed = await fetch(tickets, { method: "POST", headers, body: asked });
+
+	expect([first.status, replayed.status]).toEqual([200, 404]);
+	app.stop();
+});
+
+test("a request signed for a host this gateway does not serve is answered as nobody's", async () => {
+	const app = await running(null, 10_000, { publicHosts: new Set(["gateway.example.net"]) });
+	const mine = app.store.insert(pendingPayment({ caller: (await callerKey(OWNER)).publicKeyHex }));
+	const asked = JSON.stringify({ payment_id: mine.id });
+	const sentTo = async (host: string) =>
+		await postedWithHost(app, "/ws-tickets", asked, {
+			"content-type": "application/json",
+			host,
+			...(await signedAs(await callerKey(OWNER), "POST", "/ws-tickets", asked, host)),
+		});
+
+	expect(await sentTo("gateway.example.net")).toBe(200);
+	expect(await sentTo(`127.0.0.1:${app.service.at}`)).toBe(404);
+	app.stop();
+});
+
+function postedWithHost(
+	app: App,
+	path: string,
+	body: string,
+	headers: Record<string, string>,
+): Promise<number> {
+	return new Promise((answered, failed) => {
+		const call = httpRequest(
+			{ host: "127.0.0.1", port: Number(app.service.at), path, method: "POST", headers },
+			(answer) => {
+				answer.resume();
+				answered(answer.statusCode ?? 0);
+			},
+		);
+		call.on("error", failed);
+		call.end(body);
+	});
+}
 
 test("a watch answered over a socket names the caller asking, and no verify url is fetched", async () => {
 	const app = await running();
@@ -1169,7 +1227,7 @@ test("an agent ticket is minted for the caller that asked for it, and for nobody
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
-			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+			...(await speaking(app, OWNER, "POST", "/ws-tickets", asked)),
 		},
 		body: asked,
 	});
@@ -1193,7 +1251,7 @@ test("a draining instance closes the agent sockets it holds, so the device recon
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
-			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+			...(await speaking(app, OWNER, "POST", "/ws-tickets", asked)),
 		},
 		body: asked,
 	});
@@ -1219,7 +1277,7 @@ test("a ticket names one subject, so asking for an agent and a payment at once i
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
-			...(await speaking(OWNER, "POST", "/ws-tickets", asked)),
+			...(await speaking(app, OWNER, "POST", "/ws-tickets", asked)),
 		},
 		body: asked,
 	});
