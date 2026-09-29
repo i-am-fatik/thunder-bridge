@@ -48,6 +48,13 @@ export interface WebhookHandlers {
 
   /** How far the gateway's clock may drift from yours, five minutes by default */
   toleranceSecs?: number;
+
+  /**
+   * The URL you registered, when a proxy in front of you hands the request on
+   * under another host or scheme. Left unset, the request's own URL is what the
+   * delivery has to have been signed for
+   */
+  url?: string;
 }
 
 /**
@@ -104,7 +111,7 @@ export class Serve {
    * entire integration
    */
   webhook(handlers: WebhookHandlers): Handler {
-    const options: WebhookOptions = { toleranceSecs: handlers.toleranceSecs };
+    const options: WebhookOptions = { toleranceSecs: handlers.toleranceSecs, url: handlers.url };
     const once = onceWhileReplayable(handlers.toleranceSecs ?? DEFAULT_TOLERANCE_SECS);
 
     return async (request: Request) => {

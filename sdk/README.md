@@ -400,9 +400,12 @@ try {
 
 Pass `webhookUrl` when you create a payment, or on any rail. There is no webhook
 secret: a gateway holds nothing of yours, and sending one is refused rather than
-ignored. Every delivery is signed `ed25519=<signature>` with the key the gateway
-publishes at `/webhook-key`, over `<x-timestamp>.<raw body>` rather than the body
-alone, so a captured delivery cannot be replayed at you later. Until then
+ignored. Every delivery carries `x-signature-v2: ed25519=<signature>` with the key
+the gateway publishes at `/webhook-key`, over the URL it was sent to, `<x-timestamp>`
+and the raw body, so a delivery made for somebody else's endpoint proves nothing at
+yours and a captured one cannot be replayed at you later. Behind a proxy that hands
+the request on under another host or scheme, pass the URL you registered as `url`.
+Until then
 `serve.webhook` acts on each settlement once, answering a replay `200` without
 calling you again. Delivery is still at-least-once: a retry after that window, or
 one reaching another instance of your server, calls you again, so fulfil

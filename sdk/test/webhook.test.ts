@@ -1,5 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { deliverySigned } from "../../core/delivery.js";
 import { type SigningKey, signingKeyFromSeed } from "../../core/ed25519.js";
 import type { MintedPayment } from "../src/types";
 import { carriesProof } from "../src/verify";
@@ -58,10 +59,11 @@ async function signedBy(
   body: string,
   timestamp: string,
   key: Promise<SigningKey> = KEY,
+  url = HOOK,
 ): Promise<string> {
   const signing = await key;
 
-  return `ed25519=${await signing.sign(new TextEncoder().encode(`${timestamp}.${body}`))}`;
+  return `ed25519=${await signing.sign(deliverySigned(url, timestamp, body))}`;
 }
 
 async function published(key: Promise<SigningKey> = KEY): Promise<WebhookCredential> {
@@ -80,7 +82,7 @@ async function delivery(body: string, sent: Sent = {}): Promise<Request> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   const signature = sent.signature ?? (await signedBy(body, timestamp, sent.signedWith));
   if (signature !== "") {
-    headers["x-signature"] = signature;
+    headers["x-signature-v2"] = signature;
   }
   if (sent.timestamp !== "") {
     headers["x-timestamp"] = timestamp;
@@ -125,6 +127,43 @@ describe("the signature a delivery has to carry", () => {
     ).resolves.toEqual(PAYMENT);
   });
 
+  it("refuses a delivery the gateway signed for somebody else's endpoint", async () => {
+    const stamp = now();
+    const request = await delivery(BODY, {
+      timestamp: stamp,
+      signature: await signedBy(BODY, stamp, KEY, "https://other.example/hooks/thunder-bridge"),
+    });
+
+    await expect(readPayment(request, await published())).resolves.toBeNull();
+  });
+
+  it("reads a delivery a proxy hands on under another URL, when told the one registered", async () => {
+    const request = await delivery(BODY, { url: "http://shop:3000/hooks/thunder-bridge" });
+
+    await expect(readPayment(request, await published())).resolves.toBeNull();
+    await expect(
+      readPayment(request, await published(), { url: HOOK }),
+    ).resolves.toEqual(PAYMENT);
+  });
+
+  it("binds the origin and the path only, so a query string added on the way does no harm", async () => {
+    const request = await delivery(BODY, { url: `${HOOK}?via=edge` });
+
+    await expect(readPayment(request, await published())).resolves.toEqual(PAYMENT);
+  });
+
+  it("refuses a delivery carrying only the signature a gateway older than 2.2.0 sends", async () => {
+    const stamp = now();
+    const older = `ed25519=${await (await KEY).sign(new TextEncoder().encode(`${stamp}.${BODY}`))}`;
+    const request = new Request(HOOK, {
+      method: "POST",
+      headers: { "x-signature": older, "x-timestamp": stamp },
+      body: BODY,
+    });
+
+    await expect(readPayment(request, await published())).resolves.toBeNull();
+  });
+
   it("rejects a signature lifted onto a different timestamp", async () => {
     const stamp = now();
     const request = await delivery(BODY, {
@@ -153,7 +192,7 @@ describe("the signature a delivery has to carry", () => {
     }
   });
 
-  it("returns null when the request carries no x-signature header at all", async () => {
+  it("returns null when the request carries no x-signature-v2 header at all", async () => {
     const request = await delivery(BODY, { signature: "" });
 
     await expect(readPayment(request, await published())).resolves.toBeNull();
@@ -163,7 +202,7 @@ describe("the signature a delivery has to carry", () => {
     const stamp = now();
     const request = new Request(HOOK, {
       method: "POST",
-      headers: { "x-signature": await signedBy(BODY, stamp) },
+      headers: { "x-signature-v2": await signedBy(BODY, stamp) },
       body: BODY,
     });
 

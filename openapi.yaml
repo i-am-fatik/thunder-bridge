@@ -198,8 +198,10 @@ paths:
         verifies against it. It changes only if that key changes.
 
         Fetch it once and keep it. Every delivery and every challenge arrives as
-        `x-signature: ed25519=<signature>` over `<x-timestamp>.<raw body>`, and this is the
-        key that checks it. Because the key is derived from `CLUSTER_KEY`, a rotation
+        `x-signature-v2: ed25519=<signature>` over four lines joined by a newline: `v2`, the
+        origin and path of the URL it was sent to, `<x-timestamp>` and the raw body. It also
+        carries `x-signature` over `<x-timestamp>.<raw body>` for clients older than 2.2.0.
+        This is the key that checks both. Because the key is derived from `CLUSTER_KEY`, a rotation
         invalidates it for every receiver at once, so treat a signature that stops verifying
         as a reason to read this again before treating it as a gateway misbehaving.
       responses:
@@ -720,11 +722,10 @@ webhooks:
         payment settled on one instance is delivered by whichever instance in the cluster gets
         there first, so a duplicate is normal and the receiver must be idempotent.
 
-        Verify before you act. The SDK's `parseSettlementRequest` does both halves in one call
-        and refuses a body whose signature or timestamp does not hold up, and
-        `isProvablySettled` then answers the only question that matters about one: whether the
-        preimage hashes to the payment hash the delivery itself names. The credential is the key
-        from `/webhook-key`.
+        Verify before you act. The SDK's `serve.webhook` refuses a body whose signature,
+        timestamp or URL does not hold up and one claiming paid whose preimage does not hash
+        to the payment hash it names, so it calls you only for a settlement that proves
+        itself. The credential is the key from `/webhook-key`.
       parameters:
         - name: x-timestamp
           in: header
@@ -735,16 +736,26 @@ webhooks:
             stops a captured delivery being replayed later.
           schema:
             type: string
+        - name: x-signature-v2
+          in: header
+          required: true
+          description: |
+            `ed25519=<signature>` over `v2`, the origin and path of the URL this was sent to,
+            `<x-timestamp>` and the raw body, one per line, signed with the key this gateway
+            publishes at `/webhook-key`. The URL is in it, so a delivery made for another
+            endpoint proves nothing at yours.
+          schema:
+            type: string
+            pattern: "^ed25519=[0-9a-f]{128}$"
         - name: x-signature
           in: header
           required: true
           description: |
-            `ed25519=<signature>` over `<x-timestamp>.<raw body>`, signed with the key this
-            gateway publishes at `/webhook-key`. There is one scheme now: the shared secret is
-            gone, so a gateway holds nothing of yours and a `sha256=` signature is refused.
+            `ed25519=<signature>` over `<x-timestamp>.<raw body>`, for clients older than 2.2.0,
+            which bound no URL. A newer client does not accept it.
           schema:
             type: string
-            pattern: "^(sha256=[0-9a-f]{64}|ed25519=[0-9a-f]{128})$"
+            pattern: "^ed25519=[0-9a-f]{128}$"
       requestBody:
         required: true
         content:
@@ -766,12 +777,10 @@ webhooks:
         The gateway will not send an unsolicited request to an address a caller merely named,
         so a URL that never answers a challenge never hears from it again either.
 
-        Answer 200 with `{"nonce": "<the nonce you were sent>"}`, and add
-        `"signature": "sha256=<hmac>"` over that nonce alone, keyed with the `webhook.secret`
-        you registered, when you registered one. Echoing proves you hold the URL, signing
-        proves you are the party whose secret it is. The SDK's
-        `answerWebhookChallengeRequest` does both and hands back the response to return,
-        or null when the delivery was not a challenge.
+        Answer 200 with `{"nonce": "<the nonce you were sent>"}`. Echoing proves you hold the
+        URL, and there is nothing else to prove, because the gateway holds nothing of yours.
+        The SDK's `serve.answerWebhookChallenge` hands back the response to return, or null
+        when the delivery was not a challenge.
 
         The challenge is signed the way every delivery is, so verify it before answering.
         The nonce is single use and is not stored, so nothing here is worth replaying.
@@ -781,12 +790,18 @@ webhooks:
           required: true
           schema:
             type: string
+        - name: x-signature-v2
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: "^ed25519=[0-9a-f]{128}$"
         - name: x-signature
           in: header
           required: true
           schema:
             type: string
-            pattern: "^(sha256=[0-9a-f]{64}|ed25519=[0-9a-f]{128})$"
+            pattern: "^ed25519=[0-9a-f]{128}$"
       requestBody:
         required: true
         content:
@@ -839,7 +854,7 @@ webhooks:
 
         The client's verify endpoints answer this themselves, so `bankVerifyEndpoint` and
         `lightningVerifyEndpoint` need no wiring. A hand-rolled endpoint can use
-        `answerVerifyChallengeRequest`, which hands back the response to return or null when
+        `answerVerifyChallenge`, which hands back the response to return or null when
         the request was not a challenge. An operator whose callers are all known can turn the
         challenge off with `VERIFY_CHALLENGE=0`.
       parameters:
@@ -848,6 +863,12 @@ webhooks:
           required: true
           schema:
             type: string
+        - name: x-signature-v2
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: "^ed25519=[0-9a-f]{128}$"
         - name: x-signature
           in: header
           required: true
@@ -1460,8 +1481,7 @@ components:
     webhook_unconfirmed:
       description: |
         The `webhook.url` did not answer the challenge, so nothing was watched. Either it is
-        not serving yet, it answered without the nonce it was given, or it signed with
-        something other than the `webhook.secret` registered alongside it. Stand the endpoint
+        not serving yet, or it answered without the nonce it was given. Stand the endpoint
         up and register again: the gateway will not take on a payment whose settlement it
         already knows it cannot report.
       content:

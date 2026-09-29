@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { bytesToHex } from "../core/bytes.ts";
+import { deliverySigned } from "../core/delivery.ts";
 import type { SigningKey } from "../core/ed25519.ts";
 import { checkSettled, type Settlement } from "../core/lnurl.ts";
 import { ask, type Send } from "../core/outbound.ts";
@@ -132,7 +133,7 @@ async function notify(outbound: Outbound, owed: Delivery): Promise<boolean> {
 	try {
 		const answer = await ask(outbound.send, owed.url, {
 			method: "POST",
-			headers: await signedHeaders(owed.body, outbound.webhookKey),
+			headers: await signedHeaders(owed.url, owed.body, outbound.webhookKey),
 			body: owed.body,
 			staysOnOrigin: true,
 		});
@@ -161,7 +162,7 @@ async function consents(outbound: Outbound, url: string, type: string): Promise<
 	try {
 		const answer = await ask(outbound.send, url, {
 			method: "POST",
-			headers: await signedHeaders(body, outbound.webhookKey),
+			headers: await signedHeaders(url, body, outbound.webhookKey),
 			body,
 			staysOnOrigin: true,
 		});
@@ -196,6 +197,7 @@ function asJson(body: string): Record<string, unknown> {
 }
 
 async function signedHeaders(
+	url: string,
 	body: string,
 	gatewayKey: SigningKey,
 ): Promise<Record<string, string>> {
@@ -205,6 +207,7 @@ async function signedHeaders(
 		"content-type": "application/json",
 		"x-timestamp": stamped,
 		"x-signature": `ed25519=${await gatewayKey.sign(new TextEncoder().encode(`${stamped}.${body}`))}`,
+		"x-signature-v2": `ed25519=${await gatewayKey.sign(deliverySigned(url, stamped, body))}`,
 	};
 }
 

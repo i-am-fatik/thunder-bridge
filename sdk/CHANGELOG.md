@@ -21,6 +21,13 @@ releases a version number once it has been published.
   `x-nonce`, so a request captured on its way to one gateway proves nothing at
   another and is refused the second time. A gateway older than 2.2.0 does not read
   this signature, so upgrade the gateway before a client that signs.
+- A webhook delivery and a challenge are checked against the URL they were sent to.
+  The readers and `serve.webhook` want `x-signature-v2`, which a gateway signs over
+  the origin and path of that URL as well as the timestamp and the body, so a
+  delivery made for somebody else's endpoint proves nothing at yours. Behind a proxy
+  that hands requests on under another host or scheme, pass the URL you registered
+  as `url` to `serve.webhook` or in the readers' options. A gateway older than 2.2.0
+  sends only `x-signature`, which is no longer accepted, so upgrade the gateway first.
 
 ### Fixed
 

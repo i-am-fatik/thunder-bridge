@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { expect, test, vi } from "vitest";
 
+import { deliverySigned } from "../core/delivery.ts";
 import { signingKeyFromSeed, verifyHex } from "../core/ed25519.ts";
 import type { Send } from "../core/outbound.ts";
 import type { Agents } from "./agents.ts";
@@ -317,6 +318,18 @@ test("a delivery is signed with the key the gateway publishes, and nothing of th
 	expect(
 		await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
 	).toBe(true);
+
+	const bound = (sent?.headers["x-signature-v2"] ?? "").slice("ed25519=".length);
+	expect(
+		await verifyHex(GATEWAY_KEY.publicKeyHex, bound, deliverySigned(url, stamp, owed().body)),
+	).toBe(true);
+	expect(
+		await verifyHex(
+			GATEWAY_KEY.publicKeyHex,
+			bound,
+			deliverySigned("https://another.example/hook", stamp, owed().body),
+		),
+	).toBe(false);
 });
 
 test("the webhook carries a deadline, and one that runs out puts it back on the outbox", async () => {
@@ -605,6 +618,13 @@ test("a challenge is signed with the gateway's own key, so a receiver can tell w
 	const payload = new TextEncoder().encode(`${sent.headers["x-timestamp"]}.${sent.body}`);
 	expect(
 		await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
+	).toBe(true);
+	expect(
+		await verifyHex(
+			GATEWAY_KEY.publicKeyHex,
+			(sent.headers["x-signature-v2"] ?? "").slice("ed25519=".length),
+			deliverySigned(HOOK_URL, sent.headers["x-timestamp"] ?? "", sent.body ?? ""),
+		),
 	).toBe(true);
 });
 

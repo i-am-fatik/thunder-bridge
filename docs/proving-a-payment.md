@@ -253,9 +253,13 @@ on which fields are missing.
 ### The gateway holds nothing of yours
 
 There is nothing to hand it. A delivery is signed with the gateway's own key,
-`x-signature: ed25519=<signature>` over `<x-timestamp>.<raw body>`. Fetch the public
-half once with `webhookKey()` and keep it, as the handler in
-[the README](../sdk/README.md#webhooks) does.
+`x-signature-v2: ed25519=<signature>` over four lines joined by `\n`: `v2`, the origin
+and path of the URL it was sent to, `<x-timestamp>` and the raw body. The URL is in it
+so a delivery made for somebody else's endpoint proves nothing at yours. Fetch the
+public half once with `webhookKey()` and keep it, as the handler in
+[the README](../sdk/README.md#webhooks) does. A gateway also sends `x-signature` over
+`<x-timestamp>.<raw body>` for clients older than 2.2.0, and a newer one does not
+accept it.
 
 Answering echoes the nonce and nothing else, because there is nothing to sign it with.
 Holding the URL the gateway challenged is the whole proof.
@@ -275,26 +279,26 @@ signature does, and a receiver then finds its order by that payment hash, so a p
 gateway made up finds no order at all. `proveSettlement` asks the recipient's own
 server when you want the answer from somewhere else entirely.
 
-For a framework that hands you the raw body and headers separately, use
-`parseWebhook`. The body must be the bytes as received, so mount a raw body parser
-on that route and not a JSON one.
+For a framework that hands you the raw body and headers separately, build the
+`Request` yourself under the URL you registered and read it with
+`serve.readSettlement`. The body must be the bytes as received, so mount a raw body
+parser on that route and not a JSON one.
 
 ```ts
 import express from "express";
-import { ThunderBridge, parseWebhook } from "thunder-bridge";
+import { ThunderBridge } from "thunder-bridge";
 
 declare const gateway: ThunderBridge;
 
 const app = express();
-const signer = { publicKey: await gateway.webhookKey() };
 
 app.post("/hooks/paid", express.raw({ type: "application/json" }), async (request, response) => {
-  const payment = await parseWebhook(
-    request.body,
-    request.get("x-signature") ?? "",
-    signer,
-    request.get("x-timestamp") ?? "",
-  );
-  response.sendStatus(payment === null ? 401 : 200);
+  const delivered = new Request("https://shop.example/hooks/paid", {
+    method: "POST",
+    headers: request.headers as Record<string, string>,
+    body: request.body,
+  });
+  const settlement = await gateway.serve.readSettlement(delivered);
+  response.sendStatus(settlement === null ? 401 : 200);
 });
 ```

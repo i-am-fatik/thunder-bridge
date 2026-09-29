@@ -83,7 +83,7 @@ Nothing here is written by hand, so nothing here can be out of date. Run
 | [`WatchTicketConfig`](#thunder-bridge-interface-watchticketconfig) | interface | A trigger's live stream is opened with a ticket rather than with the watch secret, so something has to hold the secret and trade it for tickets |
 | [`WebhookCredential`](#thunder-bridge-type-webhookcredential) | type | What checks a delivery: the hex the gateway publishes at `/webhook-key` |
 | [`WebhookHandlers`](#thunder-bridge-interface-webhookhandlers) | interface | What to do with what the gateway delivers, and what to believe it with |
-| [`WebhookOptions`](#thunder-bridge-type-webhookoptions) | type | How far the gateway's clock may drift from yours before a webhook is refused |
+| [`WebhookOptions`](#thunder-bridge-type-webhookoptions) | type | How far the gateway's clock may drift from yours before a webhook is refused, and the URL you registered when a proxy in front of you hands requests on under another one |
 | [`WrapAllowance`](#thunder-bridge-interface-wrapallowance) | interface | What a wrapping operator may charge over the recipient's own amount |
 | [`wrapFeeCeiling`](#thunder-bridge-function-wrapfeeceiling) | function | The most an operator may add over the recipient's own amount, in millisatoshi |
 | [`WrapRefusalCode`](#thunder-bridge-type-wraprefusalcode) | type | The way a wrapping operator was caught out |
@@ -1460,6 +1460,13 @@ interface WebhookHandlers {
 
   /** How far the gateway's clock may drift from yours, five minutes by default */
   toleranceSecs?: number;
+
+  /**
+   * The URL you registered, when a proxy in front of you hands the request on
+   * under another host or scheme. Left unset, the request's own URL is what the
+   * delivery has to have been signed for
+   */
+  url?: string;
 }
 ```
 
@@ -1468,10 +1475,13 @@ What to do with what the gateway delivers, and what to believe it with
 ### <a id="thunder-bridge-type-webhookoptions"></a>WebhookOptions
 
 ```ts
-type WebhookOptions = { toleranceSecs?: number };
+type WebhookOptions = { toleranceSecs?: number; url?: string };
 ```
 
-How far the gateway's clock may drift from yours before a webhook is refused
+How far the gateway's clock may drift from yours before a webhook is refused,
+and the URL you registered when a proxy in front of you hands requests on under
+another one. A delivery is signed for the URL it was sent to, so one made for
+somebody else's endpoint is refused here
 
 ### <a id="thunder-bridge-interface-wrapallowance"></a>WrapAllowance
 

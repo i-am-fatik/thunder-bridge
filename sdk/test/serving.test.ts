@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { deliverySigned } from "../../core/delivery.js";
 import { type SigningKey, signingKeyFromSeed } from "../../core/ed25519.js";
 import { ThunderBridge } from "../src/client";
 import { ProblemError } from "../src/errors";
@@ -39,16 +40,20 @@ async function keyRoutes(): Promise<Routes> {
   };
 }
 
-async function delivered(body: string, key: Promise<SigningKey> = KEY): Promise<Request> {
+async function delivered(
+  body: string,
+  key: Promise<SigningKey> = KEY,
+  arrivingAt = HOOK,
+): Promise<Request> {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signing = await key;
-  const signature = await signing.sign(new TextEncoder().encode(`${timestamp}.${body}`));
+  const signature = await signing.sign(deliverySigned(HOOK, timestamp, body));
 
-  return new Request(HOOK, {
+  return new Request(arrivingAt, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-signature": `ed25519=${signature}`,
+      "x-signature-v2": `ed25519=${signature}`,
       "x-timestamp": timestamp,
     },
     body,
@@ -259,6 +264,19 @@ describe("serve.webhook", () => {
     await route(await delivered(payment));
 
     expect(onPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks a delivery against the URL it was registered under, when a proxy renames it", async () => {
+    stubFetch(await keyRoutes());
+    const onSettled = vi.fn();
+    const behindProxy = "http://shop:3000/hooks/paid";
+
+    const unnamed = new ThunderBridge(GATEWAY).serve.webhook({ onSettled });
+    const named = new ThunderBridge(GATEWAY).serve.webhook({ onSettled, url: HOOK });
+
+    expect((await unnamed(await delivered(SETTLED, KEY, behindProxy))).status).toBe(401);
+    expect((await named(await delivered(SETTLED, KEY, behindProxy))).status).toBe(200);
+    expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
   it("uses the key the caller pinned instead of asking the gateway for one", async () => {

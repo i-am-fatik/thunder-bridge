@@ -1,17 +1,23 @@
+import { deliverySigned } from "../../core/delivery.js";
 import { verifyHex } from "../../core/ed25519.js";
 import type { Payment, Settlement } from "./types.js";
 import { carriesProof } from "./verify.js";
 import { paymentFromWire, settlementFromWire } from "./wire.js";
 
-const SIGNATURE_HEADER = "x-signature";
+const SIGNATURE_HEADER = "x-signature-v2";
 const TIMESTAMP_HEADER = "x-timestamp";
 const GATEWAY_KEY_PREFIX = "ed25519=";
 export const DEFAULT_TOLERANCE_SECS = 300;
 const CHALLENGE = "webhook-challenge";
 const VERIFY_CHALLENGE = "verify-challenge";
 
-/** How far the gateway's clock may drift from yours before a webhook is refused */
-export type WebhookOptions = { toleranceSecs?: number };
+/**
+ * How far the gateway's clock may drift from yours before a webhook is refused,
+ * and the URL you registered when a proxy in front of you hands requests on under
+ * another one. A delivery is signed for the URL it was sent to, so one made for
+ * somebody else's endpoint is refused here
+ */
+export type WebhookOptions = { toleranceSecs?: number; url?: string };
 
 /**
  * What checks a delivery: the hex the gateway publishes at `/webhook-key`. There
@@ -114,7 +120,7 @@ async function believable(
   const signed = await verifyHex(
     credential.publicKey.toLowerCase(),
     signature.slice(GATEWAY_KEY_PREFIX.length).toLowerCase(),
-    stamped(timestamp, body),
+    deliverySigned(options.url ?? request.url, timestamp, body),
   );
 
   return signed ? body : null;
@@ -158,8 +164,4 @@ function recent(timestamp: string, toleranceSecs: number): boolean {
   }
 
   return Math.abs(Math.floor(Date.now() / 1000) - sent) <= toleranceSecs;
-}
-
-function stamped(timestamp: string, body: string): Uint8Array<ArrayBuffer> {
-  return new TextEncoder().encode(`${timestamp}.${body}`);
 }
