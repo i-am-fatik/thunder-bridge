@@ -18,10 +18,10 @@ import {
 	type Watcher,
 } from "./watch.ts";
 
-vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
+vi.mock("node:dns/promises", () => ({ Resolver: everyHostResolvesPublic }));
 
-async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
-	return [{ address: "93.184.216.34", family: 4 }];
+function everyHostResolvesPublic() {
+	return { resolve4: async () => ["93.184.216.34"], resolve6: async () => [], cancel: () => {} };
 }
 
 const GATEWAY_KEY = await signingKeyFromSeed(new Uint8Array(32).fill(3));

@@ -1,5 +1,3 @@
-import type { LookupAllOptions } from "node:dns";
-
 import { expect, test, vi } from "vitest";
 
 import {
@@ -11,14 +9,45 @@ import {
 	type Verified,
 } from "./outbound.ts";
 
+const nameservers = vi.hoisted(() => ({ cancelled: 0 }));
+
 vi.mock("node:dns/promises", async (importOriginal) => {
 	const dns = await importOriginal<typeof import("node:dns/promises")>();
+	const silent = () => new Promise<string[]>(() => {});
+	const refused = () => Promise.reject(new Error("ENOTFOUND"));
+	const scripted: Record<string, { four: () => Promise<string[]>; six: () => Promise<string[]> }> =
+		{
+			"nothing.example": { four: refused, six: refused },
+			"silent.example": { four: silent, six: silent },
+			"both.example": {
+				four: async () => ["93.184.216.34"],
+				six: async () => ["2606:2800:220:1:248:1893:25c8:1946"],
+			},
+			"four.example": { four: async () => ["93.184.216.34"], six: refused },
+			"uncancellable.example": { four: async () => ["93.184.216.34"], six: refused },
+		};
+
 	return {
 		...dns,
-		lookup: (host: string, options: LookupAllOptions) =>
-			host === "nothing.example"
-				? Promise.reject(new Error("ENOTFOUND"))
-				: dns.lookup(host, options),
+		lookup: () => Promise.reject(new Error("getaddrinfo holds a libuv thread and is never asked")),
+		Resolver: function scriptedResolver() {
+			const real = new dns.Resolver();
+			let asked = "";
+			return {
+				resolve4: (host: string) => {
+					asked = host;
+					return scripted[host]?.four() ?? real.resolve4(host);
+				},
+				resolve6: (host: string) => scripted[host]?.six() ?? real.resolve6(host),
+				cancel: () => {
+					if (asked === "uncancellable.example") {
+						throw new Error("Not implemented: cares.ChannelWrap.prototype.cancel");
+					}
+					nameservers.cancelled += 1;
+					real.cancel();
+				},
+			};
+		},
 	};
 });
 
@@ -215,6 +244,41 @@ test("a name nothing answers for is refused here, not left to the connection", a
 	await expect(addressesToReach("https://nothing.example/")).rejects.toThrow(
 		"resolves to an address we do not reach",
 	);
+});
+
+test("a name whose nameserver never answers is given up on and its query cancelled", async () => {
+	const cancelledBefore = nameservers.cancelled;
+	const asked = Date.now();
+
+	await expect(addressesToReach("https://silent.example/")).rejects.toThrow(
+		"resolves to an address we do not reach",
+	);
+
+	expect(Date.now() - asked).toBeGreaterThanOrEqual(4_900);
+	expect(nameservers.cancelled).toBe(cancelledBefore + 1);
+}, 10_000);
+
+test("a name is asked for both address families, and one that has only IPv4 still resolves", async () => {
+	expect(await addressesToReach("https://both.example/")).toEqual([
+		{ address: "93.184.216.34", family: 4 },
+		{ address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
+	]);
+	expect(await addressesToReach("https://four.example/")).toEqual([
+		{ address: "93.184.216.34", family: 4 },
+	]);
+});
+
+test("a runtime that cannot cancel a query still gets the addresses it resolved", async () => {
+	expect(await addressesToReach("https://uncancellable.example/")).toEqual([
+		{ address: "93.184.216.34", family: 4 },
+	]);
+});
+
+test("an address written into the url is judged as it is, without asking anyone", async () => {
+	expect(await addressesToReach("https://[2606:4700:4700::1111]/")).toEqual([
+		{ address: "2606:4700:4700::1111", family: 6 },
+	]);
+	await expect(addressesToReach("https://[::ffff:127.0.0.1]/")).rejects.toThrow();
 });
 
 test("what is verified is handed on, so nothing resolves the name a second time", async () => {

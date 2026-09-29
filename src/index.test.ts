@@ -31,10 +31,10 @@ import { CLUSTER_KEY, openStore, until } from "./testing.ts";
 import { VERIFY_CHALLENGE } from "./watch.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
 
-vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
+vi.mock("node:dns/promises", () => ({ Resolver: everyHostResolvesPublic }));
 
-async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
-	return [{ address: "93.184.216.34", family: 4 }];
+function everyHostResolvesPublic() {
+	return { resolve4: async () => ["93.184.216.34"], resolve6: async () => [], cancel: () => {} };
 }
 
 const MSAT_21K = { value: "21000", asset_code: "BTC", asset_scale: 11 };

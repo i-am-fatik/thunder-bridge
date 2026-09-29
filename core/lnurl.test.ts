@@ -3,10 +3,10 @@ import { NoWalletAvailable, statusForWallets } from "../src/problem.ts";
 import { cannotReleaseAPreimage, quote, resolve, toLnurl } from "./lnurl.ts";
 import type { Send } from "./outbound.ts";
 
-vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
+vi.mock("node:dns/promises", () => ({ Resolver: everyHostResolvesPublic }));
 
-async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
-	return [{ address: "93.184.216.34", family: 4 }];
+function everyHostResolvesPublic() {
+	return { resolve4: async () => ["93.184.216.34"], resolve6: async () => [], cancel: () => {} };
 }
 
 const NOBODY = answering({});

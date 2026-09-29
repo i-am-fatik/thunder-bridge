@@ -85,15 +85,42 @@ export async function addressesToReach(url: string): Promise<Verified[]> {
 }
 
 async function resolved(url: string): Promise<Verified[]> {
-	const { lookup } = await import("node:dns/promises");
-	const { setTimeout: sleep } = await import("node:timers/promises");
+	const { isIP } = await import("node:net");
 	const host = new URL(url).hostname.replace(/^\[|]$/g, "");
+	const literal = isIP(host);
+	if (literal !== 0) {
+		return [{ address: host, family: literal }];
+	}
+
+	const { Resolver } = await import("node:dns/promises");
+	const { setTimeout: sleep } = await import("node:timers/promises");
+	const resolver = new Resolver({ timeout: LOOKUP_TIMEOUT_MS, tries: 1 });
 	const found = await Promise.race([
-		lookup(host, { all: true, verbatim: true }).catch(() => []),
+		Promise.all([
+			resolver.resolve4(host).catch((): string[] => []),
+			resolver.resolve6(host).catch((): string[] => []),
+		]),
 		sleep(LOOKUP_TIMEOUT_MS, null, { ref: false }),
 	]);
+	cancelled(resolver);
+	if (found === null) {
+		return [];
+	}
 
-	return found ?? [];
+	const [four, six] = found;
+	return [
+		...four.map((address) => ({ address, family: 4 })),
+		...six.map((address) => ({ address, family: 6 })),
+	];
+}
+
+function cancelled(resolver: { cancel(): void }): boolean {
+	try {
+		resolver.cancel();
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 async function answerOf(response: Response): Promise<Answer> {

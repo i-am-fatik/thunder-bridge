@@ -10,10 +10,10 @@ import {
 	verdictOf,
 } from "./lud21-harvest.ts";
 
-vi.mock("node:dns/promises", () => ({ lookup: everyHostResolvesPublic }));
+vi.mock("node:dns/promises", () => ({ Resolver: everyHostResolvesPublic }));
 
-async function everyHostResolvesPublic(): Promise<{ address: string; family: number }[]> {
-	return [{ address: "93.184.216.34", family: 4 }];
+function everyHostResolvesPublic() {
+	return { resolve4: async () => ["93.184.216.34"], resolve6: async () => [], cancel: () => {} };
 }
 
 function sampled(verdicts: Verdict[]): Measured[] {

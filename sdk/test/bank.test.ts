@@ -15,7 +15,9 @@ import { fioStatement } from "../src/fio";
 import { jsonResponse, throughFetch, type FetchCall } from "./harness";
 
 vi.mock("node:dns/promises", () => ({
-  lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+  Resolver: function everyHostResolvesPublic() {
+    return { resolve4: async () => ["93.184.216.34"], resolve6: async () => [], cancel: () => {} };
+  },
 }));
 
 const SECRET = "keep-me-server-side-and-thirty-two-plus";

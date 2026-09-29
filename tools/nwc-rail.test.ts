@@ -9,7 +9,9 @@ import { type RegtestWallet, startRegtestWallet } from "./nwc-regtest-wallet.ts"
 import { ensureWrapCanFlow, nodesUp, wrapper } from "./regtest-nodes.ts";
 
 vi.mock("node:dns/promises", () => ({
-	lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+	Resolver: function everyHostResolvesPublic() {
+		return { resolve4: async () => ["93.184.216.34"], resolve6: async () => [], cancel: () => {} };
+	},
 }));
 
 const OWN_AMOUNT_MSAT = 2_000_000;

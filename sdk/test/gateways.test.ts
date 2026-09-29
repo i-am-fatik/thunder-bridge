@@ -11,7 +11,9 @@ const HASH = "ab".repeat(32);
 const EXPIRES_AT = 1_900_000_600;
 
 vi.mock("node:dns/promises", () => ({
-  lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+  Resolver: function everyHostResolvesPublic() {
+    return { resolve4: async () => ["93.184.216.34"], resolve6: async () => [], cancel: () => {} };
+  },
 }));
 
 function watchable() {
