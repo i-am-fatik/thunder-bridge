@@ -242,7 +242,9 @@ interface BankVerifyConfig {
    * How often you want the gateway to ask, in seconds. It goes out as
    * `Cache-Control: max-age`, so the pace is yours to set rather than the
    * gateway's, and a bank that updates once a minute should say so instead of
-   * being polled every few seconds. Thirty by default, clamped to an hour
+   * being polled every few seconds. By default as often as the statement can have
+   * anything new, which for `fioStatement` is thirty seconds divided by its tokens,
+   * and thirty for a statement that does not say
    */
   pollEverySecs?: number;
 }
@@ -787,7 +789,7 @@ interface NwcRailConfig extends RailConfig {
   /** Where the default conversion gets its rate, the median of four venues by default */
   rate?: Ticker;
 
-  /** Where `nwcVerifyEndpoint` is mounted, and the secret the hash is sealed with */
+  /** Where `serve.nwcVerify` is mounted, and the secret the hash is sealed with */
   verifyThrough: { endpoint: string; secret: string };
 
   /** What the payer's wallet shows, the order's reference by default */
@@ -2116,7 +2118,9 @@ interface BankVerifyConfig {
    * How often you want the gateway to ask, in seconds. It goes out as
    * `Cache-Control: max-age`, so the pace is yours to set rather than the
    * gateway's, and a bank that updates once a minute should say so instead of
-   * being polled every few seconds. Thirty by default, clamped to an hour
+   * being polled every few seconds. By default as often as the statement can have
+   * anything new, which for `fioStatement` is thirty seconds divided by its tokens,
+   * and thirty for a statement that does not say
    */
   pollEverySecs?: number;
 }
@@ -2168,6 +2172,13 @@ interface FioConfig {
    */
   minIntervalSecs?: number;
 
+  /**
+   * The account every token has to read. Given, a read by a token that belongs to
+   * another account throws instead of lending that account's credits to this one,
+   * which is the mistake several tokens make easy
+   */
+  iban?: string;
+
   /** Override to point at a mock */
   baseUrl?: string;
 }
@@ -2198,12 +2209,16 @@ rather than guessing.
 ### <a id="thunder-bridge-bank-type-statement"></a>Statement
 
 ```ts
-type Statement = (sinceUnix: number) => Promise<Credit[]>;
+type Statement = ((sinceUnix: number) => Promise<Credit[]>) & {
+  readonly freshEverySecs?: number;
+};
 ```
 
 Recent credits on one account, oldest or newest first, it makes no difference.
 This is the whole plugin seam: a bank is a function of this shape, and
-[`fioStatement`](#thunder-bridge-bank-function-fiostatement) is one implementation of it
+[`fioStatement`](#thunder-bridge-bank-function-fiostatement) is one implementation of it. One that knows how often it can
+have anything new says so in `freshEverySecs`, and `bankVerify` then asks the
+gateway to poll exactly that often
 
 ## `thunder-bridge/nwc`
 

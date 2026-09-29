@@ -32,9 +32,13 @@ export interface Credit {
 /**
  * Recent credits on one account, oldest or newest first, it makes no difference.
  * This is the whole plugin seam: a bank is a function of this shape, and
- * `fioStatement` is one implementation of it
+ * `fioStatement` is one implementation of it. One that knows how often it can
+ * have anything new says so in `freshEverySecs`, and `bankVerify` then asks the
+ * gateway to poll exactly that often
  */
-export type Statement = (sinceUnix: number) => Promise<Credit[]>;
+export type Statement = ((sinceUnix: number) => Promise<Credit[]>) & {
+  readonly freshEverySecs?: number;
+};
 
 /** One transfer to ask for: what is owed, where it lands, and where its arrival is read back from */
 export interface BankTransferParams {
@@ -139,7 +143,9 @@ export interface BankVerifyConfig {
    * How often you want the gateway to ask, in seconds. It goes out as
    * `Cache-Control: max-age`, so the pace is yours to set rather than the
    * gateway's, and a bank that updates once a minute should say so instead of
-   * being polled every few seconds. Thirty by default, clamped to an hour
+   * being polled every few seconds. By default as often as the statement can have
+   * anything new, which for `fioStatement` is thirty seconds divided by its tokens,
+   * and thirty for a statement that does not say
    */
   pollEverySecs?: number;
 }
@@ -222,7 +228,7 @@ export function bankVerifyEndpoint(
   }
 
   const paced = {
-    "cache-control": `max-age=${config.pollEverySecs ?? DEFAULT_POLL_EVERY_SECS}`,
+    "cache-control": `max-age=${config.pollEverySecs ?? config.statement.freshEverySecs ?? DEFAULT_POLL_EVERY_SECS}`,
   };
 
   return async (request: Request) => {
@@ -474,7 +480,7 @@ function refuseUnusable(params: BankTransferParams, iban: string, currency: stri
   }
 }
 
-function accountOf(iban: string): string {
+export function accountOf(iban: string): string {
   return iban.replace(/\s+/g, "").toUpperCase();
 }
 

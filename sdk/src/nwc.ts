@@ -488,7 +488,7 @@ export interface NwcRailConfig extends RailConfig {
   /** Where the default conversion gets its rate, the median of four venues by default */
   rate?: Ticker;
 
-  /** Where `nwcVerifyEndpoint` is mounted, and the secret the hash is sealed with */
+  /** Where `serve.nwcVerify` is mounted, and the secret the hash is sealed with */
   verifyThrough: { endpoint: string; secret: string };
 
   /** What the payer's wallet shows, the order's reference by default */

@@ -152,12 +152,12 @@ preimage, and which side does the checking.
 
 | `rails.bank` | nobody, there is no invoice |
 |---|---|
-| the gateway is told | a hash and your URL, which names the amount and the reference |
+| the gateway is told | a hash and your URL, whose query is one sealed blob naming neither the amount, the reference nor the account |
 | the invoice is checked by | nobody, there is no invoice to check |
 | the gateway probes first | the same GET and signed nonce |
 | the gateway polls | your `serve.bankVerify` endpoint |
 | `settled` comes from | a `Statement` credit matching amount and currency exactly, with the reference anywhere in the payer's text |
-| the pace is set by | you, `pollEverySecs` |
+| the pace is set by | the statement: `fioStatement` reads every thirty seconds divided by its tokens, and `pollEverySecs` overrides it |
 
 Two things are worth reading off those blocks rather than inferring.
 

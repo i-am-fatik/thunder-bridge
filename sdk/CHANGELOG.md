@@ -13,6 +13,24 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 2.2.1
+
+### Added
+
+- `fioStatement` says how often it can have anything new, thirty seconds divided by
+  its tokens, as `freshEverySecs` on the statement it returns, and
+  `serve.bankVerify` asks the gateway to poll that often unless `pollEverySecs` says
+  otherwise. Three tokens of one account now mean a poll every ten seconds with
+  nothing else to set. A `Statement` of your own may carry `freshEverySecs` too.
+- `fioStatement({ token, iban })` refuses a read by a token that belongs to another
+  account, rather than lending that account's credits to this one. Leaving `iban`
+  out reads as before.
+
+### Fixed
+
+- The README said a bank rail's verify URL names the amount and the reference. Its
+  query has been one sealed blob since 2.0, naming neither.
+
 ## 2.2.0
 
 Every lie the client can catch a gateway in is now caught or named, and a signed

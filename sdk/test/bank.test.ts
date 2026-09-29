@@ -382,6 +382,21 @@ describe("bankVerifyEndpoint", () => {
     expect((await handler(new Request(url))).headers.get("cache-control")).toBe("max-age=900");
   });
 
+  it("asks to be polled as often as its statement can have anything new, unless told a pace", async () => {
+    const transfer = await asked();
+    const url = new URL(transfer.verifyUrl);
+    const everyTenSeconds = Object.assign(statementOf(), { freshEverySecs: 10 });
+    const paceOf = async (config: Partial<Parameters<typeof bankVerifyEndpoint>[0]>) =>
+      (
+        await bankVerifyEndpoint({ secret: SECRET, iban: IBAN, statement: everyTenSeconds, ...config })(
+          new Request(url),
+        )
+      ).headers.get("cache-control");
+
+    expect(await paceOf({})).toBe("max-age=10");
+    expect(await paceOf({ pollEverySecs: 900 })).toBe("max-age=900");
+  });
+
   it("releases a preimage that hashes to what the gateway was given", async () => {
     const transfer = await asked();
     const answer = await verified(statementOf(credit()), transfer.verifyUrl);

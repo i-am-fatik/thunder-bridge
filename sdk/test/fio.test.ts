@@ -157,6 +157,53 @@ describe("fioStatement", () => {
     await expect(reading()(SINCE)).rejects.toThrow("fio answered 401");
   });
 
+  it("says it can have news every thirty seconds divided by its tokens", () => {
+    const freshWith = (tokens: number) =>
+      fioStatement({ token: Array.from({ length: tokens }, (_, n) => `${n}`.repeat(64)) })
+        .freshEverySecs;
+
+    expect([1, 2, 3, 4, 5].map(freshWith)).toEqual([30, 15, 10, 8, 6]);
+  });
+
+  it("throws on a read by a token that belongs to another account, naming neither token", async () => {
+    fioServing({
+      accountStatement: {
+        info: { iban: "CZ9455000000001028912385" },
+        transactionList: { transaction: [transaction()] },
+      },
+    });
+    const read = fioStatement({ token: TOKEN, minIntervalSecs: 0, iban: "CZ6508000000192000145399" });
+
+    const refused = await read(SINCE).catch((error: unknown) => error as Error);
+
+    expect(refused).toBeInstanceOf(Error);
+    expect((refused as Error).message).toContain("CZ9455000000001028912385");
+    expect((refused as Error).message).not.toContain(TOKEN);
+  });
+
+  it("reads the account it was told, however its IBAN is spaced", async () => {
+    fioServing({
+      accountStatement: {
+        info: { iban: "CZ6508000000192000145399" },
+        transactionList: { transaction: [transaction()] },
+      },
+    });
+    const read = fioStatement({
+      token: TOKEN,
+      minIntervalSecs: 0,
+      iban: "cz65 0800 0000 1920 0014 5399",
+    });
+
+    expect(await read(SINCE)).toHaveLength(1);
+  });
+
+  it("refuses a statement that names no account once it was told which to expect", async () => {
+    fioServing(statementOf(transaction()));
+    const read = fioStatement({ token: TOKEN, minIntervalSecs: 0, iban: "CZ6508000000192000145399" });
+
+    await expect(read(SINCE)).rejects.toThrow("an account it does not name");
+  });
+
   it("uses each token in turn, always the one unused longest", async () => {
     const calls = fioServing(statementOf(transaction()));
     const statement = fioStatement({ token: ["one", "two", "three"], minIntervalSecs: 0 });

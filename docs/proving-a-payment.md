@@ -165,10 +165,30 @@ with its own permissions and budget, and this needs `make_invoice` and
 ### How often the gateway asks
 
 Your endpoint decides, not the gateway. `serve.bankVerify` answers with
-`Cache-Control: max-age=30`, and the gateway uses that as the interval for every
-payment on your host. Set `pollEverySecs` to whatever your bank's own refresh makes
-sensible: reading a statement that moves once an hour every five seconds only burns
-your rate limit.
+`Cache-Control: max-age` set to how often its statement can have anything new, and
+the gateway uses that as the interval for every payment on your host. Fio lets one
+token read once every thirty seconds, so `fioStatement` with one token asks the
+gateway for thirty, with three tokens of the same account for ten, and takes the
+tokens in turn. Pass `iban` as well, and a token that belongs to another account is
+refused instead of lending that account's credits to yours. A statement of your own
+says nothing and gets thirty, and `pollEverySecs` overrides either: reading a
+statement that moves once an hour every five seconds only burns your rate limit.
+
+```ts
+import { ThunderBridge } from "thunder-bridge";
+import { fioStatement } from "thunder-bridge/bank";
+
+declare const gateway: ThunderBridge;
+
+export const serveBankVerify = gateway.serve.bankVerify({
+  secret: process.env.BANK_SECRET as string,
+  iban: "CZ6508000000192000145399",
+  statement: fioStatement({
+    token: [process.env.FIO_TOKEN_1 as string, process.env.FIO_TOKEN_2 as string],
+    iban: "CZ6508000000192000145399",
+  }),
+});
+```
 
 How long one answer may take is the other half of the pacing. The gateway abandons a
 poll after 15 seconds, and `askTimeoutMs` is one deadline over the whole connection

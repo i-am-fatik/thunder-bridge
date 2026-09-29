@@ -1,4 +1,4 @@
-import type { Credit, Statement } from "./bank.js";
+import { accountOf, type Credit, type Statement } from "./bank.js";
 
 const BASE_URL = "https://fioapi.fio.cz/v1/rest";
 const MINOR_UNITS = 100;
@@ -43,6 +43,13 @@ export interface FioConfig {
    */
   minIntervalSecs?: number;
 
+  /**
+   * The account every token has to read. Given, a read by a token that belongs to
+   * another account throws instead of lending that account's credits to this one,
+   * which is the mistake several tokens make easy
+   */
+  iban?: string;
+
   /** Override to point at a mock */
   baseUrl?: string;
 }
@@ -52,6 +59,7 @@ type FioTransaction = Record<string, Cell>;
 
 interface FioStatement {
   accountStatement?: {
+    info?: { iban?: string | null } | null;
     transactionList?: { transaction?: FioTransaction[] | null } | null;
   };
 }
@@ -83,7 +91,7 @@ export function fioStatement(config: FioConfig): Statement {
   let lastRead = Number.NEGATIVE_INFINITY;
   let credits: Credit[] = [];
 
-  return async (sinceUnix: number) => {
+  const read = async (sinceUnix: number) => {
     const now = Date.now();
     if (now - lastRead < paceMs) {
       return credits;
@@ -114,13 +122,21 @@ export function fioStatement(config: FioConfig): Statement {
       throw new Error(`fio answered ${answer.status} reading the statement`);
     }
 
-    const read = (await answer.json()) as FioStatement;
-    credits = (read.accountStatement?.transactionList?.transaction ?? [])
+    const statement = (await answer.json()) as FioStatement;
+    const reads = statement.accountStatement?.info?.iban;
+    if (config.iban !== undefined && accountOf(reads ?? "") !== accountOf(config.iban)) {
+      throw new Error(
+        `a fio token reads ${reads ?? "an account it does not name"}, not ${config.iban}`,
+      );
+    }
+    credits = (statement.accountStatement?.transactionList?.transaction ?? [])
       .filter(isCredit)
       .map(asCredit);
 
     return credits;
   };
+
+  return Object.assign(read, { freshEverySecs: Math.ceil(paceMs / MILLIS) });
 }
 
 function longestUnused(usedAt: Map<string, number>): { token: string; usedAt: number } {
