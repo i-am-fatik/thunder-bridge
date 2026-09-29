@@ -1,7 +1,9 @@
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
@@ -640,6 +642,34 @@ test("the worklist a rollback used to read is gone, and the stamp says so", () =
 		expect(tables).toHaveLength(0);
 	} finally {
 		opened.close();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a write waits out a lock another connection holds for a moment rather than failing", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-busy-"));
+	const ledgerPath = join(directory, "ledger.db");
+	const { store, stop } = openStore({ ledgerPath });
+	const holder = new Worker(
+		`
+		const { DatabaseSync } = require("node:sqlite");
+		const { parentPort, workerData } = require("node:worker_threads");
+		const db = new DatabaseSync(workerData);
+		db.exec("BEGIN IMMEDIATE");
+		parentPort.postMessage("held");
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+		db.exec("COMMIT");
+		db.close();
+		`,
+		{ eval: true, workerData: ledgerPath },
+	);
+	try {
+		await once(holder, "message");
+
+		expect(store.insert(payment(0)).paymentHash).toBe(payment(0).paymentHash);
+	} finally {
+		await once(holder, "exit");
+		stop();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });

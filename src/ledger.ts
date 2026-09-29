@@ -132,6 +132,7 @@ const SCHEMA = `
 
 const SCHEMA_VERSION = 3;
 
+const BUSY_TIMEOUT_MS = 5000;
 const RETRY_FLOOR_SECS = 3600;
 const UNOWED_SLACK_SECS = 60;
 const TAKEOVER_SPREAD = 8;
@@ -285,6 +286,7 @@ export class Ledger {
 	) {
 		this.db = new DatabaseSync(path);
 		this.db.exec("PRAGMA journal_mode = WAL");
+		this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
 		this.db.exec("PRAGMA foreign_keys = ON");
 		this.migrate();
 		this.key = key;
@@ -1007,7 +1009,7 @@ export class Ledger {
 	}
 
 	private transact<T>(work: () => T): T {
-		this.db.exec("BEGIN");
+		this.db.exec("BEGIN IMMEDIATE");
 		try {
 			const result = work();
 			this.db.exec("COMMIT");
