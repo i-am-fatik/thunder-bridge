@@ -5,6 +5,16 @@ const SEED_BYTES = 32;
 const SIGNATURE_BYTES = 64;
 const PUBLIC_KEY_BYTES = 32;
 const PKCS8_HEADER = hexToBytes("302e020100300506032b657004220420");
+const SIGN_BIT_CLEARED = 0x7f;
+const SMALL_ORDER = [
+	"00".repeat(32),
+	`01${"00".repeat(31)}`,
+	"26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+	"c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+	`ec${"ff".repeat(30)}7f`,
+	`ed${"ff".repeat(30)}7f`,
+	`ee${"ff".repeat(30)}7f`,
+];
 
 export type SigningKey = {
 	publicKeyHex: string;
@@ -38,6 +48,9 @@ export async function verifyHex(
 	if (!isHex(publicKeyHex) || publicKeyHex.length !== PUBLIC_KEY_BYTES * 2) {
 		return false;
 	}
+	if (hasSmallOrder(publicKeyHex)) {
+		return false;
+	}
 	if (!isHex(signatureHex) || signatureHex.length !== SIGNATURE_BYTES * 2) {
 		return false;
 	}
@@ -60,6 +73,13 @@ export async function verifyHex(
 	} catch {
 		return false;
 	}
+}
+
+function hasSmallOrder(publicKeyHex: string): boolean {
+	const point = hexToBytes(publicKeyHex);
+	point[PUBLIC_KEY_BYTES - 1] = point[PUBLIC_KEY_BYTES - 1]! & SIGN_BIT_CLEARED;
+
+	return SMALL_ORDER.includes(bytesToHex(point));
 }
 
 function fromBase64Url(text: string): Uint8Array {

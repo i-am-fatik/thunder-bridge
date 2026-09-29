@@ -52,3 +52,15 @@ test("a malformed key or signature is refused rather than thrown", async () => {
 test("a seed that is not 32 bytes is refused", async () => {
 	await expect(signingKeyFromSeed(new Uint8Array(31))).rejects.toThrow("32 bytes");
 });
+
+test("a key of small order is refused, because one signature of zeros verifies any message under it", async () => {
+	const forged = `01${"00".repeat(63)}`;
+	for (const key of [
+		`01${"00".repeat(31)}`,
+		`01${"00".repeat(30)}80`,
+		"26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+		`ec${"ff".repeat(30)}7f`,
+	]) {
+		expect(await verifyHex(key, forged, PAYLOAD)).toBe(false);
+	}
+});
