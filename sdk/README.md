@@ -252,15 +252,17 @@ Four sharp edges, worth reading before you build:
   metadata and answers the verify requests. Every check passes. This protects a
   payer against the operator, never against the recipient's own custodian.
 - **The two proof fetches vet the first hop and no further.** `proveOrigin` and
-  `proveSettlement` use the runtime's default redirect handling, so a public https
-  host answering `302` to a private address is followed there. `invoiceFrom` is not
-  like this: it resolves through the outbound guard, which sets `redirect: "manual"`
-  and re-vets every hop. Keep egress control outside this package if that matters.
+  `proveSettlement` use the runtime's redirect handling, so a public https host
+  answering `302` to a private address on its own origin is followed there, while a
+  redirect off the recipient's origin fails the proof. `invoiceFrom` is not like
+  this: it resolves through the outbound guard, which sets `redirect: "manual"` and
+  re-vets every hop. Keep egress control outside this package if that matters.
 - **A payment read cold is only as pinned as its creation.** `payment` checks
-  the preimage against the `paymentHash` in the same record, and it was
-  `proveOrigin` at creation, against the request you wrote, that tied that hash to
-  an invoice the recipient issued. Store the request alongside the payment id, or a
-  cold read is checking the gateway's numbers against each other and nothing more.
+  the report against the `paymentHash` you hand it, and it was `proveOrigin` at
+  creation, against the request you wrote, that tied that hash to an invoice the
+  recipient issued. Store the hash you proved alongside the payment id, and never a
+  hash a later read handed back, or a cold read is checking the gateway's numbers
+  against each other and nothing more.
 - **Availability is not provable, and an address is not a person.** Every check
   here is about an invoice you were given, none about one you were refused, and
   proving an invoice belongs to an address never proves the address belongs to

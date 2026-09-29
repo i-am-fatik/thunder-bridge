@@ -269,8 +269,10 @@ is gone.
 `serve.readSettlement` refuses anything more than five minutes out of date,
 adjustable with `toleranceSecs`. The signature proves the delivery came from the
 gateway. It does not prove the payment happened, because the gateway holds the key
-that signs it either way. The proof is the preimage, checked by `carriesProof`
-against the hash in the same body, or `proveSettlement` against the recipient's own
+that signs it either way. The proof is the preimage: a delivery claiming paid whose
+preimage does not hash to the hash in the same body reads as nothing, the way a bad
+signature does, and a receiver then finds its order by that payment hash, so a pair the
+gateway made up finds no order at all. `proveSettlement` asks the recipient's own
 server when you want the answer from somewhere else entirely.
 
 For a framework that hands you the raw body and headers separately, use
