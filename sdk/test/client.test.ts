@@ -1175,6 +1175,19 @@ describe("firstToSettle", () => {
     await expect(winner).resolves.toMatchObject({ id: paid.id, preimage: paid.preimage });
   });
 
+  it("ends the wait on a leg the gateway was caught lying about, though another leg is paid after", async () => {
+    const winner = track(new ThunderBridge(GATEWAY).firstSettled([held("bank_01"), held("ln_01")]));
+
+    legs()[0].deliver(settledPayment({ id: "bank_01", preimage: "22".repeat(32) }));
+    await drainMicrotasks();
+    legs()[1].deliver(settledPayment({ id: "ln_01" }));
+    await drainMicrotasks();
+
+    expect(winner.outcomes).toEqual(["rejected"]);
+    expect(winner.error).toMatchObject({ name: "GatewayCheatError", paymentId: "bank_01" });
+    expect(legs()[1].closeCalls).toBeGreaterThan(0);
+  });
+
   it("throws what refused when no leg was paid", async () => {
     const winner = new ThunderBridge(GATEWAY).firstSettled([held("bank_01"), held("ln_01")]);
 

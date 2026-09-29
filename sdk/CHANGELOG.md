@@ -24,6 +24,9 @@ releases a version number once it has been published.
   calling `onSettled`, `onUnproven` or `onPayment` again. A callback that throws is
   forgotten, so the gateway's retry reaches it. The memory is per mounted handler,
   so a retry after the window or on another instance still calls you again.
+- `firstSettled` no longer trades a detected cheat for a win. A leg the gateway is
+  caught lying about, before any leg is paid, ends the wait with its
+  `GatewayCheatError` instead of being counted as a leg that lost.
 
 ## 2.1.1
 

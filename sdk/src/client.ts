@@ -561,6 +561,10 @@ export class ThunderBridge {
    * the recipient's own wallet minted it, so a payer who pays the loser afterwards
    * really does pay twice and that shows up on `follow` as a second settlement to
    * refund.
+   *
+   * A leg the gateway is caught lying about before any leg is paid ends the wait
+   * with its `GatewayCheatError`, even when another leg is paid after it, so a
+   * detected cheat is never traded for a later win.
    */
   async firstSettled(held: Held[], options?: WaitOptions): Promise<Payment | null> {
     if (held.length === 0) {
@@ -574,7 +578,7 @@ export class ThunderBridge {
     let refused: unknown = null;
 
     try {
-      const winner = await new Promise<Payment | null>((resolve) => {
+      const winner = await new Promise<Payment | null>((resolve, caught) => {
         let waiting = held.length;
         const lost = () => {
           waiting -= 1;
@@ -586,6 +590,10 @@ export class ThunderBridge {
           this.settled(leg, { ...options, signal })
             .then((watched) => (watched.status === "paid" ? resolve(watched) : lost()))
             .catch((failure: unknown) => {
+              if (failure instanceof GatewayCheatError) {
+                caught(failure);
+                return;
+              }
               refused ??= failure;
               lost();
             });
