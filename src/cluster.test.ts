@@ -13,7 +13,7 @@ import { attach } from "./gossip.ts";
 import type { UnsavedPayment } from "./payment.ts";
 import type { Store } from "./store.ts";
 
-import { CLUSTER_KEY, freePort, openStore, type TestOptions, until } from "./testing.ts";
+import { CLUSTER_KEY, freePort, openStore, refusals, type TestOptions, until } from "./testing.ts";
 
 const TAKEOVER_TIMEOUT_MS = 25_000;
 
@@ -192,11 +192,13 @@ test("an accepted fact whose id does not name its own invoice is refused, key or
 			expiresAt: lying.expiresAt,
 		};
 
-		expect(() =>
-			cluster.first.gossip.onFacts({
-				accepted: [{ ...fact, mac: signedAsCluster("accepted", Object.values(fact)) }],
-			}),
-		).toThrow("does not name the invoice it watches");
+		expect(
+			refusals(() =>
+				cluster.first.gossip.onFacts({
+					accepted: [{ ...fact, mac: signedAsCluster("accepted", Object.values(fact)) }],
+				}),
+			),
+		).toContainEqual(expect.stringContaining("does not name the invoice it watches"));
 
 		expect(cluster.first.info().rows.accepted).toBe(0);
 		expect(cluster.first.get(lying.id)).toBeNull();
@@ -225,6 +227,26 @@ test("a handshake overheard on one link does not open another, because it names 
 			"the replayed handshake to be judged",
 		);
 		expect(two.store.info().peers).toBe(0);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a peer that sends a note nobody can read has its link torn down, so it is dialled again", async () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const [toOne, toTwo] = session();
+		attach(one.store.gossip, toOne);
+		attach(two.store.gossip, toTwo);
+		await until(() => two.store.info().peers === 1, "the two to shake hands");
+
+		const unreadable = { facts: { accepted: [{ seq: "one" }] }, more: false };
+		two.store.gossip.peers.get(one.store.info().origin)?.(unreadable as never);
+
+		await until(() => toOne.destroyed, "the link to be torn down");
+		expect(one.store.info().peers).toBe(0);
 	} finally {
 		one.stop();
 		two.stop();
@@ -432,7 +454,9 @@ test("an instance on a new key refuses the facts the old key signed, which is wh
 
 	const rolled = openStore({ key: NEXT_KEY });
 	try {
-		expect(() => rolled.store.gossip.onFacts(facts)).toThrow("without the cluster key");
+		expect(refusals(() => rolled.store.gossip.onFacts(facts))).toContainEqual(
+			expect.stringContaining("without the cluster key"),
+		);
 		expect(rolled.store.get(taken.id)).toBeNull();
 	} finally {
 		rolled.stop();
@@ -482,7 +506,10 @@ test("a caller's payment replicates across a rotation, and the old key opens not
 		peer.store.gossip.onFacts(facts);
 		expect(peer.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
 
-		expect(() => stale.store.gossip.onFacts(facts)).toThrow("without the cluster key");
+		expect(refusals(() => stale.store.gossip.onFacts(facts))).toContainEqual(
+			expect.stringContaining("without the cluster key"),
+		);
+		expect(stale.store.get(taken.id)).toBeNull();
 	} finally {
 		peer.stop();
 		stale.stop();
@@ -505,7 +532,10 @@ test("a payment nobody signed for stops replicating after a rotation, because th
 	const peer = openStore({ key: NEXT_KEY });
 	try {
 		expect(rolled.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
-		expect(() => peer.store.gossip.onFacts(facts)).toThrow("does not name the invoice");
+		expect(refusals(() => peer.store.gossip.onFacts(facts))).toContainEqual(
+			expect.stringContaining("does not name the invoice"),
+		);
+		expect(peer.store.get(taken.id)).toBeNull();
 	} finally {
 		rolled.stop();
 		peer.stop();
@@ -551,11 +581,13 @@ test("a fact named after one caller but claiming another is refused, key or no k
 			expiresAt: misnamed.expiresAt,
 		};
 
-		expect(() =>
-			cluster.first.gossip.onFacts({
-				accepted: [{ ...fact, mac: signedAsCluster("accepted", Object.values(fact)) }],
-			}),
-		).toThrow("does not name the invoice it watches");
+		expect(
+			refusals(() =>
+				cluster.first.gossip.onFacts({
+					accepted: [{ ...fact, mac: signedAsCluster("accepted", Object.values(fact)) }],
+				}),
+			),
+		).toContainEqual(expect.stringContaining("does not name the invoice it watches"));
 
 		expect(cluster.first.get(misnamed.id)).toBeNull();
 	} finally {

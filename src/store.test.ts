@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
-import { openStore } from "./testing.ts";
+import { openStore, refusals } from "./testing.ts";
 import { unixNow } from "./watch.ts";
 
 const HOOK = "https://example.com/hook";
@@ -469,9 +469,34 @@ test("an accepted fact nobody signed with the cluster key is refused", () => {
 		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
 		const forged = (facts.accepted ?? []).map((fact) => ({ ...fact, id: "0".repeat(64) }));
 
-		expect(() => two.store.gossip.onFacts({ accepted: forged })).toThrow(/cluster key/);
+		expect(refusals(() => two.store.gossip.onFacts({ accepted: forged }))).toContainEqual(
+			expect.stringContaining("cluster key"),
+		);
 		expect(two.store.info().pending).toBe(0);
 	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a fact under a key this cluster no longer holds costs nothing but itself", () => {
+	const stale = openStore({ key: Buffer.from("aa".repeat(32), "hex") });
+	const one = openStore();
+	const two = openStore();
+	try {
+		stale.store.insert(payment(0));
+		const kept = one.store.insert(payment(1));
+		const nothingSeen = two.store.gossip.watermarks();
+		const old = stale.store.gossip.since(nothingSeen).facts.accepted ?? [];
+		const fresh = one.store.gossip.since(nothingSeen).facts.accepted ?? [];
+
+		const refused = refusals(() => two.store.gossip.onFacts({ accepted: [...old, ...fresh] }));
+
+		expect(refused).toHaveLength(1);
+		expect(two.store.get(kept.id)?.paymentHash).toBe(kept.paymentHash);
+		expect(two.store.info().pending).toBe(1);
+	} finally {
+		stale.stop();
 		one.stop();
 		two.stop();
 	}

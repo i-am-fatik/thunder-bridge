@@ -786,45 +786,38 @@ export class Ledger {
 			const settled: PublicPayment[] = [];
 
 			for (const fact of inSeqOrder(facts.accepted ?? [])) {
-				if (this.known("accepted", fact)) {
+				if (this.known("accepted", fact) || refuses(() => this.provenAccepted(fact))) {
 					continue;
 				}
-				this.provenAccepted(fact);
 				this.recordAccepted(fact);
 				this.scheduleWatch(fact.id, fact.expiresAt, this.watchAfter(fact.id));
 			}
 
 			for (const fact of inSeqOrder(facts.paid ?? [])) {
-				if (this.known("paid", fact)) {
+				if (this.known("paid", fact) || refuses(() => this.provenPaid(fact))) {
 					continue;
 				}
-				const payment = this.provenPaid(fact);
 				this.recordPaid(fact);
 				this.forget(fact.id);
-				settled.push(payment);
+				settled.push(asStored<PublicPayment>(fact.payment));
 			}
 
 			for (const fact of inSeqOrder(facts.outbox ?? [])) {
-				if (this.known("outbox", fact)) {
+				const proof = [fact.origin, fact.seq, fact.id, fact.url, fact.body, fact.owedAt];
+				if (this.known("outbox", fact) || refuses(() => this.verify("outbox", proof, fact.mac))) {
 					continue;
 				}
-				this.verify(
-					"outbox",
-					[fact.origin, fact.seq, fact.id, fact.url, fact.body, fact.owedAt],
-					fact.mac,
-				);
 				this.recordOutbox(fact, this.takeoverAt(fact));
 			}
 
 			for (const fact of inSeqOrder(facts.delivered ?? [])) {
-				if (this.known("delivered", fact)) {
+				const proof = [fact.origin, fact.seq, fact.id, fact.url, fact.deliveredAt];
+				if (
+					this.known("delivered", fact) ||
+					refuses(() => this.verify("delivered", proof, fact.mac))
+				) {
 					continue;
 				}
-				this.verify(
-					"delivered",
-					[fact.origin, fact.seq, fact.id, fact.url, fact.deliveredAt],
-					fact.mac,
-				);
 				this.recordDelivered(fact);
 			}
 
@@ -1127,7 +1120,7 @@ export class Ledger {
 		}
 	}
 
-	private provenPaid(fact: PaidFact): PublicPayment {
+	private provenPaid(fact: PaidFact): void {
 		this.verify("paid", [fact.origin, fact.seq, fact.id, fact.payment, fact.settledAt], fact.mac);
 
 		const payment = asStored<PublicPayment>(fact.payment);
@@ -1135,8 +1128,6 @@ export class Ledger {
 			throw new Error(`paid fact ${fact.id} does not name the invoice it settles`);
 		}
 		proves(payment.preimage, payment.paymentHash);
-
-		return payment;
 	}
 
 	private takeoverAt(fact: OutboxFact): number {
@@ -1184,6 +1175,16 @@ function inSeqOrder<T extends { origin: string; seq: number }>(facts: T[]): T[] 
 	return [...facts].sort((one, other) =>
 		one.origin === other.origin ? one.seq - other.seq : one.origin < other.origin ? -1 : 1,
 	);
+}
+
+function refuses(prove: () => void): boolean {
+	try {
+		prove();
+		return false;
+	} catch (refusal: unknown) {
+		log.warn(`refusing a fact from a peer: ${String(refusal)}`);
+		return true;
+	}
 }
 
 function proves(preimage: string | null, paymentHash: string): void {

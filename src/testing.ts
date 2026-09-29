@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { vi } from "vitest";
+
 import { Cluster } from "./cluster.ts";
 import { Ledger } from "./ledger.ts";
 import { Store } from "./store.ts";
@@ -52,6 +54,19 @@ export function openStore({
 			}
 		},
 	};
+}
+
+export function refusals(absorbing: () => void): string[] {
+	const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+	try {
+		absorbing();
+
+		return warned.mock.calls
+			.map(([message]) => String(message))
+			.filter((message) => message.startsWith("refusing a fact"));
+	} finally {
+		warned.mockRestore();
+	}
 }
 
 export function freePort(): Promise<number> {

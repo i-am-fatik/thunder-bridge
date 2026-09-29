@@ -64,7 +64,7 @@ export function attach(gossip: Gossip, stream: SecretStream): void {
 				receive(gossip, incoming, note);
 			} catch (error: unknown) {
 				log.warn(`dropping a peer that sent an unusable note: ${String(error)}`);
-				channel.close();
+				stream.destroy();
 			}
 		},
 	});
