@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import type SecretStream from "@hyperswarm/secret-stream";
 import c from "compact-encoding";
 import Protomux from "protomux";
 import type { Facts, Watermarks } from "./ledger.ts";
@@ -31,15 +32,15 @@ export function resync(gossip: Gossip): void {
 	announce(gossip, { have: gossip.watermarks() });
 }
 
-export function attach(gossip: Gossip, stream: unknown): void {
+export function attach(gossip: Gossip, stream: SecretStream): void {
 	let peer = "";
 	const channel = Protomux.from(stream).createChannel({
 		protocol: PROTOCOL,
 		handshake: c.json,
 		onopen: (them: Introduction) => {
-			if (!introduces([gossip.key], them)) {
+			if (them?.self === gossip.self || !introduces([gossip.key], stream.handshakeHash, them)) {
 				log.warn("a peer without the cluster key tried to join");
-				channel?.close();
+				stream.destroy();
 				return;
 			}
 			peer = them.self;
@@ -68,7 +69,12 @@ export function attach(gossip: Gossip, stream: unknown): void {
 		},
 	});
 
-	channel.open({ self: gossip.self, proof: proofOf(gossip.key, gossip.self) });
+	void stream.opened.then((open) => {
+		const session = stream.handshakeHash;
+		if (open && session !== null) {
+			channel.open({ self: gossip.self, proof: proofOf(gossip.key, session, gossip.self) });
+		}
+	});
 }
 
 function receive(gossip: Gossip, note: Note, reply: { send(note: Note): void }): void {
@@ -91,18 +97,22 @@ function reach(marks: Watermarks): number {
 		.reduce((all, seq) => all + seq, 0);
 }
 
-function proofOf(key: Uint8Array, self: string): string {
-	return createHmac("sha256", key).update("cluster-handshake").update(self).digest("hex");
+function proofOf(key: Uint8Array, session: Uint8Array, self: string): string {
+	return createHmac("sha256", key)
+		.update("cluster-handshake")
+		.update(session)
+		.update(self)
+		.digest("hex");
 }
 
-function introduces(keys: Uint8Array[], them: Introduction): boolean {
-	if (typeof them?.self !== "string" || typeof them.proof !== "string") {
+function introduces(keys: Uint8Array[], session: Uint8Array | null, them: Introduction): boolean {
+	if (session === null || typeof them?.self !== "string" || typeof them.proof !== "string") {
 		return false;
 	}
 	const got = Buffer.from(them.proof, "hex");
 
 	return keys.some((key) => {
-		const want = Buffer.from(proofOf(key, them.self), "hex");
+		const want = Buffer.from(proofOf(key, session, them.self), "hex");
 		return want.length === got.length && timingSafeEqual(want, got);
 	});
 }

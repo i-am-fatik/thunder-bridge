@@ -2,9 +2,14 @@ import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { duplexPair } from "node:stream";
+import SecretStream from "@hyperswarm/secret-stream";
+import c from "compact-encoding";
+import Protomux from "protomux";
 import { expect, test } from "vitest";
 import { callerKey, paymentNamedBy } from "../core/caller.ts";
 
+import { attach } from "./gossip.ts";
 import type { UnsavedPayment } from "./payment.ts";
 import type { Store } from "./store.ts";
 
@@ -63,6 +68,30 @@ type Cluster = {
 	loseFirst: () => void;
 	stop: () => void;
 };
+
+type Introduction = { self: string; proof: string };
+
+function session(): [SecretStream, SecretStream] {
+	const [left, right] = duplexPair();
+
+	return [new SecretStream(true, left), new SecretStream(false, right)];
+}
+
+function overhear(stream: SecretStream): Promise<Introduction> {
+	const mux = Protomux.from(stream);
+
+	return new Promise((heard) => {
+		mux.pair({ protocol: "thunder-cluster" }, () => {
+			mux
+				.createChannel<Introduction>({
+					protocol: "thunder-cluster",
+					handshake: c.json,
+					onopen: heard,
+				})
+				?.open({ self: "an-eavesdropper", proof: "00" });
+		});
+	});
+}
 
 async function connected(options: TestOptions = {}): Promise<Cluster> {
 	const port = await freePort();
@@ -173,6 +202,32 @@ test("an accepted fact whose id does not name its own invoice is refused, key or
 		expect(cluster.first.get(lying.id)).toBeNull();
 	} finally {
 		cluster.stop();
+	}
+});
+
+test("a handshake overheard on one link does not open another, because it names its session", async () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const [toOne, eavesdropping] = session();
+		attach(one.store.gossip, toOne);
+		const overheard = await overhear(eavesdropping);
+		expect(overheard.self).toBe(one.store.info().origin);
+
+		const [toTwo, replaying] = session();
+		attach(two.store.gossip, toTwo);
+		Protomux.from(replaying)
+			.createChannel({ protocol: "thunder-cluster", handshake: c.json })
+			?.open(overheard);
+
+		await until(
+			() => toTwo.destroyed || two.store.info().peers > 0,
+			"the replayed handshake to be judged",
+		);
+		expect(two.store.info().peers).toBe(0);
+	} finally {
+		one.stop();
+		two.stop();
 	}
 });
 

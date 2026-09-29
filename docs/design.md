@@ -137,7 +137,10 @@ a cut cable.
 
 Instances find each other on a Hyperswarm topic derived from the cluster key and
 open a `thunder-cluster` channel. The handshake proves the peer holds that key
-before anything is exchanged, and every fact carries its own HMAC on top.
+before anything is exchanged, and every fact carries its own HMAC on top. The
+proof is keyed over the Noise handshake hash of the link it travels on, so a proof
+overheard on one link opens no other, and a peer that fails it has its link torn
+down rather than left open and silent.
 
 Everything replicates one way. Each side sends what it has as one number per origin
 per table, the other replies with everything above that mark, and it repeats until

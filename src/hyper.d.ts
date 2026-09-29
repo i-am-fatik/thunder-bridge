@@ -14,6 +14,7 @@ declare module "protomux" {
 
 	export default class Protomux {
 		static from(stream: unknown): Protomux;
+		pair(options: { protocol: string }, notify: () => void): void;
 		createChannel<H>(options: {
 			protocol: string;
 			handshake?: unknown;
@@ -31,13 +32,17 @@ declare module "@hyperswarm/secret-stream" {
 		constructor(isInitiator: boolean, rawStream?: unknown);
 		readonly publicKey: Buffer;
 		readonly remotePublicKey: Buffer | null;
+		readonly handshakeHash: Buffer | null;
+		readonly opened: Promise<boolean>;
 	}
 }
 
 declare module "hyperswarm" {
+	import type SecretStream from "@hyperswarm/secret-stream";
+
 	export default class Hyperswarm {
 		join(topic: Uint8Array, options?: { server?: boolean; client?: boolean }): unknown;
-		on(event: "connection", listener: (connection: unknown) => void): void;
+		on(event: "connection", listener: (connection: SecretStream) => void): void;
 		flush(): Promise<void>;
 		destroy(): Promise<void>;
 	}
