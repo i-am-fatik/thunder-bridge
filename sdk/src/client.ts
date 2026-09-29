@@ -216,6 +216,7 @@ function gatewayAt(baseUrl: string): string {
 export class ThunderBridge {
   private readonly baseUrl: string;
   private readonly token: string | null;
+  private readonly handedOut = new Map<string, { key: string | null; expiresAt: number }>();
   private readonly secret: string | null;
   private strangers: Promise<boolean> | null = null;
   private speaks: Promise<SigningKey> | null = null;
@@ -277,6 +278,7 @@ export class ThunderBridge {
    * and `GatewayCheatError` when what comes back is not what you asked for
    */
   async mint(charge: Charge, options?: CreateOptions): Promise<MintedPayment> {
+    const askedAt = Math.floor(Date.now() / 1000);
     const asked = await priced(charge);
     const sent = createRequestBody(
       asked,
@@ -299,7 +301,8 @@ export class ThunderBridge {
     }
 
     const payment = await mintedFrom(response);
-    await proveOrigin(payment, asked);
+    await proveOrigin(payment, asked, askedAt);
+    this.handOut(payment, options?.idempotencyKey ?? null);
 
     return payment;
   }
@@ -851,6 +854,22 @@ export class ThunderBridge {
     this.speaks ??= callerKey(this.secret ?? "");
 
     return await this.speaks;
+  }
+
+  private handOut(payment: MintedPayment, key: string | null): void {
+    const now = Math.floor(Date.now() / 1000);
+    for (const [hash, earlier] of this.handedOut) {
+      if (earlier.expiresAt <= now) {
+        this.handedOut.delete(hash);
+      }
+    }
+
+    const hash = payment.paymentHash.toLowerCase();
+    const earlier = this.handedOut.get(hash);
+    if (earlier !== undefined && (earlier.key === null || earlier.key !== key)) {
+      throw new GatewayCheatError("invoice_reused", payment.id);
+    }
+    this.handedOut.set(hash, { key, expiresAt: payment.expiresAt });
   }
 
   private proven<T extends Payment>(payment: T, held?: Held): T {

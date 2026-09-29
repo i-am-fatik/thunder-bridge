@@ -22,7 +22,7 @@ const LN_ADDRESS = "alice@example.com";
 const PAY_REQUEST_URL = "https://example.com/.well-known/lnurlp/alice";
 const CALLBACK_URL = "https://example.com/lnurl/pay/alice";
 const VERIFY_URL = "https://example.com/lnurl/verify/1a2b3c";
-const METADATA = '[["text/plain","one coffee for alice"]]';
+const METADATA = '[["text/plain","one coffee for alice"],["text/identifier","alice@example.com"]]';
 const AMOUNT_MSAT = 21_000_000;
 const PREIMAGE = "11".repeat(32);
 const PAYMENT_HASH = sha256Hex(Buffer.from(PREIMAGE, "hex"));
@@ -330,6 +330,143 @@ describe("createPayment", () => {
 
     expect(rejection).toBeInstanceOf(GatewayCheatError);
     expect((rejection as GatewayCheatError).code).toBe("hash_mismatch");
+  });
+
+  it("refuses an invoice the recipient already reports settled, so somebody else's payment pays nothing here", async () => {
+    stubFetch({
+      ...gatewayMints(pendingPayment()),
+      ...recipientServing(),
+      [VERIFY_URL]: () =>
+        jsonResponse({ status: "OK", settled: true, preimage: PREIMAGE, pr: INVOICE }),
+    });
+
+    await expect(
+      new ThunderBridge(GATEWAY).mint({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) }),
+    ).rejects.toMatchObject({ code: "invoice_settled" });
+  });
+
+  it("refuses an invoice issued well before it was asked for", async () => {
+    const old = bolt11({
+      paymentHash: PAYMENT_HASH,
+      amountMsat: AMOUNT_MSAT,
+      descriptionHash: sha256Hex(METADATA),
+      issuedAt: Math.floor(Date.now() / 1000) - 3600,
+    });
+    stubFetch({ ...gatewayMints(pendingPayment({ bolt11: old })), ...recipientServing(old) });
+
+    await expect(
+      new ThunderBridge(GATEWAY).mint({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) }),
+    ).rejects.toMatchObject({ code: "invoice_stale" });
+  });
+
+  it("hands one invoice to one order, and to its retries, but not to a second order", async () => {
+    stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
+    const gateway = new ThunderBridge(GATEWAY);
+    const order = { paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) };
+
+    await gateway.mint(order, { idempotencyKey: "order-1" });
+    await expect(gateway.mint(order, { idempotencyKey: "order-1" })).resolves.toMatchObject({
+      paymentHash: PAYMENT_HASH,
+    });
+    await expect(gateway.mint(order, { idempotencyKey: "order-2" })).rejects.toMatchObject({
+      code: "invoice_reused",
+    });
+    await expect(gateway.mint(order)).rejects.toMatchObject({ code: "invoice_reused" });
+  });
+
+  it("forgets an invoice once it has expired, so the set is never bigger than what is payable", async () => {
+    stubFetch({ ...gatewayMints(pendingPayment()), ...recipientServing() });
+    const gateway = new ThunderBridge(GATEWAY);
+    const order = { paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) };
+    await gateway.mint(order);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime((pendingPayment().expiresAt + 1) * 1000);
+      const fresh = bolt11({
+        paymentHash: PAYMENT_HASH,
+        amountMsat: AMOUNT_MSAT,
+        descriptionHash: sha256Hex(METADATA),
+      });
+      stubFetch({ ...gatewayMints(pendingPayment({ bolt11: fresh })), ...recipientServing(fresh) });
+
+      await expect(gateway.mint(order)).resolves.toMatchObject({ paymentHash: PAYMENT_HASH });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cannot bind an invoice to an address whose metadata does not name it", async () => {
+    for (const unnamed of [
+      '[["text/plain","one coffee for alice"]]',
+      '[["text/plain","alice@example.com"]]',
+      '[["text/identifier","mallory@example.com"]]',
+    ]) {
+      const unbound = bolt11({
+        paymentHash: PAYMENT_HASH,
+        amountMsat: AMOUNT_MSAT,
+        descriptionHash: sha256Hex(unnamed),
+      });
+      stubFetch({
+        ...gatewayMints(pendingPayment({ bolt11: unbound })),
+        ...recipientServing(unbound),
+        [PAY_REQUEST_URL]: () =>
+          jsonResponse({ tag: "payRequest", callback: CALLBACK_URL, metadata: unnamed }),
+      });
+
+      await expect(
+        new ThunderBridge(GATEWAY).mint({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) }),
+      ).rejects.toBeInstanceOf(UnverifiedRecipientError);
+    }
+  });
+
+  it("binds an invoice to an address its metadata names by email too", async () => {
+    const emailed = '[["text/plain","one coffee"],["text/email","Alice@Example.com"]]';
+    const bound = bolt11({
+      paymentHash: PAYMENT_HASH,
+      amountMsat: AMOUNT_MSAT,
+      descriptionHash: sha256Hex(emailed),
+    });
+    stubFetch({
+      ...gatewayMints(pendingPayment({ bolt11: bound })),
+      ...recipientServing(bound),
+      [PAY_REQUEST_URL]: () =>
+        jsonResponse({ tag: "payRequest", callback: CALLBACK_URL, metadata: emailed }),
+    });
+
+    await expect(
+      new ThunderBridge(GATEWAY).mint({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) }),
+    ).resolves.toMatchObject({ paymentHash: PAYMENT_HASH });
+  });
+
+  it("does not take the recipient's word from wherever a redirect off its origin led", async () => {
+    stubFetch({
+      ...gatewayMints(pendingPayment()),
+      ...recipientServing(),
+      [VERIFY_URL]: () => {
+        const moved = jsonResponse({ status: "OK", settled: false, pr: INVOICE });
+        Object.defineProperty(moved, "redirected", { value: true });
+        Object.defineProperty(moved, "url", { value: "https://attacker.example/echo" });
+        return moved;
+      },
+    });
+
+    await expect(
+      new ThunderBridge(GATEWAY).mint({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) }),
+    ).rejects.toBeInstanceOf(UnverifiedRecipientError);
+  });
+
+  it("reads no more of the recipient's answer than a proof needs", async () => {
+    stubFetch({
+      ...gatewayMints(pendingPayment()),
+      ...recipientServing(),
+      [VERIFY_URL]: () =>
+        jsonResponse({ status: "OK", settled: false, pr: INVOICE, pad: "x".repeat(300_000) }),
+    });
+
+    await expect(
+      new ThunderBridge(GATEWAY).mint({ paidTo: [LN_ADDRESS], amount: msat(AMOUNT_MSAT) }),
+    ).rejects.toBeInstanceOf(UnverifiedRecipientError);
   });
 
   it("hands back no invoice when the recipient cannot be reached to prove it, whatever the caller wants", async () => {

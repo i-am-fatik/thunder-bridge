@@ -426,7 +426,10 @@ type GatewayCheatCode =
   | "verify_url_foreign"
   | "invoice_not_issued"
   | "preimage_mismatch"
-  | "id_not_mine";
+  | "id_not_mine"
+  | "invoice_settled"
+  | "invoice_stale"
+  | "invoice_reused";
 ```
 
 The way a gateway was caught out, every code is a check that held against the
@@ -917,7 +920,11 @@ status is settled. Nothing downstream of the check needs a null guard
 ### <a id="thunder-bridge-function-proveorigin"></a>proveOrigin
 
 ```ts
-async function proveOrigin(payment: MintedPayment, asked: Priced): Promise<void>
+async function proveOrigin(
+  payment: MintedPayment,
+  asked: Priced,
+  askedAt?: number,
+): Promise<void>
 ```
 
 Prove the invoice really is the one the recipient issued for what you asked,

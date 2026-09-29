@@ -1,4 +1,5 @@
 import { decodeInvoice, preimageMatchesHash } from "../../core/bolt11.js";
+import { BODY_LIMIT_BYTES } from "../../core/outbound.js";
 import { sha256Hex } from "../../core/sha256.js";
 import { publicHttps, sameOrigin } from "../../core/url.js";
 import { type Msat, msat } from "./amount.js";
@@ -12,6 +13,8 @@ import {
 import type { MintedPayment, PaymentStatus, Priced } from "./types.js";
 
 const HTTP_TIMEOUT_MS = 15_000;
+const ISSUED_SKEW_SECS = 300;
+const NAMES_AN_ADDRESS = ["text/identifier", "text/email"];
 const DEFAULT_WRAP_PROPORTION = 0.01;
 const DEFAULT_WRAP_BASE_MSAT = 1000;
 
@@ -47,7 +50,11 @@ interface Verification {
  * Throws `GatewayCheatError` when a check fails and `UnverifiedRecipientError`
  * when the recipient could not be reached to run one
  */
-export async function proveOrigin(payment: MintedPayment, asked: Priced): Promise<void> {
+export async function proveOrigin(
+  payment: MintedPayment,
+  asked: Priced,
+  askedAt?: number,
+): Promise<void> {
   const cheat = (code: GatewayCheatCode) => new GatewayCheatError(code, payment.id);
 
   const listed = asked.paidTo.find((address) => equalIgnoringCase(address, payment.lnAddress));
@@ -68,10 +75,20 @@ export async function proveOrigin(payment: MintedPayment, asked: Priced): Promis
   if (invoice.amountMsat !== asked.amountMsat) {
     throw cheat("amount_mismatch");
   }
+  if (askedAt !== undefined && (invoice.issuedAt ?? 0) < askedAt - ISSUED_SKEW_SECS) {
+    throw cheat("invoice_stale");
+  }
 
   const payRequest = await payRequestFor(listed, payment);
   if (typeof payRequest.metadata !== "string" || typeof payRequest.callback !== "string") {
     throw new UnverifiedRecipientError(payment.lnAddress, payment.id, "no payRequest served");
+  }
+  if (!namesTheAddress(payRequest.metadata, listed)) {
+    throw new UnverifiedRecipientError(
+      payment.lnAddress,
+      payment.id,
+      "its metadata names no text/identifier for this address, so no invoice binds to it",
+    );
   }
   if (invoice.descriptionHash !== sha256Hex(payRequest.metadata)) {
     throw cheat("description_hash_mismatch");
@@ -83,6 +100,28 @@ export async function proveOrigin(payment: MintedPayment, asked: Priced): Promis
   const issued = await reachable<Verification>(payment.verifyUrl, payment);
   if (typeof issued.pr !== "string" || !equalIgnoringCase(issued.pr, payment.bolt11)) {
     throw cheat("invoice_not_issued");
+  }
+  if (askedAt !== undefined && issued.settled === true) {
+    throw cheat("invoice_settled");
+  }
+}
+
+function namesTheAddress(metadata: string, address: string): boolean {
+  try {
+    const entries: unknown = JSON.parse(metadata);
+
+    return (
+      Array.isArray(entries) &&
+      entries.some(
+        (entry: unknown) =>
+          Array.isArray(entry) &&
+          NAMES_AN_ADDRESS.includes(entry[0]) &&
+          typeof entry[1] === "string" &&
+          equalIgnoringCase(entry[1], address),
+      )
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -226,10 +265,13 @@ async function reachable<T>(url: string, payment: MintedPayment): Promise<T> {
       signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
       headers: { accept: "application/json" },
     });
+    if (response.redirected && !sameOrigin(response.url, url)) {
+      throw new Error(`redirected off its own origin, to ${response.url}`);
+    }
     if (!response.ok) {
       throw new Error(`answered ${response.status}`);
     }
-    const body: unknown = await response.json();
+    const body: unknown = JSON.parse(await boundedText(response));
     if (body === null || typeof body !== "object") {
       throw new Error("answered with no JSON object");
     }
@@ -237,6 +279,23 @@ async function reachable<T>(url: string, payment: MintedPayment): Promise<T> {
   } catch (cause: unknown) {
     throw new UnverifiedRecipientError(payment.lnAddress, payment.id, cause);
   }
+}
+
+async function boundedText(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  for (let chunk = await reader?.read(); chunk && !chunk.done; chunk = await reader?.read()) {
+    bytes += chunk.value.length;
+    if (bytes > BODY_LIMIT_BYTES) {
+      await reader?.cancel();
+      throw new Error(`answered with more than the ${BODY_LIMIT_BYTES} bytes a proof reads`);
+    }
+    text += decoder.decode(chunk.value, { stream: true });
+  }
+
+  return text + decoder.decode();
 }
 
 function equalIgnoringCase(one: string, other: string): boolean {

@@ -12,7 +12,10 @@ const WELL_KNOWN = "https://agora.gripe/.well-known/lnurlp/fatik";
 const CALLBACK = "https://agora.gripe/lnurlp/fatik/callback";
 const VERIFY_URL = "https://agora.gripe/lnurlp/fatik/verify/7f3a";
 const AMOUNT_MSAT = 21_000_000;
-const METADATA = JSON.stringify([["text/plain", "a coffee for fatik"]]);
+const METADATA = JSON.stringify([
+  ["text/plain", "a coffee for fatik"],
+  ["text/identifier", "fatik@agora.gripe"],
+]);
 const METADATA_OF_ANOTHER_USER = JSON.stringify([["text/plain", "a coffee for the gateway"]]);
 const PREIMAGE = "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
 

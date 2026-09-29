@@ -49,7 +49,10 @@ export type GatewayCheatCode =
   | "verify_url_foreign"
   | "invoice_not_issued"
   | "preimage_mismatch"
-  | "id_not_mine";
+  | "id_not_mine"
+  | "invoice_settled"
+  | "invoice_stale"
+  | "invoice_reused";
 
 /**
  * Thrown when the gateway demonstrably misbehaved, the invoice it returned is

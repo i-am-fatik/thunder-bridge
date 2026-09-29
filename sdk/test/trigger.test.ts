@@ -19,8 +19,9 @@ const GATEWAY = "https://gateway.example.net";
 const MOUNT = "https://tips.example.org/pay/coffee";
 const WINNER = "alice@coinos.io";
 const FALLBACK = "alice@getalby.com";
-const METADATA = '[["text/plain","Paying alice@coinos.io"]]';
-const OTHER_METADATA = '[["text/plain","Paying alice@getalby.com"]]';
+const METADATA = '[["text/plain","Paying alice@coinos.io"],["text/identifier","alice@coinos.io"]]';
+const OTHER_METADATA =
+  '[["text/plain","Paying alice@getalby.com"],["text/identifier","alice@getalby.com"]]';
 const AMOUNT_MSAT = 21_000;
 const PAYMENT_HASH = "ab".repeat(32);
 const SECRET = "keep-me-server-side";

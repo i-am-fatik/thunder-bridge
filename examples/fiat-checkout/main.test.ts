@@ -12,7 +12,10 @@ const VERIFY_URL = "https://blink.sv/lnurlp/iamfatik/verify/7f3a";
 const COINBASE = "https://api.coinbase.com/v2/prices/BTC-USD/spot";
 const KRAKEN = "https://api.kraken.com/0/public/Ticker?pair=XBTUSD";
 const AT_TWENTY_ONE_CENTS = 213_000;
-const METADATA = JSON.stringify([["text/plain", "a coffee for fatik"]]);
+const METADATA = JSON.stringify([
+  ["text/plain", "a coffee for fatik"],
+  ["text/identifier", "iamfatik@blink.sv"],
+]);
 const PREIMAGE = "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
 const PAYMENT_HASH = createHash("sha256").update(Buffer.from(PREIMAGE, "hex")).digest("hex");
 const INVOICE = bolt11({
@@ -49,6 +52,7 @@ function venuesAt(coinbaseUsd: string, krakenUsd: string): Routes {
 }
 
 function shop(overrides: Routes = {}): Routes {
+  let verified = 0;
   return {
     ...venuesAt("100000.00", "100000.00"),
     [`${DEMO_GATEWAY}/incoming-payments`]: () => jsonResponse(wire(), 201),
@@ -61,7 +65,11 @@ function shop(overrides: Routes = {}): Routes {
         maxSendable: 100_000_000_000,
       }),
     [VERIFY_URL]: () =>
-      jsonResponse({ status: "OK", settled: true, preimage: PREIMAGE, pr: INVOICE }),
+      jsonResponse(
+        verified++ === 0
+          ? { status: "OK", settled: false, pr: INVOICE }
+          : { status: "OK", settled: true, preimage: PREIMAGE, pr: INVOICE },
+      ),
     ...overrides,
   };
 }

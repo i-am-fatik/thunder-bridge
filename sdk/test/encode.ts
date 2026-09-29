@@ -11,6 +11,7 @@ export interface InvoiceFields {
   expirySecs?: number;
   network?: string;
   hrpAmount?: string;
+  issuedAt?: number;
 }
 
 /**
@@ -23,7 +24,7 @@ export function bolt11(fields: InvoiceFields): string {
     ? bytesToWords(new TextEncoder().encode(fields.description))
     : [];
   const data = [
-    ...Array<number>(7).fill(0),
+    ...timestampWords(fields.issuedAt ?? Math.floor(Date.now() / 1000)),
     1,
     1,
     20,
@@ -38,6 +39,12 @@ export function bolt11(fields: InvoiceFields): string {
     ...Array<number>(SIGNATURE_WORDS).fill(0),
   ];
   return `${hrp}1${toChars([...data, ...checksum(hrp, data)])}`;
+}
+
+function timestampWords(issuedAt: number): number[] {
+  const words: number[] = [];
+  for (let left = issuedAt, at = 0; at < 7; at++, left = Math.floor(left / 32)) words.unshift(left % 32);
+  return words;
 }
 
 function expiryFields(expirySecs: number | undefined): number[] {

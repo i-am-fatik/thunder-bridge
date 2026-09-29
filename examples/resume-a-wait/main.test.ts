@@ -11,7 +11,10 @@ const WELL_KNOWN = "https://blink.sv/.well-known/lnurlp/iamfatik";
 const CALLBACK = "https://blink.sv/lnurlp/iamfatik/callback";
 const VERIFY_URL = "https://blink.sv/lnurlp/iamfatik/verify/7f3a";
 const AMOUNT_MSAT = 21_000;
-const METADATA = JSON.stringify([["text/plain", "a tip for fatik"]]);
+const METADATA = JSON.stringify([
+  ["text/plain", "a tip for fatik"],
+  ["text/identifier", "iamfatik@blink.sv"],
+]);
 const PREIMAGE = "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
 const PAYMENT_HASH = createHash("sha256").update(Buffer.from(PREIMAGE, "hex")).digest("hex");
 const INVOICE = bolt11({

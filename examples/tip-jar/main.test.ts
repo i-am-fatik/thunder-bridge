@@ -11,7 +11,10 @@ const WELL_KNOWN = "https://blink.sv/.well-known/lnurlp/iamfatik";
 const CALLBACK = "https://blink.sv/lnurlp/iamfatik/callback";
 const VERIFY_URL = "https://blink.sv/lnurlp/iamfatik/verify/7f3a";
 const AMOUNT_MSAT = 21_000;
-const METADATA = JSON.stringify([["text/plain", "a tip for fatik"]]);
+const METADATA = JSON.stringify([
+  ["text/plain", "a tip for fatik"],
+  ["text/identifier", "iamfatik@blink.sv"],
+]);
 const PREIMAGE = "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
 const PAYMENT_HASH = createHash("sha256").update(Buffer.from(PREIMAGE, "hex")).digest("hex");
 const INVOICE = bolt11({
@@ -37,6 +40,7 @@ function wire(overrides: Record<string, unknown> = {}): Record<string, unknown> 
 }
 
 function honestRecipient(at: string = DEMO_GATEWAY): Routes {
+  let verified = 0;
   return {
     [`${at}/incoming-payments`]: () => jsonResponse(wire(), 201),
     [WELL_KNOWN]: () =>
@@ -48,7 +52,11 @@ function honestRecipient(at: string = DEMO_GATEWAY): Routes {
         maxSendable: 100_000_000,
       }),
     [VERIFY_URL]: () =>
-      jsonResponse({ status: "OK", settled: true, preimage: PREIMAGE, pr: INVOICE }),
+      jsonResponse(
+        verified++ === 0
+          ? { status: "OK", settled: false, pr: INVOICE }
+          : { status: "OK", settled: true, preimage: PREIMAGE, pr: INVOICE },
+      ),
   };
 }
 

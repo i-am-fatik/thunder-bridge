@@ -54,6 +54,16 @@ verify query and its preimage both changed, and an in-flight transfer raised by
 - `payments()` leaves out an entry reported paid without a preimage that proves it,
   `watch` refuses a gateway that echoes the watch under another hash, and
   `bankTransfer` returns the hash it derived rather than the one the gateway echoed.
+- `mint` refuses an invoice issued more than five minutes before it asked, one the
+  recipient already reports settled, and one whose payment hash it already handed
+  to another order that is still payable, with `invoice_stale`, `invoice_settled`
+  and `invoice_reused`. A retry under the same `idempotencyKey` is the same order.
+  `proveOrigin` takes the moment it was asked as an optional third argument, and
+  `Invoice` carries the `issuedAt` its timestamp says.
+- The origin proof needs the recipient's metadata to name the address as its
+  `text/identifier` or `text/email`, as LUD-16 requires, and throws
+  `UnverifiedRecipientError` when it names nobody. It no longer follows a redirect
+  off the recipient's origin, and it reads at most 256 KiB of any answer.
 - A blob sealed for a payment opens only beside that payment's hash. `seal` and
   `unseal` take the hash as a third argument, the rails seal what the watcher
   needs themselves once the hash exists, so `sealed` on `bankTransfer`, the bank,

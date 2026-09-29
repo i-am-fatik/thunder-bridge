@@ -7,17 +7,23 @@ This is the part that argues.
 ## The proof
 
 `proveOrigin(payment, request)` runs five checks in order and stops at the first
-failure. The first two need no network. The rest go to the recipient's own domain,
-never back to the gateway, which is the point: a gateway cannot witness its own
-honesty.
+failure, and `mint` runs two more on top. The first two need no network. The rest go
+to the recipient's own domain, never back to the gateway, which is the point: a
+gateway cannot witness its own honesty.
 
 | # | Check | Rules out | Fails with |
 |---|---|---|---|
 | 1 | the chosen address is one you listed, compared case-insensitively | the gateway paying an address you never named, its own included | `address_not_requested` |
 | 2 | the invoice decodes to the amount you asked for and the payment hash the record reports | being billed more than you asked, or a record describing one invoice while carrying another | `amount_mismatch`, `hash_mismatch` |
-| 3 | the invoice's description hash equals the sha256 of the `metadata` that address serves, under LUD-06 | an invoice minted by a different account on the same custodial domain | `description_hash_mismatch` |
+| 3 | that `metadata` names the address as its `text/identifier` or `text/email`, as LUD-16 requires, and the invoice's description hash equals its sha256, under LUD-06 | an invoice minted by a different account on the same custodial domain, even one that serves every account the same text | `description_hash_mismatch`, or `UnverifiedRecipientError` for metadata that names nobody |
 | 4 | `verifyUrl` shares an origin with the `callback` that endpoint publishes | a settlement proof pointed anywhere the gateway controls | `verify_url_foreign` |
 | 5 | a GET to `verifyUrl` echoes `pr`, and it equals `bolt11` byte for byte | everything the earlier checks could still miss, because the answer now comes from the recipient | `invoice_not_issued` |
+| 6 | at mint, the invoice was issued no more than five minutes before you asked, and the recipient does not already report it settled | an old invoice, or one somebody already paid, handed out as yours | `invoice_stale`, `invoice_settled` |
+| 7 | at mint, no other order this client is still waiting on was handed the same payment hash | one invoice sold twice, so that one payment settles two orders | `invoice_reused` |
+
+Check 7 remembers hashes for as long as their invoices are payable and no longer,
+and only inside one process. Store your orders under their payment hash and your own
+storage refuses the same duplicate across restarts and across tills.
 
 Check 1 also builds the url the rest of the chain uses: your `user@domain` becomes
 `https://domain/.well-known/lnurlp/user` under LUD-16, with the domain lowercased
@@ -47,6 +53,12 @@ whatever the gateway says.
 Use `carriesProof` to throw out a record that is obviously wrong. Use
 `proveSettlement` before you part with anything.
 
+Every read and every wait is checked against more than itself, though.
+`payment`, `settled` and `firstSettled` take the payment you hold, its id and
+the hash you proved or derived, and a report naming another hash is a cheat before
+its preimage is even looked at. A gateway can make up a pair that agrees with
+itself, and it cannot make up one that agrees with the hash you already had.
+
 ### The host guard
 
 Every outbound url in the chain must be public https. The guard refuses loopback,
@@ -55,13 +67,16 @@ IPv4-mapped IPv6 unwrapping into any of those. It also refuses a host with no do
 such as `nas`, the trailing-dot `localhost.`, and anything whose last label is
 `local`, `internal`, `lan`, `arpa`, `test` or `invalid`.
 
-It vets the first hop only. See below.
+It follows a redirect only within the recipient's own origin, and reads an answer
+up to 256 KiB and no further.
 
 ### Which transfer counts as paying
 
 `serve.bankVerify` calls a credit a settlement when the amount and the currency
-match exactly and the reference appears anywhere in what the payer wrote,
-case-insensitively. With `fioStatement` "what the payer wrote" is four Fio columns
+match exactly and the reference appears as a whole word in what the payer wrote,
+case-insensitively. A credit that also names another reference shaped like it, a
+second order number of the same kind, pays neither, because one payment cannot pay
+two orders. With `fioStatement` "what the payer wrote" is four Fio columns
 joined: the variable symbol, the user identification, the message for the recipient
 and the payer's own reference. So a bank that prefixes, appends, or moves the text
 between those fields still settles.

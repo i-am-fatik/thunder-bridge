@@ -11,7 +11,7 @@ const VERIFY_URL = "https://example.com/lnurl/verify/1a2b3c";
 const AMOUNT_MSAT = 21_000;
 const PREIMAGE = "11".repeat(32);
 const PAYMENT_HASH = createHash("sha256").update(Buffer.from(PREIMAGE, "hex")).digest("hex");
-const METADATA = '[["text/plain","a coffee for alice"]]';
+const METADATA = '[["text/plain","a coffee for alice"],["text/identifier","alice@example.com"]]';
 const INVOICE = bolt11({
   paymentHash: PAYMENT_HASH,
   amountMsat: AMOUNT_MSAT,
@@ -204,6 +204,7 @@ describe("requestPayment", () => {
 
 describe("requestPayment().prove", () => {
   it("asks the recipient's own server rather than the gateway, and hands back its preimage", async () => {
+    let verified = 0;
     stubFetch({
       ...minting(),
       "https://example.com/.well-known/lnurlp/alice": () =>
@@ -214,7 +215,12 @@ describe("requestPayment().prove", () => {
           minSendable: 1_000,
           maxSendable: 100_000_000,
         }),
-      [VERIFY_URL]: () => jsonResponse({ pr: INVOICE, settled: true, preimage: PREIMAGE }),
+      [VERIFY_URL]: () =>
+        jsonResponse(
+          verified++ === 0
+            ? { pr: INVOICE, settled: false }
+            : { pr: INVOICE, settled: true, preimage: PREIMAGE },
+        ),
     });
     const asked = await requesting().requestPayment({ paidTo: LN_ADDRESS, amount: sats(21) });
 
