@@ -27,6 +27,16 @@ releases a version number once it has been published.
 - `firstSettled` no longer trades a detected cheat for a win. A leg the gateway is
   caught lying about, before any leg is paid, ends the wait with its
   `GatewayCheatError` instead of being counted as a leg that lost.
+- The relay, bank and NWC verify endpoints each open only blobs sealed for their own
+  purpose. Their blobs are sealed as `v3.` under a key derived for that purpose, so
+  a gateway holding one endpoint's blob cannot hand it to another endpoint that
+  shares the secret. A `v2.` blob sealed before this release still opens, so a watch
+  already running keeps its answers until 3.0. `seal` and `unseal`, what a watcher
+  uses, are unchanged.
+- A trigger's callback signature carries its own label, so no other HMAC the same
+  secret makes can stand in for it. A callback a trigger signed before the upgrade
+  is refused, which a wallet only meets when it scanned in the minute of the
+  deploy.
 
 ## 2.1.1
 

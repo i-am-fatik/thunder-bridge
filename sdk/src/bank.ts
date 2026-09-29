@@ -1,7 +1,7 @@
 import { bytesToHex, hexToBytes } from "../../core/bytes.js";
 import { callerKey } from "../../core/caller.js";
 import { hmacHex } from "../../core/hmac.js";
-import { refuseAWeakSecret, seal, sealStable, unseal } from "../../core/sealed.js";
+import { refuseAWeakSecret, seal, sealFor, unsealFor } from "../../core/sealed.js";
 import { sha256 } from "../../core/sha256.js";
 import type { ThunderBridge } from "./client.js";
 import { minorScaleOf, minorUnitsOf } from "./currency.js";
@@ -236,7 +236,7 @@ export function bankVerifyEndpoint(
       return Response.json({ settled: false }, { status: 400 });
     }
 
-    const subject = await unseal(config.secret, sealed);
+    const subject = await unsealFor("bank-verify", config.secret, sealed);
     const asked = subject === null ? null : askedFrom(subject);
     if (asked === null || asked.iban !== answersFor) {
       return Response.json({ settled: false }, { status: 403 });
@@ -261,7 +261,10 @@ async function answeredAt(params: BankTransferParams, subject: string): Promise<
   }
 
   const polling = new URL(params.verifyUrl ?? "");
-  polling.searchParams.set("q", await sealStable(params.secret, subject));
+  polling.searchParams.set(
+    "q",
+    await sealFor("bank-verify", params.secret, subject, { stable: true }),
+  );
 
   return polling.toString();
 }

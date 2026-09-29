@@ -1,6 +1,6 @@
 import { decodeInvoice, preimageMatchesHash } from "../../core/bolt11.js";
 import { type WalletReason, WalletRefused } from "../../core/refusal.js";
-import { seal, unseal } from "../../core/sealed.js";
+import { seal, sealFor, unsealFor } from "../../core/sealed.js";
 import type { Amount } from "./amount.js";
 import type { ThunderBridge } from "./client.js";
 import {
@@ -257,7 +257,7 @@ export function nwcVerifyEndpoint(
       return Response.json({ settled: false }, { status: 400 });
     }
 
-    const paymentHash = await unseal(config.secret, sealed);
+    const paymentHash = await unsealFor("nwc-verify", config.secret, sealed);
     if (paymentHash === null) {
       return Response.json({ settled: false }, { status: 403 });
     }
@@ -283,7 +283,7 @@ export async function nwcVerifyUrl(
   secret: string,
 ): Promise<string> {
   const sealed = new URL(endpoint);
-  sealed.searchParams.set(HASH, await seal(secret, paymentHash));
+  sealed.searchParams.set(HASH, await sealFor("nwc-verify", secret, paymentHash));
 
   return sealed.toString();
 }

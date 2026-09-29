@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { seal, sealStable, unseal } from "./sealed.ts";
+import { seal, sealFor, unseal, unsealFor } from "./sealed.ts";
 
 const SECRET = "a".repeat(32);
 const OTHER_SECRET = "b".repeat(32);
@@ -87,20 +87,23 @@ test("utf-8 survives the round trip, so a message is not mangled", async () => {
 	expect(await unseal(SECRET, await seal(SECRET, text))).toBe(text);
 });
 
+const stable = (secret: string, plaintext: string) =>
+	sealFor("bank-verify", secret, plaintext, { stable: true });
+
 test("a stable seal gives one blob for one plaintext, however often it is asked for", async () => {
-	expect(await sealStable(SECRET, PLAIN)).toBe(await sealStable(SECRET, PLAIN));
+	expect(await stable(SECRET, PLAIN)).toBe(await stable(SECRET, PLAIN));
 });
 
 test("a stable blob reads back like any other, and only under its own secret", async () => {
-	const sealed = await sealStable(SECRET, PLAIN);
+	const sealed = await stable(SECRET, PLAIN);
 
-	expect(await unseal(SECRET, sealed)).toBe(PLAIN);
-	expect(await unseal(OTHER_SECRET, sealed)).toBeNull();
+	expect(await unsealFor("bank-verify", SECRET, sealed)).toBe(PLAIN);
+	expect(await unsealFor("bank-verify", OTHER_SECRET, sealed)).toBeNull();
 });
 
 test("two plaintexts never share a stable nonce, which is what makes the reuse safe", async () => {
-	const one = await sealStable(SECRET, PLAIN);
-	const other = await sealStable(SECRET, `${PLAIN} `);
+	const one = await stable(SECRET, PLAIN);
+	const other = await stable(SECRET, `${PLAIN} `);
 	const nonceOf = (sealed: string) =>
 		Buffer.from(sealed.slice(3), "base64url").subarray(0, 12).toString("hex");
 
@@ -108,15 +111,36 @@ test("two plaintexts never share a stable nonce, which is what makes the reuse s
 });
 
 test("the same plaintext under two secrets seals to two blobs", async () => {
-	expect(await sealStable(SECRET, PLAIN)).not.toBe(await sealStable(OTHER_SECRET, PLAIN));
+	expect(await stable(SECRET, PLAIN)).not.toBe(await stable(OTHER_SECRET, PLAIN));
 });
 
 test("a stable blob hides what it carries, exactly like a random one", async () => {
-	const sealed = await sealStable(SECRET, PLAIN);
+	const sealed = await stable(SECRET, PLAIN);
 
 	expect(sealed).not.toContain("21000");
 	expect(sealed).not.toContain("iamfatik");
-	expect(sealed.startsWith("v2.")).toBe(true);
+	expect(sealed.startsWith("v3.")).toBe(true);
+});
+
+test("a blob sealed for one purpose opens for that purpose and for no other", async () => {
+	const relayed = await sealFor("relay", SECRET, PLAIN);
+
+	expect(await unsealFor("relay", SECRET, relayed)).toBe(PLAIN);
+	expect(await unsealFor("bank-verify", SECRET, relayed)).toBeNull();
+	expect(await unsealFor("nwc-verify", SECRET, relayed)).toBeNull();
+	expect(await unseal(SECRET, relayed)).toBeNull();
+});
+
+test("a blob relabelled from a purpose to the version a watcher opens is refused", async () => {
+	const relayed = await sealFor("relay", SECRET, PLAIN);
+
+	expect(await unseal(SECRET, `v2.${relayed.slice(3)}`)).toBeNull();
+	expect(await unsealFor("relay", SECRET, `v2.${relayed.slice(3)}`)).toBeNull();
+});
+
+test("a blob an older release sealed before purposes existed still opens, so a running watch keeps its answers", async () => {
+	expect(await unsealFor("bank-verify", SECRET, await seal(SECRET, PLAIN))).toBe(PLAIN);
+	expect(await unsealFor("relay", SECRET, SEALED_BEFORE_PADDING)).not.toBeNull();
 });
 
 const HASH = "ab".repeat(32);

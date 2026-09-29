@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkSettled } from "../../core/lnurl.js";
-import { unseal } from "../../core/sealed.js";
+import { sealFor, unseal, unsealFor } from "../../core/sealed.js";
 import {
   type BankTransfer,
   type BankTransferParams,
@@ -137,7 +137,7 @@ describe("bankTransfer", () => {
 
     expect(url.origin + url.pathname).toBe(MOUNT);
     expect([...url.searchParams.keys()]).toEqual(["q"]);
-    expect(url.searchParams.get("q")).toMatch(/^v2\.[A-Za-z0-9_-]+$/);
+    expect(url.searchParams.get("q")).toMatch(/^v3\.[A-Za-z0-9_-]+$/);
   });
 
   it("seals every order's query to one length, so its size gives no amount away", async () => {
@@ -486,6 +486,18 @@ describe("bankVerifyEndpoint", () => {
 
     expect(answer.status).toBe(403);
     expect(await answer.json()).toEqual({ settled: false });
+  });
+
+  it("refuses a question sealed under the same secret for another purpose", async () => {
+    const transfer = await asked();
+    const handler = bankVerifyEndpoint({ secret: SECRET, iban: IBAN, statement: statementOf(credit()) });
+    const asOwnPurpose = new URL(transfer.verifyUrl);
+    const subject = await unsealFor("bank-verify", SECRET, asOwnPurpose.searchParams.get("q") ?? "");
+    const asRelay = new URL(transfer.verifyUrl);
+    asRelay.searchParams.set("q", await sealFor("relay", SECRET, subject ?? ""));
+
+    expect((await handler(new Request(asOwnPurpose))).status).toBe(200);
+    expect((await handler(new Request(asRelay))).status).toBe(403);
   });
 
   it("answers the account it was mounted for, when that is the one asked about", async () => {

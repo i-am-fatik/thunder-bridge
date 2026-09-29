@@ -1,5 +1,5 @@
 import { msat } from "../src/amount";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThunderBridge } from "../src/client";
 import { unseal } from "../../core/sealed.js";
@@ -259,6 +259,19 @@ describe("the callback half", () => {
     const handler = endpoint();
     const callback = await callbackFor(handler);
     callback.searchParams.set("to", "attacker@example.com");
+
+    const refused = (await (await handler(new Request(callback))).json()) as Record<string, string>;
+
+    expect(refused["status"]).toBe("ERROR");
+    expect(refused["reason"]).toContain("not signed here");
+  });
+
+  it("refuses a callback signed with the bare HMAC of its fields, so no other use of the secret stands in", async () => {
+    stubFetch(gatewayServing());
+    const handler = endpoint();
+    const callback = await callbackFor(handler);
+    const fields = ["to", "least", "most", "n"].map((name) => callback.searchParams.get(name));
+    callback.searchParams.set("sig", createHmac("sha256", SECRET).update(fields.join("|")).digest("hex"));
 
     const refused = (await (await handler(new Request(callback))).json()) as Record<string, string>;
 

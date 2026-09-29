@@ -352,7 +352,7 @@ function sign(
   most: number,
   nonce: string,
 ): Promise<string> {
-  return hmacHex(secret, `${address}|${least}|${most}|${nonce}`);
+  return hmacHex(secret, `lnurl-callback|${address}|${least}|${most}|${nonce}`);
 }
 
 function randomNonce(): string {

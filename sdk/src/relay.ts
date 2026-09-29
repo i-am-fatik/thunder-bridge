@@ -1,7 +1,7 @@
 import { checkSettled } from "../../core/lnurl.js";
 import type { Send } from "../../core/outbound.js";
 import { pinnedToTheAddressWeVerified } from "../../core/pinned.js";
-import { seal, unseal } from "../../core/sealed.js";
+import { sealFor, unsealFor } from "../../core/sealed.js";
 import { answerVerifyChallenge } from "./webhook.js";
 
 const DEFAULT_POLL_EVERY_SECS = 5;
@@ -64,7 +64,7 @@ export function lightningVerifyEndpoint(
       return Response.json({ settled: false }, { status: 400 });
     }
 
-    const opened = await unseal(config.secret, sealed);
+    const opened = await unsealFor("relay", config.secret, sealed);
     const wallet = opened === null ? null : relayedFrom(opened);
     if (wallet === null) {
       return Response.json({ settled: false }, { status: 403 });
@@ -108,7 +108,7 @@ export async function relayedVerifyUrl(
   secret: string,
 ): Promise<string> {
   const relayed = new URL(endpoint);
-  relayed.searchParams.set(WALLET, await seal(secret, JSON.stringify(wallet)));
+  relayed.searchParams.set(WALLET, await sealFor("relay", secret, JSON.stringify(wallet)));
 
   return relayed.toString();
 }
