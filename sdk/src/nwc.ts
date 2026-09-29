@@ -495,7 +495,7 @@ export interface NwcRailConfig extends RailConfig {
   description?: (order: Order) => string;
 
   /** Sealed before the gateway sees it, the way the blind Lightning rail does */
-  sealed?: (order: Order) => string | Promise<string>;
+  sealed?: { secret: string; data: (order: Order) => unknown };
 }
 
 /**
@@ -524,7 +524,13 @@ export function nwcRail(gateway: ThunderBridge, config: NwcRailConfig): Rail {
       expiresAt: invoice.expiresAt,
       trigger: config.trigger,
       replay: config.replay,
-      sealed: await config.sealed?.(order),
+      sealed: config.sealed
+        ? await seal(
+            config.sealed.secret,
+            JSON.stringify(config.sealed.data(order)),
+            invoice.paymentHash,
+          )
+        : undefined,
       webhookUrl: config.webhookUrl,
     });
 

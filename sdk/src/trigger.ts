@@ -324,7 +324,9 @@ async function mintBlind(
       expiresAt: resolved.expiresAt,
       trigger: config.watchSecret,
       replay: config.replay,
-      sealed: locked ? await seal(locked.secret, JSON.stringify(locked.data(minted))) : undefined,
+      sealed: locked
+        ? await seal(locked.secret, JSON.stringify(locked.data(minted)), minted.paymentHash)
+        : undefined,
     });
   } catch (refused: unknown) {
     if (!alreadyWatched(refused)) {

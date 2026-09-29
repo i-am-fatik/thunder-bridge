@@ -54,6 +54,13 @@ verify query and its preimage both changed, and an in-flight transfer raised by
 - `payments()` leaves out an entry reported paid without a preimage that proves it,
   `watch` refuses a gateway that echoes the watch under another hash, and
   `bankTransfer` returns the hash it derived rather than the one the gateway echoed.
+- A blob sealed for a payment opens only beside that payment's hash. `seal` and
+  `unseal` take the hash as a third argument, the rails seal what the watcher
+  needs themselves once the hash exists, so `sealed` on `bankTransfer`, the bank,
+  blind Lightning and NWC rails is `{ secret, data }` rather than a blob sealed
+  beforehand, and a watcher opens a frame's blob with `unseal(secret, sealed,
+  payment.paymentHash)`. A gateway that moves one order's blob next to another
+  payment, or next to a pair it made up, hands the watcher nothing it can open.
 - `readSettlement`, `readPayment` and `serve.webhook` treat a signed delivery that
   claims paid without proving it the way they treat a bad signature, so
   `onUnproven` now hears only about expiries.

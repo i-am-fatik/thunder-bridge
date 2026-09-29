@@ -1,7 +1,7 @@
 import { bytesToHex, hexToBytes } from "../../core/bytes.js";
 import { callerKey } from "../../core/caller.js";
 import { hmacHex } from "../../core/hmac.js";
-import { refuseAWeakSecret, sealStable, unseal } from "../../core/sealed.js";
+import { refuseAWeakSecret, seal, sealStable, unseal } from "../../core/sealed.js";
 import { sha256 } from "../../core/sha256.js";
 import type { ThunderBridge } from "./client.js";
 import { minorScaleOf, minorUnitsOf } from "./currency.js";
@@ -86,10 +86,11 @@ export interface BankTransferParams {
   replay?: number;
 
   /**
-   * Handed back untouched on that stream, so a watcher learns which order settled
-   * without asking anyone. `seal` it and the gateway cannot read it either
+   * Handed back on that stream, so a watcher learns which order settled without
+   * asking anyone. It is sealed under `secret` for this transfer's payment hash,
+   * so the gateway can neither read it nor move it onto another payment
    */
-  sealed?: string;
+  sealed?: { secret: string; data: unknown };
 
   /**
    * Where the gateway posts once the money lands, a public https URL. Without one
@@ -187,7 +188,9 @@ export async function bankTransfer(
     expiresAt: params.expiresAt,
     trigger: params.trigger,
     replay: params.replay,
-    sealed: params.sealed,
+    sealed: params.sealed
+      ? await seal(params.sealed.secret, JSON.stringify(params.sealed.data), paymentHash)
+      : undefined,
     webhookUrl: params.webhookUrl,
   });
 

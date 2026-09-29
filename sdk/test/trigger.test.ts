@@ -425,10 +425,11 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
     const watch = calls.find((call) => call.url === `${GATEWAY}/watched-payments`);
     const sealed = String((JSON.parse(String(watch?.init?.body)) as Record<string, unknown>)["sealed"]);
 
-    expect(JSON.parse((await unseal(SEALING_SECRET, sealed)) ?? "null")).toEqual({
+    expect(JSON.parse((await unseal(SEALING_SECRET, sealed, PAYMENT_HASH)) ?? "null")).toEqual({
       amountMsat: AMOUNT_MSAT,
     });
-    expect(await unseal("z".repeat(32), sealed)).toBeNull();
+    expect(await unseal("z".repeat(32), sealed, PAYMENT_HASH)).toBeNull();
+    expect(await unseal(SEALING_SECRET, sealed, "ee".repeat(32))).toBeNull();
   });
 
   it("survives a gateway that says the invoice is already watched, and still serves it", async () => {

@@ -2,6 +2,7 @@ import { type Resolved, resolve } from "../../core/lnurl.js";
 import type { Send } from "../../core/outbound.js";
 import { pinnedToTheAddressWeVerified } from "../../core/pinned.js";
 import { NoWalletAvailable } from "../../core/refusal.js";
+import { seal } from "../../core/sealed.js";
 import { type Amount, amountNow, type Msat, msat } from "./amount.js";
 import { type BankTransfer, type BankTransferParams, bankTransfer } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
@@ -86,10 +87,10 @@ export interface LightningRailConfig extends RailConfig {
 /** The same rail with the invoice resolved here, so the gateway is told neither address nor amount */
 export interface BlindLightningRailConfig extends LightningRailConfig {
   /**
-   * What the watcher needs and the gateway must not read, sealed with `seal`
-   * before it goes anywhere near the gateway
+   * What the watcher needs and the gateway must not read, sealed under `secret`
+   * for the invoice's payment hash before it goes anywhere near the gateway
    */
-  sealed?: (order: Order) => string | Promise<string>;
+  sealed?: { secret: string; data: (order: Order) => unknown };
 
   /**
    * Where your own `serve.verify` endpoint is mounted, and its secret. Without
@@ -117,7 +118,7 @@ export interface BankRailConfig extends RailConfig {
   expiresAt: (order: Order) => number;
 
   /** Sealed before the gateway sees it, the way the blind Lightning rail does */
-  sealed?: (order: Order) => string | Promise<string>;
+  sealed?: { secret: string; data: (order: Order) => unknown };
 
   /** The Czech variable symbol, taken off the reference's digits by default */
   variableSymbol?: (order: Order) => string | undefined;
@@ -149,7 +150,7 @@ export function bankRail(gateway: ThunderBridge, config: BankRailConfig): Rail {
       expiresAt,
       trigger: config.trigger,
       replay: config.replay,
-      sealed: await config.sealed?.(order),
+      sealed: config.sealed && { secret: config.sealed.secret, data: config.sealed.data(order) },
       variableSymbol: config.variableSymbol?.(order),
       webhookUrl: config.webhookUrl,
       allowPublicGateway: config.allowPublicGateway,
@@ -223,7 +224,13 @@ export function blindLightningRail(gateway: ThunderBridge, config: BlindLightnin
       expiresAt: resolved.expiresAt,
       trigger: config.trigger,
       replay: config.replay,
-      sealed: await config.sealed?.(order),
+      sealed: config.sealed
+        ? await seal(
+            config.sealed.secret,
+            JSON.stringify(config.sealed.data(order)),
+            resolved.paymentHash,
+          )
+        : undefined,
       webhookUrl: config.webhookUrl,
     });
 

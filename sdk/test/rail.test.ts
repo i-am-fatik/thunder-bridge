@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preimageMatchesHash } from "../../core/bolt11.js";
 import { checkSettled } from "../../core/lnurl.js";
+import { unseal } from "../../core/sealed.js";
 import { bankVerifyEndpoint, type Credit } from "../src/bank";
 import { ThunderBridge } from "../src/client";
 import { NoWalletAvailableError } from "../src/errors";
@@ -173,6 +174,18 @@ describe("every rail answers the same question", () => {
 });
 
 describe("bankRail", () => {
+  it("seals what the watcher needs for the transfer's own hash", async () => {
+    const calls = stubFetch(railsServing());
+    const sealing = "the-watchers-own-thirty-two-char-key";
+
+    const leg = await bank({
+      sealed: { secret: sealing, data: (order) => ({ order: order.reference }) },
+    })(ORDER);
+
+    const sealed = String(bodyOf(`${GATEWAY}/watched-payments`, calls)["sealed"]);
+    expect(await unseal(sealing, sealed, leg.paymentHash)).toBe('{"order":"ORDER-2026-77"}');
+  });
+
   it("takes the reference, the amount and the currency from the order and nothing else", async () => {
     stubFetch(railsServing());
 
@@ -285,6 +298,17 @@ describe("blindLightningRail", () => {
     expect(body["verify_url"]).toBe(VERIFY);
     expect(JSON.stringify(body)).not.toContain(LN_ADDRESS);
     expect(JSON.stringify(body)).not.toContain(String(AMOUNT_MSAT));
+  });
+
+  it("seals what the watcher needs for the invoice it resolved, and for no other", async () => {
+    const calls = stubFetch(railsServing());
+    const sealing = "the-watchers-own-thirty-two-char-key";
+
+    await blind({ sealed: { secret: sealing, data: (order) => ({ order: order.reference }) } })(ORDER);
+
+    const sealed = String(bodyOf(`${GATEWAY}/watched-payments`, calls)["sealed"]);
+    expect(await unseal(sealing, sealed, PAYMENT_HASH)).toBe('{"order":"ORDER-2026-77"}');
+    expect(await unseal(sealing, sealed, "ee".repeat(32))).toBeNull();
   });
 
   it("never asks the gateway to mint", async () => {

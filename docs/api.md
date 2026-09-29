@@ -184,7 +184,7 @@ interface BankRailConfig extends RailConfig {
   expiresAt: (order: Order) => number;
 
   /** Sealed before the gateway sees it, the way the blind Lightning rail does */
-  sealed?: (order: Order) => string | Promise<string>;
+  sealed?: { secret: string; data: (order: Order) => unknown };
 
   /** The Czech variable symbol, taken off the reference's digits by default */
   variableSymbol?: (order: Order) => string | undefined;
@@ -232,10 +232,10 @@ The endpoint the gateway polls for a bank transfer, answering off your own state
 ```ts
 interface BlindLightningRailConfig extends LightningRailConfig {
   /**
-   * What the watcher needs and the gateway must not read, sealed with `seal`
-   * before it goes anywhere near the gateway
+   * What the watcher needs and the gateway must not read, sealed under `secret`
+   * for the invoice's payment hash before it goes anywhere near the gateway
    */
-  sealed?: (order: Order) => string | Promise<string>;
+  sealed?: { secret: string; data: (order: Order) => unknown };
 
   /**
    * Where your own `serve.verify` endpoint is mounted, and its secret. Without
@@ -510,7 +510,7 @@ interface Handover {
    */
   replay?: number;
 
-  /** Sealed with `seal`, so the gateway stores what it cannot read */
+  /** Sealed with `seal` for this payment hash, so the gateway stores what it cannot read or move */
   sealed?: string;
 
   webhookUrl?: string;
@@ -1956,10 +1956,11 @@ interface BankTransferParams {
   replay?: number;
 
   /**
-   * Handed back untouched on that stream, so a watcher learns which order settled
-   * without asking anyone. `seal` it and the gateway cannot read it either
+   * Handed back on that stream, so a watcher learns which order settled without
+   * asking anyone. It is sealed under `secret` for this transfer's payment hash,
+   * so the gateway can neither read it nor move it onto another payment
    */
-  sealed?: string;
+  sealed?: { secret: string; data: unknown };
 
   /**
    * Where the gateway posts once the money lands, a public https URL. Without one
@@ -2230,7 +2231,7 @@ interface NwcRailConfig {
 	rate?: Ticker | undefined;
 	verifyThrough: { endpoint: string; secret: string; };
 	description?: ((order: Order) => string) | undefined;
-	sealed?: ((order: Order) => string | Promise<string>) | undefined;
+	sealed?: { secret: string; data: (order: Order) => unknown; } | undefined;
 	trigger?: string | undefined;
 	replay?: number | undefined;
 	webhookUrl?: string | undefined;

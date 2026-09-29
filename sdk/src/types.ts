@@ -100,7 +100,7 @@ export interface Handover {
    */
   replay?: number;
 
-  /** Sealed with `seal`, so the gateway stores what it cannot read */
+  /** Sealed with `seal` for this payment hash, so the gateway stores what it cannot read or move */
   sealed?: string;
 
   webhookUrl?: string;

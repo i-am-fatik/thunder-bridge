@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkSettled } from "../../core/lnurl.js";
+import { unseal } from "../../core/sealed.js";
 import {
   type BankTransfer,
   type BankTransferParams,
@@ -18,6 +19,7 @@ vi.mock("node:dns/promises", () => ({
 }));
 
 const SECRET = "keep-me-server-side-and-thirty-two-plus";
+const SEALING = "the-watchers-own-thirty-two-char-key";
 const OTHER_IBAN = "CZ9455000000001028912385";
 const REFERENCE = "ORDER-2026-77";
 const AMOUNT_MINOR = 48_055;
@@ -195,11 +197,38 @@ describe("bankTransfer", () => {
   it("puts the trigger on the watch as a hash, so one socket hears both rails", async () => {
     const calls = watching();
 
-    await bankTransfer(owned(), asking({ trigger: "the-shop-holds-this", sealed: "v1.opaque" }));
+    await bankTransfer(owned(), asking({ trigger: "the-shop-holds-this" }));
 
     const body = JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>;
     expect(body["trigger"]).toBe(createHash("sha256").update("the-shop-holds-this").digest("hex"));
-    expect(body["sealed"]).toBe("v1.opaque");
+  });
+
+  it("seals what the watcher needs for this transfer's hash, so it opens beside no invented pair", async () => {
+    const calls = watching();
+    const transfer = await bankTransfer(
+      owned(),
+      asking({ sealed: { secret: SEALING, data: { order: "ORDER-2026-77" } } }),
+    );
+
+    const sealed = String((JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>)["sealed"]);
+    const invented = createHash("sha256").update(Buffer.from("44".repeat(32), "hex")).digest("hex");
+
+    expect(await unseal(SEALING, sealed, transfer.paymentHash)).toBe('{"order":"ORDER-2026-77"}');
+    expect(await unseal(SEALING, sealed, invented)).toBeNull();
+  });
+
+  it("opens an unpaid order's blob beside no other payment, however really that one settled", async () => {
+    const calls = watching();
+    const unpaid = await bankTransfer(
+      owned(),
+      asking({ sealed: { secret: SEALING, data: { order: "ORDER-2026-77" } } }),
+    );
+    const settled = await bankTransfer(owned(), asking({ reference: "ORDER-2026-78" }));
+
+    const sealed = String((JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>)["sealed"]);
+
+    expect(await unseal(SEALING, sealed, settled.paymentHash)).toBeNull();
+    expect(await unseal(SEALING, sealed, unpaid.paymentHash)).toBe('{"order":"ORDER-2026-77"}');
   });
 
   it("asks the gateway to keep the trigger's settlements when the transfer says how many", async () => {
