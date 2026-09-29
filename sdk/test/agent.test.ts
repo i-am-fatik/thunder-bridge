@@ -58,6 +58,7 @@ function order(credits: Credit[]): BankOrder {
     iban: IBAN,
     reference: REFERENCE,
     amountMinor: AMOUNT_MINOR,
+    expiresAt: EXPIRES_AT,
     statement: async () => credits,
   };
 }

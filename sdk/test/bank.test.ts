@@ -398,6 +398,13 @@ describe("bankVerifyEndpoint", () => {
     expect(await answer.json()).toEqual({ settled: true, preimage: expect.any(String) });
   });
 
+  it("makes a second order under the same reference and amount a different payment", async () => {
+    const first = await asked();
+    const second = await asked({ expiresAt: EXPIRES_AT + 86_400 });
+
+    expect(second.paymentHash).not.toBe(first.paymentHash);
+  });
+
   it("refuses a question it did not seal, so it is no statement oracle", async () => {
     const answer = await verified(statementOf(credit()), `${MOUNT}?q=v1.AAAAAAAAAAAAAAAAAAAA`);
 

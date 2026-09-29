@@ -82,6 +82,10 @@ verify query and its preimage both changed, and an in-flight transfer raised by
   same price settled both. The reference is now looked for as a whole word, and a
   credit that also names another reference shaped like it, such as a second order
   number, pays neither.
+- A bank transfer's preimage is made from its `expiresAt` too, so a second order
+  under the same reference and amount is a different payment rather than one the
+  gateway already holds a preimage for. `BankOrder` takes the `expiresAt` its
+  transfer was raised with.
 
 ## 1.5.0
 

@@ -170,7 +170,13 @@ export async function bankTransfer(
   refuseUnusable(params, iban, currency);
   await refuseAnOpenGateway(gateway, params);
   const spd = shortPaymentDescriptor(params, iban, currency);
-  const subject = subjectOf(iban, params.amountMinor, currency, params.reference);
+  const subject = subjectOf({
+    iban,
+    amountMinor: params.amountMinor,
+    currency,
+    expiresAt: params.expiresAt,
+    reference: params.reference,
+  });
 
   const verifyUrl = await answeredAt(params, subject);
 
@@ -262,6 +268,7 @@ export interface BankOrder {
   reference: string;
   amountMinor: number;
   currency?: string;
+  expiresAt: number;
   statement: Statement;
 }
 
@@ -312,6 +319,7 @@ export function bankAgent(config: BankAgentConfig): () => void {
           reference: order.reference,
           amountMinor: order.amountMinor,
           currency,
+          expiresAt: order.expiresAt,
         },
         statement: order.statement,
         lookBackSecs: config.lookBackSecs,
@@ -332,12 +340,7 @@ async function creditedPreimage(params: {
     return null;
   }
 
-  const { iban, amountMinor, currency, reference } = params.asked;
-
-  return await hmacHex(
-    params.secret,
-    `preimage|${subjectOf(iban, amountMinor, currency, reference)}`,
-  );
+  return await hmacHex(params.secret, `preimage|${subjectOf(params.asked)}`);
 }
 
 interface Asked {
@@ -345,20 +348,22 @@ interface Asked {
   reference: string;
   amountMinor: number;
   currency: string;
+  expiresAt: number;
 }
 
 function askedFrom(subject: string): Asked | null {
-  const [iban, minorText, currency, ...rest] = subject.split("|");
+  const [iban, minorText, currency, expiresText, ...rest] = subject.split("|");
   const reference = rest.join("|");
   const amountMinor = Number(minorText);
+  const expiresAt = Number(expiresText);
   if (!iban || !currency || reference.length === 0) {
     return null;
   }
-  if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+  if (!Number.isInteger(amountMinor) || amountMinor <= 0 || !Number.isSafeInteger(expiresAt)) {
     return null;
   }
 
-  return { iban, reference, amountMinor, currency };
+  return { iban, reference, amountMinor, currency, expiresAt };
 }
 
 function pays(credit: Credit, asked: Asked): boolean {
@@ -389,8 +394,8 @@ function wordsShapedLike(reference: string): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}])${shape}(?![\\p{L}\\p{N}])`, "gu");
 }
 
-function subjectOf(iban: string, amountMinor: number, currency: string, reference: string): string {
-  return `${iban}|${amountMinor}|${currency.toUpperCase()}|${reference}`;
+function subjectOf({ iban, amountMinor, currency, expiresAt, reference }: Asked): string {
+  return `${iban}|${amountMinor}|${currency.toUpperCase()}|${expiresAt}|${reference}`;
 }
 
 function hashOf(preimage: string): string {

@@ -1859,6 +1859,7 @@ interface BankOrder {
   reference: string;
   amountMinor: number;
   currency?: string;
+  expiresAt: number;
   statement: Statement;
 }
 ```
