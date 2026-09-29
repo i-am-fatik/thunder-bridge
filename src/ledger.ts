@@ -932,9 +932,7 @@ export class Ledger {
 		}
 
 		this.transact(() => {
-			if (written !== undefined) {
-				this.resignEveryFact();
-			}
+			this.resignEveryFact();
 			this.db
 				.prepare(
 					"INSERT INTO meta (key, value) VALUES ('ledger-key', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",

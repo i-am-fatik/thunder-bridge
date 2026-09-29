@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { duplexPair } from "node:stream";
 import SecretStream from "@hyperswarm/secret-stream";
 import c from "compact-encoding";
@@ -513,6 +514,34 @@ test("a caller's payment replicates across a rotation, and the old key opens not
 	} finally {
 		peer.stop();
 		stale.stop();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a ledger no key ever stamped is re-signed on its first boot, so rotating while upgrading loses nothing", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-unstamped-"));
+	const ledgerPath = join(directory, "ledger.db");
+	const NEXT_KEY = Buffer.from("55".repeat(32), "hex");
+	const nothingSeen = { accepted: {}, paid: {}, outbox: {}, delivered: {} };
+	const owner = (await callerKey("rail_unstamped_2d9e6b4f")).publicKeyHex;
+
+	const before = openStore({ ledgerPath });
+	const taken = before.store.insert({ ...payment(4), caller: owner });
+	before.stop();
+	const unstamped = new DatabaseSync(ledgerPath);
+	unstamped.exec("DELETE FROM meta WHERE key = 'ledger-key'");
+	unstamped.close();
+
+	const rolled = openStore({ ledgerPath, key: NEXT_KEY });
+	const { facts } = rolled.store.gossip.since(nothingSeen);
+	rolled.stop();
+
+	const peer = openStore({ key: NEXT_KEY });
+	try {
+		expect(refusals(() => peer.store.gossip.onFacts(facts))).toEqual([]);
+		expect(peer.store.get(taken.id)?.paymentHash).toBe(taken.paymentHash);
+	} finally {
+		peer.stop();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
