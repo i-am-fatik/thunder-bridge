@@ -67,6 +67,7 @@ const SCHEMA = `
 		payment TEXT NOT NULL,
 		settledAt INTEGER NOT NULL,
 		mac TEXT NOT NULL,
+		heardAt INTEGER,
 		PRIMARY KEY (origin, seq)
 	);
 	CREATE INDEX IF NOT EXISTS paid_by_id ON paid (id);
@@ -82,10 +83,13 @@ const SCHEMA = `
 		mac TEXT NOT NULL,
 		dueAt INTEGER,
 		attempts INTEGER NOT NULL DEFAULT 0,
+		retryUntil INTEGER,
+		parkedAt INTEGER,
 		PRIMARY KEY (origin, seq)
 	);
 	CREATE INDEX IF NOT EXISTS outbox_by_due ON outbox (dueAt);
 	CREATE INDEX IF NOT EXISTS outbox_by_age ON outbox (owedAt);
+	CREATE INDEX IF NOT EXISTS outbox_by_hook ON outbox (id, url);
 
 	CREATE TABLE IF NOT EXISTS delivered (
 		origin TEXT NOT NULL,
@@ -129,6 +133,7 @@ const SCHEMA = `
 const SCHEMA_VERSION = 3;
 
 const RETRY_FLOOR_SECS = 3600;
+const UNOWED_SLACK_SECS = 60;
 const TAKEOVER_SPREAD = 8;
 const REQUEST_TTL_SECS = 86_400;
 const GAP_BATCH = 500;
@@ -213,7 +218,7 @@ type Missing = { id: string; url: string; settledAt: number | null };
 
 type Held = { fingerprint: string; paymentId: string | null; leaseUntil: number };
 
-type Attempted = { attempts: number; owedAt: number };
+type Attempted = { attempts: number; owedAt: number; retryUntil: number | null };
 
 type Statements = {
 	read: StatementSync;
@@ -344,7 +349,7 @@ export class Ledger {
 				FROM accepted
 				JOIN paid ON paid.id = accepted.id
 				JOIN json_each(accepted.payment, '$.webhooks') AS hook
-				WHERE NOT EXISTS (
+				WHERE coalesce(paid.heardAt, paid.settledAt) <= ? AND NOT EXISTS (
 					SELECT 1 FROM outbox
 					WHERE outbox.id = accepted.id AND outbox.url = json_extract(hook.value, '$.url')
 				) AND NOT EXISTS (
@@ -363,10 +368,10 @@ export class Ledger {
 				"SELECT payment FROM paid ORDER BY settledAt DESC, seq DESC LIMIT ?",
 			),
 			insertPaid: this.db.prepare(
-				"INSERT INTO paid (origin, seq, id, payment, settledAt, mac) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
+				"INSERT INTO paid (origin, seq, id, payment, settledAt, mac, heardAt) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
 			),
 			insertOutbox: this.db.prepare(
-				"INSERT INTO outbox (origin, seq, id, url, body, owedAt, mac, dueAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
+				"INSERT INTO outbox (origin, seq, id, url, body, owedAt, mac, dueAt, retryUntil) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
 			),
 			insertDelivered: this.db.prepare(
 				"INSERT INTO delivered (origin, seq, id, url, deliveredAt, mac) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(origin, seq) DO NOTHING",
@@ -379,10 +384,10 @@ export class Ledger {
 				) RETURNING origin, seq, id, url, body`,
 			),
 			attempted: this.db.prepare(
-				"SELECT attempts, owedAt FROM outbox WHERE origin = ? AND seq = ?",
+				"SELECT attempts, owedAt, retryUntil FROM outbox WHERE origin = ? AND seq = ?",
 			),
 			undelivered: this.db.prepare(
-				"UPDATE outbox SET attempts = ?, dueAt = ? WHERE origin = ? AND seq = ?",
+				"UPDATE outbox SET attempts = ?, dueAt = ?, parkedAt = ? WHERE origin = ? AND seq = ?",
 			),
 			parkedDeliveries: this.db.prepare(
 				`SELECT COUNT(*) AS n FROM outbox WHERE dueAt IS NULL
@@ -392,8 +397,8 @@ export class Ledger {
 				"SELECT MAX(expiresAt) AS deadline FROM accepted WHERE id = ?",
 			),
 			pruneOutbox: this.db.prepare(
-				`DELETE FROM outbox WHERE owedAt <= ? AND (dueAt IS NULL
-					OR EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url))`,
+				`DELETE FROM outbox WHERE (dueAt IS NULL AND coalesce(parkedAt, owedAt) <= ?)
+					OR (owedAt <= ? AND EXISTS (SELECT 1 FROM delivered WHERE delivered.id = outbox.id AND delivered.url = outbox.url))`,
 			),
 			prunePaid: this.db.prepare(
 				`DELETE FROM paid WHERE settledAt <= ? AND id IN (
@@ -683,10 +688,17 @@ export class Ledger {
 			return "abandoned";
 		}
 
+		const now = unixNow();
 		const attempts = tried.attempts + 1;
-		const nextAt = unixNow() + this.deliveryBackoffSecs * attempts;
-		const abandoned = nextAt > this.retryUntil(owed.id, tried.owedAt);
-		this.statements.undelivered.run(attempts, abandoned ? null : nextAt, owed.origin, owed.seq);
+		const nextAt = now + this.deliveryBackoffSecs * attempts;
+		const abandoned = nextAt > (tried.retryUntil ?? this.retryUntil(owed.id, tried.owedAt));
+		this.statements.undelivered.run(
+			attempts,
+			abandoned ? null : nextAt,
+			abandoned ? now : null,
+			owed.origin,
+			owed.seq,
+		);
 
 		return abandoned ? "abandoned" : "scheduled";
 	}
@@ -857,12 +869,12 @@ export class Ledger {
 		this.statements.prune.run(now - graceSecs);
 		this.statements.pruneAccepted.run(now - graceSecs);
 		this.statements.pruneSettled.run(now - graceSecs);
-		this.statements.pruneOutbox.run(now - graceSecs);
+		this.statements.pruneOutbox.run(now - graceSecs, now - graceSecs);
 		this.statements.prunePaid.run(now - graceSecs);
 		this.statements.pruneDelivered.run(now - graceSecs);
 		this.statements.pruneRequests.run(now - REQUEST_TTL_SECS);
 
-		for (const missing of this.statements.unowed.all() as Missing[]) {
+		for (const missing of this.statements.unowed.all(now - UNOWED_SLACK_SECS) as Missing[]) {
 			this.owe(missing);
 		}
 
@@ -964,6 +976,7 @@ export class Ledger {
 		}
 
 		this.dropOutdatedRequestCache();
+		this.addLocalColumns();
 		this.db.exec(SCHEMA);
 		if (found !== SCHEMA_VERSION) {
 			this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -972,6 +985,20 @@ export class Ledger {
 
 	private schemaVersion(): number {
 		return (this.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+	}
+
+	private addLocalColumns(): void {
+		const missing = [
+			["paid", "heardAt"],
+			["outbox", "retryUntil"],
+			["outbox", "parkedAt"],
+		].filter(([table, column]) => {
+			const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+			return columns.length > 0 && !columns.some((one) => one.name === column);
+		});
+		for (const [table, column] of missing) {
+			this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} INTEGER`);
+		}
 	}
 
 	private dropOutdatedRequestCache(): void {
@@ -1020,6 +1047,7 @@ export class Ledger {
 			fact.payment,
 			fact.settledAt,
 			fact.mac,
+			unixNow(),
 		);
 		this.advance("paid", fact.origin);
 	}
@@ -1034,6 +1062,7 @@ export class Ledger {
 			fact.owedAt,
 			fact.mac,
 			dueAt,
+			this.retryUntil(fact.id, fact.owedAt),
 		);
 		this.advance("outbox", fact.origin);
 	}

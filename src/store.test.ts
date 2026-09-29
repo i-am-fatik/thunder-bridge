@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
 import { openStore, refusals } from "./testing.ts";
@@ -40,6 +40,15 @@ function payment(nth: number): UnsavedPayment {
 		caller: null,
 		webhooks: [{ url: HOOK }],
 	};
+}
+
+afterEach(() => {
+	vi.useRealTimers();
+});
+
+function at(unix: number): void {
+	vi.useFakeTimers({ toFake: ["Date"] });
+	vi.setSystemTime(unix * 1000);
 }
 
 test("a payment round trips and only the unsettled ones come back as work", () => {
@@ -255,6 +264,48 @@ test("a delivery is abandoned once its payment has no time left to retry in", ()
 	}
 });
 
+test("a webhook is retried until its invoice would have expired, after the sweep forgot the rest", () => {
+	const { store, stop } = openStore({ deliveryBackoffSecs: 3600 });
+	try {
+		const owedAt = unixNow();
+		at(owedAt);
+		const one = store.insert({ ...payment(4), expiresAt: owedAt + 86_400 });
+		store.paid(one.id, preimage(4));
+		const [owed] = store.dueDeliveries(10, 0);
+		expect(store.undelivered(owed!)).toBe("scheduled");
+
+		at(owedAt + 3700);
+		store.sweep(0, 7_776_000);
+		expect(store.info().rows.accepted).toBe(0);
+
+		expect(store.undelivered(owed!)).toBe("scheduled");
+	} finally {
+		stop();
+	}
+});
+
+test("a webhook given up on is counted as parked for an hour after it was given up on", () => {
+	const { store, stop } = openStore({ deliveryBackoffSecs: 7200 });
+	try {
+		const owedAt = unixNow();
+		at(owedAt);
+		const one = store.insert({ ...payment(5), expiresAt: owedAt + 60 });
+		store.paid(one.id, preimage(5));
+		const [owed] = store.dueDeliveries(10, 0);
+
+		at(owedAt + 7200);
+		expect(store.undelivered(owed!)).toBe("abandoned");
+		store.sweep(3600, 7_776_000);
+		expect(store.info().parked).toBe(1);
+
+		at(owedAt + 7200 + 3601);
+		store.sweep(3600, 7_776_000);
+		expect(store.info().parked).toBe(0);
+	} finally {
+		stop();
+	}
+});
+
 test("an idempotency key is held for one request at a time and released on the way out", () => {
 	const { store, stop } = openStore();
 	try {
@@ -326,17 +377,45 @@ test("a webhook only the other instance knew about is owed once the sweep notice
 	const two = openStore();
 	const theirs = "https://elsewhere.example/hook";
 	try {
+		const heard = unixNow();
+		at(heard);
 		const mine = one.store.insert(payment(0));
 		two.store.insert({ ...payment(0), webhooks: [{ url: theirs }] });
 		one.store.paid(mine.id, preimage(0));
 
 		two.store.gossip.onFacts(one.store.gossip.since(two.store.gossip.watermarks()).facts);
 		expect(two.store.get(mine.id)?.status).toBe("paid");
+		two.store.sweep(3600, 7_776_000);
 		expect(two.store.dueDeliveries(10, 30)).toEqual([]);
 
+		at(heard + 61);
 		two.store.sweep(3600, 7_776_000);
 
 		expect(two.store.dueDeliveries(10, 30).map((owed) => owed.url)).toEqual([theirs]);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a settlement heard late from a peer still waits its minute before a missing webhook is owed", () => {
+	const one = openStore();
+	const two = openStore();
+	const theirs = "https://elsewhere.example/hook";
+	try {
+		const settled = unixNow();
+		at(settled);
+		const mine = one.store.insert(payment(1));
+		two.store.insert({ ...payment(1), webhooks: [{ url: theirs }] });
+		one.store.paid(mine.id, preimage(1));
+
+		at(settled + 1800);
+		two.store.gossip.onFacts({
+			paid: one.store.gossip.since(two.store.gossip.watermarks()).facts.paid,
+		});
+		two.store.sweep(3600, 7_776_000);
+
+		expect(two.store.dueDeliveries(10, 30)).toEqual([]);
 	} finally {
 		one.stop();
 		two.stop();
@@ -561,6 +640,30 @@ test("the worklist a rollback used to read is gone, and the stamp says so", () =
 		expect(tables).toHaveLength(0);
 	} finally {
 		opened.close();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a ledger written before the outbox kept its own deadline is given the columns and keeps working", () => {
+	const directory = mkdtempSync(join(tmpdir(), "tbd-columns-"));
+	const ledgerPath = join(directory, "ledger.db");
+	openStore({ ledgerPath }).stop();
+
+	const written = new DatabaseSync(ledgerPath);
+	written.exec("ALTER TABLE paid DROP COLUMN heardAt");
+	written.exec("ALTER TABLE outbox DROP COLUMN retryUntil");
+	written.exec("ALTER TABLE outbox DROP COLUMN parkedAt");
+	written.close();
+
+	const { store, stop } = openStore({ ledgerPath });
+	try {
+		const one = store.insert(payment(0));
+		store.paid(one.id, preimage(0));
+		const [owed] = store.dueDeliveries(10, 0);
+
+		expect(store.undelivered(owed!)).toBe("scheduled");
+	} finally {
+		stop();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
