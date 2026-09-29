@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { type AddressInfo, createServer } from "node:net";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -14,6 +14,7 @@ export const CLUSTER_KEY = Buffer.from("09".repeat(32), "hex");
 
 const WAIT_TIMEOUT_MS = 20_000;
 const WAIT_POLL_MS = 25;
+const BELOW_EPHEMERAL_PORTS = { from: 20_000, to: 32_000 };
 
 export type Opened = {
 	store: Store;
@@ -69,13 +70,22 @@ export function refusals(absorbing: () => void): string[] {
 	}
 }
 
-export function freePort(): Promise<number> {
-	return new Promise((found) => {
+export async function freePort(): Promise<number> {
+	for (;;) {
+		const port =
+			BELOW_EPHEMERAL_PORTS.from +
+			Math.floor(Math.random() * (BELOW_EPHEMERAL_PORTS.to - BELOW_EPHEMERAL_PORTS.from));
+		if ((await bindable(port, "127.0.0.1")) && (await bindable(port, "::"))) {
+			return port;
+		}
+	}
+}
+
+function bindable(port: number, host: string): Promise<boolean> {
+	return new Promise((answer) => {
 		const probe = createServer();
-		probe.listen(0, "127.0.0.1", () => {
-			const { port } = probe.address() as AddressInfo;
-			probe.close(() => found(port));
-		});
+		probe.once("error", () => answer(false));
+		probe.listen(port, host, () => probe.close(() => answer(true)));
 	});
 }
 
