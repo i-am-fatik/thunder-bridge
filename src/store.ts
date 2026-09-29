@@ -47,8 +47,8 @@ export class Store {
 			self: this.ledger.origin,
 			key: this.key,
 			peers: new Map(),
-			onFacts: (facts) => {
-				for (const settled of this.ledger.absorb(facts)) {
+			onFacts: (facts, through) => {
+				for (const settled of this.ledger.absorb(facts, through)) {
 					this.onChange(asPayment(settled));
 				}
 				this.onScheduled();

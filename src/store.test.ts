@@ -376,6 +376,73 @@ test("the fact channel alone carries a payment to another instance", () => {
 	}
 });
 
+test("a fact pushed ahead of a gap does not stop the gap from being asked for", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const taken = [0, 1, 2].map((nth) => one.store.insert(payment(nth)));
+		const everything = one.store.gossip.since(two.store.gossip.watermarks()).facts;
+		two.store.gossip.onFacts({ accepted: everything.accepted?.slice(2) });
+
+		const { facts, through } = one.store.gossip.since(two.store.gossip.watermarks());
+		two.store.gossip.onFacts(facts, through);
+
+		expect(taken.map((mine) => two.store.get(mine.id)?.paymentHash)).toEqual(
+			taken.map((mine) => mine.paymentHash),
+		);
+		expect(one.store.gossip.since(two.store.gossip.watermarks()).facts.accepted).toEqual([]);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a settlement pushed ahead of a gap is announced once, not again by the catch-up", () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const taken = [0, 1, 2].map((nth) => one.store.insert(payment(nth)));
+		taken.forEach((mine, nth) => one.store.paid(mine.id, preimage(nth)));
+		const { facts } = one.store.gossip.since(two.store.gossip.watermarks());
+		const announced: string[] = [];
+		two.store.onChange = (changed) => void announced.push(changed.id);
+
+		two.store.gossip.onFacts({ accepted: facts.accepted, paid: facts.paid?.slice(2) });
+		const caughtUp = one.store.gossip.since(two.store.gossip.watermarks());
+		const pruned = caughtUp.facts.paid?.filter((fact) => fact.seq !== 2);
+		two.store.gossip.onFacts({ paid: pruned }, caughtUp.through);
+
+		expect(announced.sort()).toEqual([taken[0]?.id, taken[2]?.id].sort());
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a fact the origin already pruned leaves no hole for a relayed catch-up to stall on", () => {
+	const one = openStore();
+	const two = openStore();
+	const three = openStore();
+	try {
+		for (const nth of [0, 1, 2]) {
+			one.store.insert(payment(nth));
+		}
+		const { facts, through } = one.store.gossip.since(two.store.gossip.watermarks());
+		const pruned = (facts.accepted ?? []).filter((fact) => fact.seq !== 2);
+		two.store.gossip.onFacts({ accepted: pruned }, through);
+
+		const relayed = two.store.gossip.since(three.store.gossip.watermarks());
+		three.store.gossip.onFacts(relayed.facts, relayed.through);
+
+		expect(three.store.info().marks.accepted).toBe(3);
+		expect(two.store.gossip.since(three.store.gossip.watermarks()).facts.accepted).toEqual([]);
+	} finally {
+		one.stop();
+		two.stop();
+		three.stop();
+	}
+});
+
 test("a payment past the cap is still recorded and still offered to a peer", () => {
 	const one = openStore({ maxPending: 1 });
 	const two = openStore({ maxPending: 1 });

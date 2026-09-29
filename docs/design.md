@@ -27,7 +27,11 @@ four. `accepted` says this gateway took a payment on, and carries the invoice, t
 verify URL, the trigger and the webhooks. `paid` records a settlement, `outbox` a
 webhook owed, `delivered` the tombstone saying it landed. Facts are a grow-only
 set, so merging two instances is `INSERT OR IGNORE` and it does not matter what
-order rows arrive in or how many times.
+order rows arrive in or how many times. What an instance asks a peer for is set by
+a watermark per origin, and a watermark only covers a run with no hole in it: a
+fact pushed live ahead of a hole is kept without moving the mark, so the hole is
+asked for again, and a catch-up reply says how far it covered, so a fact every
+peer has already pruned is not waited for.
 
 Taking a payment on is a fact for the same reason settling it is: it happened, at
 one instance, and no later event can make it not have happened. What is not a fact

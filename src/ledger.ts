@@ -260,7 +260,7 @@ type Statements = {
 	watermarks: StatementSync;
 	watermark: StatementSync;
 	advance: StatementSync;
-	origins: Record<Source, StatementSync>;
+	held: Record<Source, StatementSync>;
 	nextSeq: Record<Source, StatementSync>;
 	since: Record<Source, StatementSync>;
 };
@@ -442,7 +442,9 @@ export class Ledger {
 			advance: this.db.prepare(
 				"INSERT INTO progress (source, origin, seq) VALUES (?, ?, ?) ON CONFLICT(source, origin) DO UPDATE SET seq = max(seq, excluded.seq)",
 			),
-			origins: bySource((source) => this.db.prepare(`SELECT DISTINCT origin FROM ${source}`)),
+			held: bySource((source) =>
+				this.db.prepare(`SELECT 1 AS held FROM ${source} WHERE origin = ? AND seq = ?`),
+			),
 			nextSeq: bySource((source) =>
 				this.db.prepare(`
 					SELECT max(
@@ -453,7 +455,7 @@ export class Ledger {
 			),
 			since: bySource((source) =>
 				this.db.prepare(
-					`SELECT ${COLUMNS[source]} FROM ${source} WHERE origin = ? AND seq > ? ORDER BY seq LIMIT ?`,
+					`SELECT ${COLUMNS[source]} FROM ${source} WHERE origin = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`,
 				),
 			),
 		};
@@ -747,19 +749,21 @@ export class Ledger {
 		return marks;
 	}
 
-	since(theirs: Watermarks): { facts: Facts; more: boolean } {
+	since(theirs: Watermarks): { facts: Facts; more: boolean; through: Watermarks } {
 		let more = false;
-		const gap = <T>(source: Source): T[] => {
+		const mine = this.watermarks();
+		const through = bySource<Record<string, number>>(() => ({}));
+		const gap = <T extends { seq: number }>(source: Source): T[] => {
 			const rows: T[] = [];
-			for (const { origin } of this.statements.origins[source].all() as { origin: string }[]) {
-				const batch = this.statements.since[source].all(
-					origin,
-					theirs[source]?.[origin] ?? 0,
-					GAP_BATCH,
-				) as T[];
-				if (batch.length === GAP_BATCH) {
-					more = true;
+			for (const [origin, held] of Object.entries(mine[source])) {
+				const seen = theirs[source]?.[origin] ?? 0;
+				if (held <= seen) {
+					continue;
 				}
+				const batch = this.statements.since[source].all(origin, seen, held, GAP_BATCH) as T[];
+				const cut = batch.length === GAP_BATCH;
+				more ||= cut;
+				through[source][origin] = cut ? (batch.at(-1)?.seq ?? seen) : held;
 				rows.push(...batch);
 			}
 			return rows;
@@ -773,10 +777,11 @@ export class Ledger {
 				delivered: gap<DeliveredFact>("delivered"),
 			},
 			more,
+			through,
 		};
 	}
 
-	absorb(facts: Facts): PublicPayment[] {
+	absorb(facts: Facts, through?: Watermarks): PublicPayment[] {
 		return this.transact(() => {
 			const settled: PublicPayment[] = [];
 
@@ -823,8 +828,23 @@ export class Ledger {
 				this.recordDelivered(fact);
 			}
 
+			if (through) {
+				this.cover(through);
+			}
+
 			return settled;
 		});
+	}
+
+	private cover(through: Watermarks): void {
+		for (const source of SOURCES) {
+			for (const [origin, seq] of Object.entries(through[source] ?? {})) {
+				if (origin !== this.origin && Number.isSafeInteger(seq)) {
+					this.statements.advance.run(source, origin, seq);
+					this.advance(source, origin);
+				}
+			}
+		}
 	}
 
 	/**
@@ -996,7 +1016,7 @@ export class Ledger {
 			fact.expiresAt,
 			fact.mac,
 		);
-		this.advance("accepted", fact);
+		this.advance("accepted", fact.origin);
 	}
 
 	private recordPaid(fact: PaidFact): void {
@@ -1008,7 +1028,7 @@ export class Ledger {
 			fact.settledAt,
 			fact.mac,
 		);
-		this.advance("paid", fact);
+		this.advance("paid", fact.origin);
 	}
 
 	private recordOutbox(fact: OutboxFact, dueAt: number): void {
@@ -1022,7 +1042,7 @@ export class Ledger {
 			fact.mac,
 			dueAt,
 		);
-		this.advance("outbox", fact);
+		this.advance("outbox", fact.origin);
 	}
 
 	private recordDelivered(fact: DeliveredFact): void {
@@ -1034,16 +1054,27 @@ export class Ledger {
 			fact.deliveredAt,
 			fact.mac,
 		);
-		this.advance("delivered", fact);
+		this.advance("delivered", fact.origin);
 	}
 
-	private advance(source: Source, fact: { origin: string; seq: number }): void {
-		this.statements.advance.run(source, fact.origin, fact.seq);
+	private advance(source: Source, origin: string): void {
+		let mark = this.markOf(source, origin);
+		while (this.statements.held[source].get(origin, mark + 1) !== undefined) {
+			mark += 1;
+		}
+		this.statements.advance.run(source, origin, mark);
 	}
 
 	private known(source: Source, fact: { origin: string; seq: number }): boolean {
-		const row = this.statements.watermark.get(source, fact.origin) as { seq: number } | undefined;
-		return fact.seq <= (row?.seq ?? 0);
+		return (
+			fact.seq <= this.markOf(source, fact.origin) ||
+			this.statements.held[source].get(fact.origin, fact.seq) !== undefined
+		);
+	}
+
+	private markOf(source: Source, origin: string): number {
+		const row = this.statements.watermark.get(source, origin) as { seq: number } | undefined;
+		return row?.seq ?? 0;
 	}
 
 	private sign(source: Source, fields: (string | number | null)[]): string {

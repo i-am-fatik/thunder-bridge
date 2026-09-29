@@ -7,16 +7,16 @@ import * as log from "./log.ts";
 
 const PROTOCOL = "thunder-cluster";
 
-export type Note = { have: Watermarks } | { facts: Facts; more: boolean };
+export type Note = { have: Watermarks } | { facts: Facts; more: boolean; through?: Watermarks };
 
 export type Gossip = {
 	self: string;
 	key: Uint8Array;
 	peers: Map<string, (note: Note) => void>;
-	onFacts: (facts: Facts) => void;
+	onFacts: (facts: Facts, through?: Watermarks) => void;
 	onConverged: () => void;
 	watermarks: () => Watermarks;
-	since: (theirs: Watermarks) => { facts: Facts; more: boolean };
+	since: (theirs: Watermarks) => { facts: Facts; more: boolean; through: Watermarks };
 };
 
 type Introduction = { self: string; proof: string };
@@ -75,13 +75,20 @@ function receive(gossip: Gossip, note: Note, reply: { send(note: Note): void }):
 	if ("have" in note) {
 		reply.send(gossip.since(note.have));
 	} else if ("facts" in note) {
-		gossip.onFacts(note.facts);
-		if (note.more) {
-			reply.send({ have: gossip.watermarks() });
-		} else {
+		const asked = reach(gossip.watermarks());
+		gossip.onFacts(note.facts, note.through);
+		if (!note.more) {
 			gossip.onConverged();
+		} else if (reach(gossip.watermarks()) > asked) {
+			reply.send({ have: gossip.watermarks() });
 		}
 	}
+}
+
+function reach(marks: Watermarks): number {
+	return Object.values(marks)
+		.flatMap((byOrigin) => Object.values(byOrigin))
+		.reduce((all, seq) => all + seq, 0);
 }
 
 function proofOf(key: Uint8Array, self: string): string {
