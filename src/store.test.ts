@@ -113,6 +113,7 @@ test("a lease taken for no time at all hands the same work straight back", () =>
 test("a worklist with nothing on it is due at no moment, so the watcher has nothing to wake for", () => {
 	const { store, stop } = openStore();
 	try {
+		at(unixNow());
 		expect(store.nextDueAt()).toBeNull();
 
 		const one = store.insert(payment(0));
@@ -128,6 +129,7 @@ test("a worklist with nothing on it is due at no moment, so the watcher has noth
 test("the watcher sleeps until the sooner of a poll and a webhook, not until whichever it looked at", () => {
 	const { store, stop } = openStore();
 	try {
+		at(unixNow());
 		const polling = store.insert(payment(0));
 		store.polled(polling.id, unixNow() + 600);
 		expect(store.nextDueAt()).toBe(unixNow() + 600);
