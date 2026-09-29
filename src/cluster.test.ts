@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { duplexPair } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 import SecretStream from "@hyperswarm/secret-stream";
 import c from "compact-encoding";
 import Protomux from "protomux";
@@ -248,6 +249,41 @@ test("a peer that sends a note nobody can read has its link torn down, so it is 
 
 		await until(() => toOne.destroyed, "the link to be torn down");
 		expect(one.store.info().peers).toBe(0);
+	} finally {
+		one.stop();
+		two.stop();
+	}
+});
+
+test("a link that closes after its replacement opened leaves the replacement talking", async () => {
+	const one = openStore();
+	const two = openStore();
+	try {
+		const [oldToOne, oldToTwo] = session();
+		attach(one.store.gossip, oldToOne);
+		attach(two.store.gossip, oldToTwo);
+		await until(
+			() => one.store.info().peers === 1 && two.store.info().peers === 1,
+			"the first link to shake hands",
+		);
+		const replaced = one.store.gossip.peers.get(two.store.info().origin);
+
+		const [newToOne, newToTwo] = session();
+		attach(one.store.gossip, newToOne);
+		attach(two.store.gossip, newToTwo);
+		await until(
+			() => one.store.gossip.peers.get(two.store.info().origin) !== replaced,
+			"the second link to shake hands",
+		);
+
+		oldToOne.destroy();
+		oldToTwo.destroy();
+		await until(() => oldToOne.destroyed && oldToTwo.destroyed, "the first link to close");
+		await sleep(50);
+
+		expect([one.store.info().peers, two.store.info().peers]).toEqual([1, 1]);
+		const mine = one.store.insert(payment(1));
+		await until(() => two.store.get(mine.id) !== null, "the payment to cross the new link");
 	} finally {
 		one.stop();
 		two.stop();

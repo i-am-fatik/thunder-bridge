@@ -34,6 +34,7 @@ export function resync(gossip: Gossip): void {
 
 export function attach(gossip: Gossip, stream: SecretStream): void {
 	let peer = "";
+	const send = (outgoing: Note) => note.send(outgoing);
 	const channel = Protomux.from(stream).createChannel({
 		protocol: PROTOCOL,
 		handshake: c.json,
@@ -44,11 +45,11 @@ export function attach(gossip: Gossip, stream: SecretStream): void {
 				return;
 			}
 			peer = them.self;
-			gossip.peers.set(peer, (outgoing) => note.send(outgoing));
+			gossip.peers.set(peer, send);
 			note.send({ have: gossip.watermarks() });
 		},
 		onclose: () => {
-			if (peer) {
+			if (gossip.peers.get(peer) === send) {
 				gossip.peers.delete(peer);
 			}
 		},
