@@ -18,7 +18,7 @@ const MAX_REFERENCE_CHARS = 60;
 export interface Credit {
   amountMinor: number;
   currency: string;
-  /** Whatever the payer wrote, wherever this bank puts it. Matching is a substring, so noise around it is fine */
+  /** Whatever the payer wrote, wherever this bank puts it. Matching is a whole word, so noise around it is fine */
   reference: string;
 
   /**
@@ -365,8 +365,28 @@ function pays(credit: Credit, asked: Asked): boolean {
   return (
     credit.amountMinor === asked.amountMinor &&
     credit.currency.toUpperCase() === asked.currency.toUpperCase() &&
-    credit.reference.toUpperCase().includes(asked.reference.toUpperCase())
+    namesOnly(credit.reference, asked.reference)
   );
+}
+
+function namesOnly(written: string, reference: string): boolean {
+  const wanted = reference.toUpperCase();
+  const alike = [...written.toUpperCase().matchAll(wordsShapedLike(wanted))].map(([word]) => word);
+
+  return alike.includes(wanted) && (!/\d/.test(wanted) || alike.every((word) => word === wanted));
+}
+
+function wordsShapedLike(reference: string): RegExp {
+  const shape = [...reference]
+    .map((char) => {
+      if (/\d/.test(char)) {
+        return "\\d";
+      }
+      return /\p{L}/u.test(char) ? "\\p{L}" : char.replace(/[\^$\\.*+?()[\]{}|/]/g, "\\$&");
+    })
+    .join("");
+
+  return new RegExp(`(?<![\\p{L}\\p{N}])${shape}(?![\\p{L}\\p{N}])`, "gu");
 }
 
 function subjectOf(iban: string, amountMinor: number, currency: string, reference: string): string {

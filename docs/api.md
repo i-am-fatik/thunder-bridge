@@ -1993,7 +1993,7 @@ The endpoint the gateway polls for a bank transfer, answering off your own state
 interface Credit {
   amountMinor: number;
   currency: string;
-  /** Whatever the payer wrote, wherever this bank puts it. Matching is a substring, so noise around it is fine */
+  /** Whatever the payer wrote, wherever this bank puts it. Matching is a whole word, so noise around it is fine */
   reference: string;
 
   /**

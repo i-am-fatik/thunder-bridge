@@ -77,6 +77,11 @@ verify query and its preimage both changed, and an in-flight transfer raised by
   `waitFor`, as one given a `token` already did. A gateway keeping `CLIENT_KEYS`
   now opens no socket without a ticket, and the trigger secret stops travelling in
   a socket URL whenever the client signs.
+- A bank verify endpoint found a reference anywhere inside what the payer wrote,
+  so reference `7` settled on `ORD-17`, and one transfer naming two orders at the
+  same price settled both. The reference is now looked for as a whole word, and a
+  credit that also names another reference shaped like it, such as a second order
+  number, pays neither.
 
 ## 1.5.0
 

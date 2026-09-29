@@ -363,6 +363,41 @@ describe("bankVerifyEndpoint", () => {
     expect(await wiped.json()).toEqual({ settled: false });
   });
 
+  it("finds a reference only as a whole word, so 7 is not found in ORD-17", async () => {
+    const transfer = await asked({ reference: "7" });
+    const inside = await verified(statementOf(credit({ reference: "ORD-17" })), transfer.verifyUrl);
+    const alone = await verified(statementOf(credit({ reference: "ORD 7" })), transfer.verifyUrl);
+
+    expect(await inside.json()).toEqual({ settled: false });
+    expect(await alone.json()).toEqual({ settled: true, preimage: expect.any(String) });
+
+    const longer = await asked({ reference: "ORD-17" });
+    const extended = await verified(statementOf(credit({ reference: "ORD-177" })), longer.verifyUrl);
+    expect(await extended.json()).toEqual({ settled: false });
+  });
+
+  it("pays nothing with one transfer that names two orders of one kind", async () => {
+    const transfer = await asked();
+    const both = await verified(
+      statementOf(credit({ reference: `${REFERENCE} ORDER-2026-78` })),
+      transfer.verifyUrl,
+    );
+    const twice = await verified(
+      statementOf(credit({ reference: `${REFERENCE} ${REFERENCE}` })),
+      transfer.verifyUrl,
+    );
+
+    expect(await both.json()).toEqual({ settled: false });
+    expect(await twice.json()).toEqual({ settled: true, preimage: expect.any(String) });
+  });
+
+  it("finds a reference with no digit in it among words of the same length", async () => {
+    const transfer = await asked({ reference: "ABC" });
+    const answer = await verified(statementOf(credit({ reference: "PAY ABC NOW" })), transfer.verifyUrl);
+
+    expect(await answer.json()).toEqual({ settled: true, preimage: expect.any(String) });
+  });
+
   it("refuses a question it did not seal, so it is no statement oracle", async () => {
     const answer = await verified(statementOf(credit()), `${MOUNT}?q=v1.AAAAAAAAAAAAAAAAAAAA`);
 
