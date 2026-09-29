@@ -1185,7 +1185,7 @@ function unconfirmedWebhook(url: string): Response {
 	return problem(424, {
 		type: WEBHOOK_UNCONFIRMED,
 		title: "The webhook did not answer the challenge",
-		detail: `${url} has to answer the challenge with the nonce it was given, signed with the secret registered alongside it, before this gateway will send anything to it`,
+		detail: `${url} has to answer the challenge with the nonce it was given before this gateway will send anything to it`,
 	});
 }
 

@@ -371,6 +371,10 @@ function readTrigger(value: unknown): string | null {
 	return value;
 }
 
+function carriesControlCharacters(text: string): boolean {
+	return [...text].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f);
+}
+
 function readWebhook(value: unknown): Webhook | null {
 	if (value === undefined || value === null) {
 		return null;
@@ -378,7 +382,7 @@ function readWebhook(value: unknown): Webhook | null {
 
 	const hook = asObject(value, "webhook must be an object");
 	const url = hook["url"];
-	if (typeof url !== "string" || !publicHttps(url)) {
+	if (typeof url !== "string" || carriesControlCharacters(url) || !publicHttps(url)) {
 		throw new MalformedRequest("webhook.url must be a public https URL");
 	}
 

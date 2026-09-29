@@ -106,6 +106,12 @@ test("a webhook arrives nested, and a private url never does", () => {
 	);
 });
 
+test("a webhook url carrying a control character is refused, since the parser would fetch another one", () => {
+	for (const url of ["https://example.com/ho\u0000ok", "https://example.com/ho\nok"]) {
+		expect(refusal(asked({ webhook: { url } }))).toContain("webhook.url");
+	}
+});
+
 test("an empty or oversized address list is refused", () => {
 	expect(refusal(asked({ ln_addresses: [] }))).toContain("non-empty");
 	expect(refusal(asked({ ln_addresses: "charter@coinos.io" }))).toContain("non-empty");
