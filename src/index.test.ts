@@ -1599,6 +1599,28 @@ test("a draining instance turns readiness down and waits for the tick in flight"
 	}
 });
 
+test("a tick stuck in flight past what any poll can take is reported stalled, not live", async () => {
+	let asked = 0;
+	const app = await runningWith({ tickStallMs: 100, drainTimeoutMs: 100 });
+	app.outbound.send = () => {
+		asked += 1;
+		return new Promise(() => {});
+	};
+	try {
+		app.store.insert(pendingPayment());
+		await until(() => asked > 0, "the watcher to reach the wallet");
+		expect((await fetch(`http://127.0.0.1:${app.service.at}/health`)).status).toBe(200);
+
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(Date.now() + 61_000);
+
+		expect((await fetch(`http://127.0.0.1:${app.service.at}/health`)).status).toBe(503);
+	} finally {
+		vi.useRealTimers();
+		app.stop();
+	}
+});
+
 test("an idle instance sleeps instead of ticking, and stays live for as long as it sleeps", async () => {
 	const app = await runningWith({ tickStallMs: 100 });
 	try {

@@ -449,6 +449,24 @@ test("an endpoint that asks for a pace is polled at it, and one that does not ke
 	expect(parked[1]?.dueAt).toBe(unixNow() + 60);
 });
 
+test("a host that asks to be left alone is put off rather than waited on, so the tick moves on", async () => {
+	const wire = intercepting(() => verified(false));
+	const { parked, watcher } = queueing(
+		wire.send,
+		[payment(), payment({ id: "bb".repeat(32) }), payment({ id: "cc".repeat(32) })],
+		settlesAs(true),
+	);
+	watcher.budget.ceiling.set("coinos.io", 0.01);
+
+	const started = Date.now();
+	await tick(watcher);
+
+	expect(Date.now() - started).toBeLessThan(2000);
+	expect(wire.calls).toHaveLength(1);
+	const putOff = parked.filter((one) => one.id !== "aa".repeat(32));
+	expect(putOff.map((one) => one.dueAt! >= unixNow() + 99)).toEqual([true, true]);
+});
+
 test("an endpoint that names its own ceiling is spaced by that, not by the operator's number", async () => {
 	const wire = intercepting(() =>
 		Response.json(

@@ -71,6 +71,7 @@ const OPEN = {
 };
 const PING_INTERVAL_MS = 30_000;
 const LONGEST_SLEEP_MS = 60_000;
+const LONGEST_TICK_MS = 60_000;
 const SWEEP_INTERVAL_MS = 60_000;
 const EXPIRED_GRACE_SECS = 3600;
 const CLAIM_LEASE_SECS = RESOLVE_TIMEOUT_MS / 1000 + 10;
@@ -212,12 +213,12 @@ export async function start(
 	let draining = false;
 	let ticking = false;
 	let tickDueAt = Date.now();
-	const vitals = (): Vitals =>
-		draining
-			? "draining"
-			: !ticking && Date.now() - tickDueAt > tickStallMs
-				? "stalled"
-				: "serving";
+	let tickStartedAt = Date.now();
+	const stalled = (): boolean =>
+		ticking
+			? Date.now() - tickStartedAt > tickStallMs + LONGEST_TICK_MS
+			: Date.now() - tickDueAt > tickStallMs;
+	const vitals = (): Vitals => (draining ? "draining" : stalled() ? "stalled" : "serving");
 
 	const followers = new Map<WebSocket, Follower>();
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
@@ -342,6 +343,7 @@ export async function start(
 
 	const runTick = () => {
 		ticking = true;
+		tickStartedAt = Date.now();
 		inFlight = tick(watcher)
 			.catch((error: unknown) => log.warn(`tick failed: ${String(error)}`))
 			.finally(() => {

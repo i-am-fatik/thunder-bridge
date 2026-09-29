@@ -13,6 +13,7 @@ import type { Store } from "./store.ts";
 const EAGER_WINDOW_SECS = 300;
 const STALENESS = 0.1;
 const LEASE_SECS = 30;
+const LONGEST_WAIT_MS = 5_000;
 const NONCE_BYTES = 32;
 
 export const CHALLENGE = "webhook-challenge";
@@ -60,7 +61,10 @@ async function pollDue(watcher: Watcher): Promise<void> {
 async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 	const agent = agentAddressed(payment.verifyUrl);
 	const host = agent ?? hostOf(payment.verifyUrl);
-	await spend(watcher.budget, host);
+	if (!(await spend(watcher.budget, host))) {
+		watcher.store.polled(payment.id, turnOf(watcher.budget, host));
+		return;
+	}
 
 	const settlement = await answerFor(watcher, payment, agent).catch((error: unknown) => {
 		log.warn(`verify poll for ${payment.id} failed: ${String(error)}`);
@@ -216,11 +220,20 @@ export function nextDue(
 	return Math.min(now + Math.ceil(pollDelayMs(waited, eagerMs, askedMs) / 1000), payment.expiresAt);
 }
 
-export async function spend(budget: Budget, host: string): Promise<void> {
+export async function spend(budget: Budget, host: string): Promise<boolean> {
 	const now = Date.now();
 	const slot = Math.max(now, budget.nextAt.get(host) ?? 0);
+	if (slot - now > LONGEST_WAIT_MS) {
+		return false;
+	}
 	budget.nextAt.set(host, slot + 1000 / (budget.ceiling.get(host) ?? budget.perSecond));
 	await sleep(slot - now);
+
+	return true;
+}
+
+function turnOf(budget: Budget, host: string): number {
+	return Math.ceil((budget.nextAt.get(host) ?? Date.now()) / 1000);
 }
 
 function hostOf(url: string): string {
