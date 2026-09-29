@@ -65,11 +65,11 @@ export function lightningVerifyEndpoint(
     }
 
     const opened = await unseal(config.secret, sealed);
-    if (opened === null) {
+    const wallet = opened === null ? null : relayedFrom(opened);
+    if (wallet === null) {
       return Response.json({ settled: false }, { status: 403 });
     }
 
-    const wallet = JSON.parse(opened) as Relayed;
     const asked = await checkSettled(
       config.send ?? pinnedToTheAddressWeVerified,
       wallet.url,
@@ -84,6 +84,18 @@ export function lightningVerifyEndpoint(
       { headers: paced },
     );
   };
+}
+
+function relayedFrom(opened: string): Relayed | null {
+  try {
+    const said = JSON.parse(opened) as Partial<Record<keyof Relayed, unknown>> | null;
+
+    return typeof said?.url === "string" && typeof said.hash === "string"
+      ? { url: said.url, hash: said.hash }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

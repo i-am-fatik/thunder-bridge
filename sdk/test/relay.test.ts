@@ -2,6 +2,7 @@ import { throughFetch } from "./harness";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkSettled } from "../../core/lnurl.js";
+import { seal } from "../../core/sealed.js";
 import { lightningVerifyEndpoint, relayedVerifyUrl } from "../src/relay";
 
 vi.mock("node:dns/promises", () => ({
@@ -98,6 +99,15 @@ describe("lightningVerifyEndpoint", () => {
     const answer = await lightningVerifyEndpoint({ secret: SECRET, send: throughFetch })(new Request(await relayed()));
 
     expect(answer.status).toBe(502);
+  });
+
+  it("refuses a blob it can open that names no wallet, rather than throwing on it", async () => {
+    const handler = lightningVerifyEndpoint({ secret: SECRET, send: throughFetch });
+    for (const opened of ["CZ6508000000192000145399|48055|CZK|1900000000|ORD-1", "[]", '{"url":7}']) {
+      const answer = await handler(new Request(`${MOUNT}?w=${await seal(SECRET, opened)}`));
+
+      expect(answer.status).toBe(403);
+    }
   });
 
   it("refuses a request carrying no sealed wallet at all", async () => {
