@@ -10,6 +10,7 @@ export interface InvoiceFields {
   description?: string;
   expirySecs?: number;
   network?: string;
+  hrpAmount?: string;
 }
 
 /**
@@ -17,7 +18,7 @@ export interface InvoiceFields {
  * nothing in this package recovers a payee from it
  */
 export function bolt11(fields: InvoiceFields): string {
-  const hrp = `ln${fields.network ?? "bc"}${amountUnits(fields.amountMsat)}`;
+  const hrp = `ln${fields.network ?? "bc"}${fields.hrpAmount ?? amountUnits(fields.amountMsat)}`;
   const descriptionWords = fields.description
     ? bytesToWords(new TextEncoder().encode(fields.description))
     : [];
@@ -90,6 +91,15 @@ function checksum(hrp: string, data: number[]): number[] {
   }
   const mod = check ^ 1;
   return Array.from({ length: 6 }, (_, i) => (mod >>> (5 * (5 - i))) & 31);
+}
+
+export function truncated(invoice: string, keptWords: number): string {
+  const separator = invoice.lastIndexOf("1");
+  const hrp = invoice.slice(0, separator);
+  const data = [...invoice.slice(separator + 1, -6)]
+    .map((char) => CHARSET.indexOf(char))
+    .slice(0, keptWords);
+  return `${hrp}1${toChars([...data, ...checksum(hrp, data)])}`;
 }
 
 function toChars(words: number[]): string {

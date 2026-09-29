@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeInvoice } from "../../core/bolt11.js";
-import { bolt11 } from "./encode";
+import { bolt11, truncated } from "./encode";
 
 const PAYMENT_HASH = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 const DESCRIPTION_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -103,13 +103,14 @@ describe("decodeInvoice", () => {
       descriptionHash: DESCRIPTION_HASH,
       amountMsat: AMOUNT_MSAT,
     });
-    expect(decodeInvoice(invoice.slice(0, -1))).toEqual({
+    const dataWords = invoice.length - invoice.lastIndexOf("1") - 1 - 6;
+    expect(decodeInvoice(truncated(invoice, dataWords - 1))).toEqual({
       paymentHash: PAYMENT_HASH,
       descriptionHash: null,
       amountMsat: AMOUNT_MSAT,
       expiresAt: EXPIRES_AT,
     });
-    expect(decodeInvoice(invoice.slice(0, invoice.length >> 1))).toEqual({
+    expect(decodeInvoice(truncated(invoice, dataWords >> 1))).toEqual({
       paymentHash: null,
       descriptionHash: null,
       amountMsat: AMOUNT_MSAT,

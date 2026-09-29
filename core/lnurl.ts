@@ -1,12 +1,16 @@
-import { decodeInvoice, preimageMatchesHash } from "./bolt11.ts";
+import {
+	BECH32_CHARSET,
+	bech32Polymod,
+	decodeInvoice,
+	expandedHrp,
+	preimageMatchesHash,
+} from "./bolt11.ts";
 import { ask, BODY_LIMIT_BYTES, type Send, type Sent } from "./outbound.ts";
 import { NoWalletAvailable, type WalletFailure, WalletRefused } from "./refusal.ts";
 import { sha256Hex } from "./sha256.ts";
 import { publicHttps } from "./url.ts";
 
 export const VERIFY_WITHOUT_PREIMAGE = ["zeuspay.com", "zeusnuts.com", "ecash.love"];
-const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-const BECH32_GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 const CHECKSUM_SLOTS = [0, 1, 2, 3, 4, 5];
 const LNURL_HRP = "lnurl";
 
@@ -319,33 +323,10 @@ function toWords(bytes: Uint8Array): number[] {
 }
 
 function checksumWords(hrp: string, words: number[]): number[] {
-	const expanded = [...hrp].map((char) => char.charCodeAt(0));
-	const values = [
-		...expanded.map((code) => code >> 5),
-		0,
-		...expanded.map((code) => code & 31),
-		...words,
-		...CHECKSUM_SLOTS.map(() => 0),
-	];
+	const values = [...expandedHrp(hrp), ...words, ...CHECKSUM_SLOTS.map(() => 0)];
 	const polymod = bech32Polymod(values) ^ 1;
 
 	return CHECKSUM_SLOTS.map((slot) => (polymod >> (5 * (5 - slot))) & 31);
-}
-
-function bech32Polymod(values: number[]): number {
-	let checksum = 1;
-
-	for (const value of values) {
-		const top = checksum >> 25;
-		checksum = ((checksum & 0x1ffffff) << 5) ^ value;
-		for (let bit = 0; bit < 5; bit++) {
-			if ((top >> bit) & 1) {
-				checksum ^= BECH32_GENERATOR[bit]!;
-			}
-		}
-	}
-
-	return checksum;
 }
 
 function withAmount(callback: string, amountMsat: number): string {

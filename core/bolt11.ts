@@ -1,7 +1,8 @@
 import { bytesToHex, hexToBytes, isHex } from "./bytes.ts";
 import { sha256 } from "./sha256.ts";
 
-const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+export const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+const BECH32_GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 const CHECKSUM_WORDS = 6;
 const TIMESTAMP_WORDS = 7;
 const SIGNATURE_WORDS = 104;
@@ -21,7 +22,7 @@ const HRP_MULTIPLIER_MSAT: Record<string, number> = {
 	p: MSAT_PER_BTC / 1_000_000_000_000,
 };
 
-const HRP_AMOUNT = /^ln[a-z]+?(\d+)([munp]?)$/;
+const HRP = /^ln(?:bcrt|bc|tbs|tb|sb)(?:(\d+)([munp]?))?$/;
 
 /** What a BOLT11 invoice says about itself, every field null when it does not carry one */
 export interface Invoice {
@@ -67,7 +68,7 @@ interface Bech32Parts {
 
 function splitBech32(bolt11: string): Bech32Parts | null {
 	const lower = bolt11.toLowerCase();
-	if (isBolt12Encoding(lower)) {
+	if (isBolt12Encoding(lower) || (bolt11 !== lower && bolt11 !== bolt11.toUpperCase())) {
 		return null;
 	}
 
@@ -90,7 +91,34 @@ function splitBech32(bolt11: string): Bech32Parts | null {
 		words.push(value);
 	}
 
-	return { hrp: lower.slice(0, separator), words: words.slice(0, -CHECKSUM_WORDS) };
+	const hrp = lower.slice(0, separator);
+	if (!HRP.test(hrp) || bech32Polymod([...expandedHrp(hrp), ...words]) !== 1) {
+		return null;
+	}
+
+	return { hrp, words: words.slice(0, -CHECKSUM_WORDS) };
+}
+
+export function expandedHrp(hrp: string): number[] {
+	const codes = [...hrp].map((char) => char.charCodeAt(0));
+
+	return [...codes.map((code) => code >> 5), 0, ...codes.map((code) => code & 31)];
+}
+
+export function bech32Polymod(values: number[]): number {
+	let checksum = 1;
+
+	for (const value of values) {
+		const top = checksum >> 25;
+		checksum = ((checksum & 0x1ffffff) << 5) ^ value;
+		for (let bit = 0; bit < 5; bit++) {
+			if ((top >> bit) & 1) {
+				checksum ^= BECH32_GENERATOR[bit]!;
+			}
+		}
+	}
+
+	return checksum;
 }
 
 function isBolt12Encoding(lower: string): boolean {
@@ -143,12 +171,10 @@ function expiryOf(words: number[], fields: TaggedFields): number | null {
 }
 
 function amountFromHrp(hrp: string): number | null {
-	const match = HRP_AMOUNT.exec(hrp);
-	if (match === null) {
+	const [, digits, multiplier] = HRP.exec(hrp) ?? [];
+	if (digits === undefined || (multiplier === "p" && !digits.endsWith("0"))) {
 		return null;
 	}
-
-	const [, digits, multiplier] = match;
 
 	return multiplier
 		? Number(digits) * HRP_MULTIPLIER_MSAT[multiplier]!

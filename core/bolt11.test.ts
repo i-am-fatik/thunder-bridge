@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 
+import { bolt11 } from "../sdk/test/encode.ts";
 import { decodeInvoice, preimageMatchesHash } from "./bolt11.ts";
 
 const SPEC_25M =
@@ -79,4 +80,35 @@ test("a preimage proves only the hash it hashes to", () => {
 	expect(preimageMatchesHash("01".repeat(32), ZERO_PREIMAGE_HASH)).toBe(false);
 	expect(preimageMatchesHash("nothex", ZERO_PREIMAGE_HASH)).toBe(false);
 	expect(preimageMatchesHash("", ZERO_PREIMAGE_HASH)).toBe(false);
+});
+
+const NOTHING = { paymentHash: null, descriptionHash: null, amountMsat: null, expiresAt: null };
+
+test("one character changed anywhere fails the checksum, so the invoice says nothing", () => {
+	const at = SPEC_25M.indexOf("pp5") + 10;
+	const flipped = `${SPEC_25M.slice(0, at)}${SPEC_25M[at] === "q" ? "p" : "q"}${SPEC_25M.slice(at + 1)}`;
+
+	expect(decodeInvoice(flipped)).toEqual(NOTHING);
+});
+
+test("an invoice in one case decodes and one in mixed case does not", () => {
+	expect(decodeInvoice(SPEC_25M.toUpperCase()).paymentHash).toBe(
+		decodeInvoice(SPEC_25M).paymentHash,
+	);
+	expect(decodeInvoice(`LNBC${SPEC_25M.slice(4)}`)).toEqual(NOTHING);
+});
+
+test("a prefix that names no lightning network is not an invoice", () => {
+	const hash = "ab".repeat(32);
+	for (const network of ["bc", "tb", "tbs", "bcrt", "sb"]) {
+		expect(decodeInvoice(bolt11({ paymentHash: hash, network })).paymentHash).toBe(hash);
+	}
+	expect(decodeInvoice(bolt11({ paymentHash: hash, network: "zz" }))).toEqual(NOTHING);
+});
+
+test("a pico amount that is not a whole millisatoshi carries no amount", () => {
+	const hash = "ab".repeat(32);
+
+	expect(decodeInvoice(bolt11({ paymentHash: hash, hrpAmount: "10p" })).amountMsat).toBe(1);
+	expect(decodeInvoice(bolt11({ paymentHash: hash, hrpAmount: "15p" })).amountMsat).toBeNull();
 });
