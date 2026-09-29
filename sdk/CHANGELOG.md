@@ -13,13 +13,16 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
-## 2.0.0
+## 2.1.1
+
+The first 2.x on npm. 2.0.0 and 2.1.0 were tagged with the gateway and never
+published, so everything since 1.5.0 is listed here.
 
 A bank transfer answers over a socket, and a watch stops naming the order. The
 gateway learned one new subject and one new address shape and kept everything else,
 so a 1.5.0 client talks to a 2.0.0 gateway unchanged. The bank rail did not: its
 verify query and its preimage both changed, and an in-flight transfer raised by
-1.5.0 cannot be settled by a 2.0.0 endpoint.
+1.5.0 cannot be settled by a 2.1.1 endpoint.
 
 ### Added
 
