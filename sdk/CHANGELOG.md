@@ -13,6 +13,20 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 3.0.1
+
+### Fixed
+
+- A browser bundler builds a page that imports `thunder-bridge`. The built client
+  imported `net`, `dns/promises` and `timers/promises` with the `node:` prefix
+  stripped, so Turbopack and webpack failed to resolve them in a client component, as
+  they had since 2.2.0. Those imports keep their prefix now and carry
+  `webpackIgnore`, because only `invoiceFrom` and the verify endpoints reach them, on
+  a server.
+- The README says that `invoiceFrom`, `serve.lightningVerify` and `rails.lightning`
+  without `gatewayMints` need Node: Deno's `node:https` cannot pin a connection to the
+  address the guard checked.
+
 ## 3.0.0
 
 ### Changed
