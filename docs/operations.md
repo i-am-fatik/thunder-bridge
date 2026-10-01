@@ -255,7 +255,8 @@ ticket from `POST /ws-tickets`, which only the payment's owner can mint.
 
 ## Webhook signatures
 
-A delivery is signed `ed25519=<signature>` with a key derived from `CLUSTER_KEY`.
+A delivery is signed as an RFC 9421 HTTP message signature with an Ed25519 key derived
+from `CLUSTER_KEY`, so a client in any language verifies it with an RFC 9421 library.
 Clients fetch the public half from `/webhook-key`, which answers without a bearer. Every
 instance in one cluster publishes the same key, so a delivery from any of them verifies.
 The full check is in [Webhooks in full](proving-a-payment.md#webhooks-in-full).

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deliverySigned } from "../../core/delivery.js";
 import { type SigningKey, signingKeyFromSeed } from "../../core/ed25519.js";
+import { GATEWAY_SIGNS, signedBy } from "../../core/signature.js";
 import { ThunderBridge } from "../src/client";
 import { ProblemError } from "../src/errors";
 import type { Settlement } from "../src/types";
@@ -45,16 +45,11 @@ async function delivered(
   key: Promise<SigningKey> = KEY,
   arrivingAt = HOOK,
 ): Promise<Request> {
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signing = await key;
-  const signature = await signing.sign(deliverySigned(HOOK, timestamp, body));
-
   return new Request(arrivingAt, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-signature-v2": `ed25519=${signature}`,
-      "x-timestamp": timestamp,
+      ...(await signedBy(await key, GATEWAY_SIGNS, { method: "POST", url: HOOK }, body)),
     },
     body,
   });

@@ -2269,7 +2269,7 @@ describe("a client that names itself", () => {
     await new ThunderBridge(GATEWAY, { secret: SECRET }).payments(10);
 
     const headers = headersOf(calls[0]);
-    for (const name of ["x-client-key", "x-signature", "x-timestamp", "authorization"]) {
+    for (const name of ["content-digest", "signature-input", "signature", "authorization"]) {
       expect(headers.get(name) ?? "").not.toContain(SECRET);
     }
   });
@@ -2282,8 +2282,8 @@ describe("a client that names itself", () => {
 
     await new ThunderBridge(GATEWAY).payments(10);
 
-    expect(headersOf(calls[0]).get("x-signature")).toBeNull();
-    expect(headersOf(calls[0]).get("x-client-key")).toBeNull();
+    expect(headersOf(calls[0]).get("signature")).toBeNull();
+    expect(headersOf(calls[0]).get("signature-input")).toBeNull();
   });
 });
 

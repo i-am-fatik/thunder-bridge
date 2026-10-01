@@ -1,13 +1,8 @@
-import { deliverySigned } from "../../core/delivery.js";
-import { verifyHex } from "../../core/ed25519.js";
+import { GATEWAY_SIGNS, signerOf } from "../../core/signature.js";
 import type { Payment, Settlement } from "./types.js";
 import { agreesWithItself } from "./verify.js";
 import { paymentFromWire, settlementFromWire } from "./wire.js";
 
-const SIGNATURE_HEADER = "x-signature-v2";
-const TIMESTAMP_HEADER = "x-timestamp";
-const GATEWAY_KEY_PREFIX = "ed25519=";
-export const DEFAULT_TOLERANCE_SECS = 300;
 const CHALLENGE = "webhook-challenge";
 const VERIFY_CHALLENGE = "verify-challenge";
 
@@ -104,26 +99,15 @@ async function believable(
   credential: WebhookCredential,
   options: WebhookOptions,
 ): Promise<string | null> {
-  const signature = request.headers.get(SIGNATURE_HEADER);
-  const timestamp = request.headers.get(TIMESTAMP_HEADER);
-  if (signature === null || timestamp === null) {
-    return null;
-  }
-  if (!recent(timestamp, options.toleranceSecs ?? DEFAULT_TOLERANCE_SECS)) {
-    return null;
-  }
-  if (!signature.startsWith(GATEWAY_KEY_PREFIX)) {
-    return null;
-  }
-
   const body = await request.clone().text();
-  const signed = await verifyHex(
-    credential.publicKey.toLowerCase(),
-    signature.slice(GATEWAY_KEY_PREFIX.length).toLowerCase(),
-    deliverySigned(options.url ?? request.url, timestamp, body),
+  const signer = await signerOf(
+    { method: request.method, url: options.url ?? request.url, headers: request.headers },
+    body,
+    GATEWAY_SIGNS,
+    options.toleranceSecs,
   );
 
-  return signed ? body : null;
+  return signer !== null && signer.keyid === credential.publicKey.toLowerCase() ? body : null;
 }
 
 function proved<T extends Payment | Settlement>(read: T | null): T | null {
@@ -155,13 +139,4 @@ function nonceOf(text: string, type: string): string | null {
   } catch {
     return null;
   }
-}
-
-function recent(timestamp: string, toleranceSecs: number): boolean {
-  const sent = Number(timestamp);
-  if (!Number.isFinite(sent)) {
-    return false;
-  }
-
-  return Math.abs(Math.floor(Date.now() / 1000) - sent) <= toleranceSecs;
 }

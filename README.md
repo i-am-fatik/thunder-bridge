@@ -94,10 +94,10 @@ codes, and every refusal reason. Every instance serves it and renders it at `/do
 without a bearer even on a gated instance.
 
 - **Webhooks.** Pass a `webhook` object when creating a payment, and the settlement
-  is POSTed to your URL. It is signed with the key at `/webhook-key` and retried from
-  an outbox that survives a restart. Delivery is at-least-once, so deduplicate on
-  `id`. The URL must answer a challenge before the payment is accepted, which the
-  client's `serve.webhook` does.
+  is POSTed to your URL. It is signed as an RFC 9421 message signature with the key
+  at `/webhook-key`, and retried from an outbox that survives a restart. Delivery is
+  at-least-once, so deduplicate on `id`. The URL must answer a challenge before the
+  payment is accepted, which the client's `serve.webhook` does.
 - **Watching.** A `verify_url` handed to `POST /watched-payments` must answer in the
   LUD-21 shape, and then echo a challenge unless `VERIFY_CHALLENGE=0`, before
   anything is watched. The client's `serve.lightningVerify`, `serve.bankVerify` and
@@ -178,12 +178,12 @@ invoice of their own.
 - **A quota is fairness, not a defence.** `MAX_PENDING` counts per signing key, and
   a new key is free to make. `CLIENT_KEYS` is the defence where the clients are
   known. An instance open to strangers still wants a rate limiter in front of it.
-- **Sign, or share with everyone unsigned.** A signature names the gateway it was
-  made for, and its nonce is spent once across the cluster. A caller that signs
-  nothing gets a payment any holder of the id can read. It shares one quota with
-  every other unsigned caller and has an `Idempotency-Key` anybody can guess. A
-  client older than 2.2.0 signs neither the gateway nor a nonce, so its signature
-  can be replayed within five minutes of its timestamp.
+- **Sign, or share with everyone unsigned.** A request is signed as an RFC 9421
+  message signature, as the top of [`openapi.yaml`](openapi.yaml) spells out. It
+  names the gateway it was made for, and its nonce is spent once across the cluster.
+  A caller that signs nothing gets a payment any holder of the id can read. It shares
+  one quota with every other unsigned caller and has an `Idempotency-Key` anybody can
+  guess. A request signed the way 2.x clients sign counts as unsigned.
 
 ## More
 

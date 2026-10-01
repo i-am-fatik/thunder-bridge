@@ -26,6 +26,23 @@ info:
     server, because an API that holds no funds and opens no accounts has nothing to grant
     access to.
 
+    Signatures are RFC 9421 HTTP message signatures with `alg="ed25519"`, carried in
+    `Signature-Input` and `Signature` under the label `thunder-bridge`, over an RFC 9530
+    `Content-Digest` of the content with `sha-256`. A verifier picks the signature by its
+    `tag`, requires every component below, and refuses a `created` more than five minutes
+    from its clock.
+
+    | Signer | `tag` | Covered components | Parameters |
+    |---|---|---|---|
+    | a client signing a request | `thunder-bridge-client` | `"@method" "@authority" "@path" "@query" "content-digest"` | `created`, `nonce` (32 hex), `keyid` (the client's public key, hex), `alg`, `tag` |
+    | this gateway signing a delivery or a challenge | `thunder-bridge-gateway` | `"@method" "@scheme" "@authority" "@path" "content-digest"` | `created`, `nonce`, `keyid` (the key at `/webhook-key`), `alg`, `tag` |
+
+    `@authority` on a request is this gateway as it knows itself, from `PUBLIC_HOSTS` or
+    the `Host` header. A nonce is spent once across the cluster. A request whose signature
+    does not hold is anonymous rather than refused, unless the instance keeps
+    `CLIENT_KEYS`. A delivery binds the receiver's origin and path but not its query,
+    which proxies rewrite.
+
 servers:
   - url: https://public.thunder-bridge.agora.gripe
     description: The public demo, no token, ledger wiped whenever
@@ -200,11 +217,9 @@ paths:
         instance in one cluster publishes the same one and a delivery from any of them
         verifies against it. It changes only if that key changes.
 
-        Fetch it once and keep it. Every delivery and every challenge arrives as
-        `x-signature-v2: ed25519=<signature>` over four lines joined by a newline: `v2`, the
-        origin and path of the URL it was sent to, `<x-timestamp>` and the raw body. It also
-        carries `x-signature` over `<x-timestamp>.<raw body>` for clients older than 2.2.0.
-        This is the key that checks both. Because the key is derived from `CLUSTER_KEY`, a rotation
+        Fetch it once and keep it. Every delivery and every challenge carries an RFC 9421
+        signature with `tag="thunder-bridge-gateway"` and this key, hex, as its `keyid`, as
+        the signatures section at the top describes. Because the key is derived from `CLUSTER_KEY`, a rotation
         invalidates it for every receiver at once, so treat a signature that stops verifying
         as a reason to read this again before treating it as a gateway misbehaving.
       responses:
@@ -457,8 +472,8 @@ paths:
         nothing about whether it wanted this gateway's traffic. So the last hop belongs on your
         side: hand over your own endpoint, which asks the wallet, and an abuser's own host is
         then the one a wallet throttles rather than this instance's address, which every other
-        client here shares. `bankVerifyEndpoint` and `lightningVerifyEndpoint` answer the
-        challenge for you. A verify URL this gateway found itself when minting is never
+        client here shares. `serve.lightningVerify`, `serve.bankVerify` and `serve.nwcVerify`
+        answer the challenge for you. A verify URL this gateway found itself when minting is never
         challenged, because there the caller named nothing.
 
         That first answer is also where the endpoint sets its own pace: a
@@ -726,39 +741,13 @@ webhooks:
         there first, so a duplicate is normal and the receiver must be idempotent.
 
         Verify before you act. The SDK's `serve.webhook` refuses a body whose signature,
-        timestamp or URL does not hold up and one claiming paid whose preimage does not hash
+        creation time, digest or URL does not hold up and one claiming paid whose preimage does not hash
         to the payment hash it names, so it calls you only for a settlement that proves
         itself. The credential is the key from `/webhook-key`.
       parameters:
-        - name: x-timestamp
-          in: header
-          required: true
-          description: |
-            Unix seconds at the moment the body was signed. It is inside the signed payload,
-            so refusing anything older than your tolerance, five minutes in the SDK, is what
-            stops a captured delivery being replayed later.
-          schema:
-            type: string
-        - name: x-signature-v2
-          in: header
-          required: true
-          description: |
-            `ed25519=<signature>` over `v2`, the origin and path of the URL this was sent to,
-            `<x-timestamp>` and the raw body, one per line, signed with the key this gateway
-            publishes at `/webhook-key`. The URL is in it, so a delivery made for another
-            endpoint proves nothing at yours.
-          schema:
-            type: string
-            pattern: "^ed25519=[0-9a-f]{128}$"
-        - name: x-signature
-          in: header
-          required: true
-          description: |
-            `ed25519=<signature>` over `<x-timestamp>.<raw body>`, for clients older than 2.2.0,
-            which bound no URL. A newer client does not accept it.
-          schema:
-            type: string
-            pattern: "^ed25519=[0-9a-f]{128}$"
+        - $ref: "#/components/parameters/content_digest"
+        - $ref: "#/components/parameters/gateway_signature_input"
+        - $ref: "#/components/parameters/gateway_signature"
       requestBody:
         required: true
         content:
@@ -788,23 +777,9 @@ webhooks:
         The challenge is signed the way every delivery is, so verify it before answering.
         The nonce is single use and is not stored, so nothing here is worth replaying.
       parameters:
-        - name: x-timestamp
-          in: header
-          required: true
-          schema:
-            type: string
-        - name: x-signature-v2
-          in: header
-          required: true
-          schema:
-            type: string
-            pattern: "^ed25519=[0-9a-f]{128}$"
-        - name: x-signature
-          in: header
-          required: true
-          schema:
-            type: string
-            pattern: "^ed25519=[0-9a-f]{128}$"
+        - $ref: "#/components/parameters/content_digest"
+        - $ref: "#/components/parameters/gateway_signature_input"
+        - $ref: "#/components/parameters/gateway_signature"
       requestBody:
         required: true
         content:
@@ -855,29 +830,15 @@ webhooks:
         address, which then costs every other client of this instance. Naming your own
         endpoint moves that cost onto you, where it belongs.
 
-        The client's verify endpoints answer this themselves, so `bankVerifyEndpoint` and
-        `lightningVerifyEndpoint` need no wiring. A hand-rolled endpoint can use
+        The client's verify endpoints answer this themselves, so `serve.lightningVerify`,
+        `serve.bankVerify` and `serve.nwcVerify` need no wiring. A hand-rolled endpoint can use
         `answerVerifyChallenge`, which hands back the response to return or null when
         the request was not a challenge. An operator whose callers are all known can turn the
         challenge off with `VERIFY_CHALLENGE=0`.
       parameters:
-        - name: x-timestamp
-          in: header
-          required: true
-          schema:
-            type: string
-        - name: x-signature-v2
-          in: header
-          required: true
-          schema:
-            type: string
-            pattern: "^ed25519=[0-9a-f]{128}$"
-        - name: x-signature
-          in: header
-          required: true
-          schema:
-            type: string
-            pattern: "^ed25519=[0-9a-f]{128}$"
+        - $ref: "#/components/parameters/content_digest"
+        - $ref: "#/components/parameters/gateway_signature_input"
+        - $ref: "#/components/parameters/gateway_signature"
       requestBody:
         required: true
         content:
@@ -907,6 +868,35 @@ webhooks:
 
 components:
   parameters:
+    content_digest:
+      name: content-digest
+      in: header
+      required: true
+      description: The RFC 9530 digest of the content, `sha-256=:<base64>:`.
+      schema:
+        type: string
+
+    gateway_signature_input:
+      name: signature-input
+      in: header
+      required: true
+      description: |
+        `thunder-bridge=("@method" "@scheme" "@authority" "@path" "content-digest")` with
+        `created`, `nonce`, `keyid`, `alg="ed25519"` and `tag="thunder-bridge-gateway"`. The
+        URL is in it, so a delivery made for another endpoint proves nothing at yours.
+      schema:
+        type: string
+
+    gateway_signature:
+      name: signature
+      in: header
+      required: true
+      description: |
+        `thunder-bridge=:<base64>:`, the Ed25519 signature over the RFC 9421 signature base,
+        made with the key this gateway publishes at `/webhook-key`.
+      schema:
+        type: string
+
     payment_id:
       name: id
       in: path

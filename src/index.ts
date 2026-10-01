@@ -8,13 +8,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { type WebSocket, WebSocketServer } from "ws";
 import { hexToBytes } from "../core/bytes.ts";
-import { callerOf, TOLERANCE_SECS } from "../core/caller.ts";
+import { callerOf } from "../core/caller.ts";
 import { type SigningKey, signingKeyFromSeed } from "../core/ed25519.ts";
 import { equalInConstantTime, hmacHex } from "../core/hmac.ts";
 import { quote, RESOLVE_TIMEOUT_MS, resolve, speaksVerify } from "../core/lnurl.ts";
 import type { Send } from "../core/outbound.ts";
 import { pinnedToTheAddressWeVerified } from "../core/pinned.ts";
 import { sha256Hex } from "../core/sha256.ts";
+import { TOLERANCE_SECS } from "../core/signature.ts";
 import { mint as mintTicket, read as readTicket, type Subject } from "../core/ticket.ts";
 import { agentAddressed } from "../core/url.ts";
 import { type Agents, attend, keepAlive } from "./agents.ts";
@@ -1246,7 +1247,7 @@ if (import.meta.main) {
 	});
 	const eagerDelayMs = secsToMs(positive("POLL_INTERVAL_SECS"));
 	const peers = (process.env["REPLICATE_PEERS"] ?? "").split(",").filter((peer) => peer.length > 0);
-	const store = new Store(ledger, clusterKey, whole("MAX_PENDING"), eagerDelayMs);
+	const store = new Store(ledger, clusterKey, { maxPending: whole("MAX_PENDING"), eagerDelayMs });
 	const cluster = new Cluster(store.gossip, {
 		key: clusterKey,
 		listenPort: whole("REPLICATE_LISTEN"),

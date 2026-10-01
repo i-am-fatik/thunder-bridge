@@ -25,6 +25,13 @@ releases a version number once it has been published.
   which is for a client with no server of its own. Naming neither, or both, fails
   when the rail or endpoint is built, and TypeScript refuses it before that.
 - `rails.nwc` takes the same `VerifyThrough` type it always had in shape.
+- **Breaking.** Requests and deliveries are signed as RFC 9421 HTTP message
+  signatures with Ed25519, in `Signature-Input` and `Signature`, over an RFC 9530
+  `Content-Digest`. A client signs with `tag="thunder-bridge-client"` and its key as
+  `keyid`, the gateway with `tag="thunder-bridge-gateway"` and the key at
+  `/webhook-key`. What each one covers is unchanged in substance, and the profile is
+  spelled out at the top of the gateway's `openapi.yaml`, so a receiver in any language
+  verifies a delivery with an RFC 9421 library.
 - `invoiceFrom`, and so `rails.lightning` with `verifyThrough` and `serve.lnurlPay`,
   refuse an address whose LUD-06 metadata does not name it as its `text/identifier` or
   `text/email`, with `cannot-prove-delivery`, and try the next address on the list. It
@@ -46,6 +53,12 @@ releases a version number once it has been published.
   purpose. A watch registered by 2.1.x or earlier is answered as not ours once you
   upgrade, so upgrade after the last such watch has expired. Bank watches can run
   for days, so check the longest `expiresAt` you handed out before switching.
+- **Breaking.** The headers of our own are gone from both directions:
+  `x-client-key`, `x-signature`, `x-timestamp` and `x-nonce` on a request, and
+  `x-signature`, `x-signature-v2` and `x-timestamp` on a delivery. A 3.0 gateway treats
+  a request signed the 2.x way as unsigned, so its payments are named and read like
+  anonymous ones and a gateway with `CLIENT_KEYS` refuses it, and a 3.0 client does not
+  believe a 2.x gateway's deliveries. Move the gateway and every client to 3.0 together.
 
 ### Migrating from 2.x
 

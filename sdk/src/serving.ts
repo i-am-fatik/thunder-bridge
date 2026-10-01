@@ -1,3 +1,4 @@
+import { TOLERANCE_SECS } from "../../core/signature.js";
 import { type BankVerifyConfig, bankVerifyEndpoint } from "./bank.js";
 import type { ThunderBridge } from "./client.js";
 import { type NwcVerifyConfig, nwcVerifyEndpoint } from "./nwc.js";
@@ -13,7 +14,6 @@ import type { Payment, Settlement } from "./types.js";
 import { agreesWithItself, type SelfConsistent } from "./verify.js";
 import {
   answerWebhookChallenge,
-  DEFAULT_TOLERANCE_SECS,
   readPayment,
   readSettlement,
   type WebhookCredential,
@@ -122,7 +122,7 @@ export class Serve {
    */
   webhook(handlers: WebhookHandlers): Handler {
     const options: WebhookOptions = { toleranceSecs: handlers.toleranceSecs, url: handlers.url };
-    const once = onceWhileReplayable(handlers.toleranceSecs ?? DEFAULT_TOLERANCE_SECS);
+    const once = onceWhileReplayable(handlers.toleranceSecs ?? TOLERANCE_SECS);
 
     return async (request: Request) => {
       const credential = await this.credential(handlers);

@@ -32,6 +32,7 @@
     "compact-encoding": "3.3.2",
     "hyperswarm": "4.17.0",
     "protomux": "3.11.0",
+    "structured-headers": "2.1.0",
     "thunder-bridge": "file:./sdk",
     "ws": "^8.21.3"
   }

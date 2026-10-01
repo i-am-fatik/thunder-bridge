@@ -436,12 +436,15 @@ hands that one to `onPayment`.
 ### How a delivery is signed
 
 The gateway signs every delivery with its own key, so there is no webhook secret to
-hand it, and one sent anyway is refused. The signature is
-`x-signature-v2: ed25519=<signature>` over four lines joined by `\n`: `v2`, the origin
-and path of the URL it was sent to, `<x-timestamp>` and the raw body. The URL is in it
-so a delivery made for somebody else's endpoint proves nothing at yours. A gateway also
-sends `x-signature` over `<x-timestamp>.<raw body>` for clients older than 2.2.0, and a
-newer client does not accept it. A `sha256=` signature is refused.
+hand it, and one sent anyway is refused. The signature is an RFC 9421 HTTP message
+signature in the `signature-input` and `signature` fields, with `alg="ed25519"`,
+`tag="thunder-bridge-gateway"` and the published key as `keyid`. It covers the method,
+the scheme, authority and path of the URL it was sent to, and an RFC 9530
+`Content-Digest` of the raw body. The URL is in it, so a delivery made for somebody
+else's endpoint proves nothing at yours, and the query is left out because proxies
+rewrite it. Any RFC 9421 library verifies it, and the profile is spelled out at the
+top of [`openapi.yaml`](../openapi.yaml). The `x-signature` and `x-signature-v2` of a
+2.x gateway are not read.
 
 The route fetches the public key from `/webhook-key` once and keeps it. `webhookKey()`
 returns the same key, and `credential` on the route pins one you already read. The key
@@ -450,7 +453,7 @@ alike, and an operator rotating that key rotates this one too. A signature that 
 verifying is a reason to read `/webhook-key` again before it is a reason to distrust
 the gateway.
 
-Every reader refuses a timestamp more than five minutes from your clock, either way,
+Every reader refuses a `created` more than five minutes from your clock, either way,
 adjustable with `toleranceSecs`. The signature proves the delivery came from the
 gateway, not that the payment happened, because the gateway holds the signing key
 either way. The proof is the preimage. Find your order by the delivery's payment hash,

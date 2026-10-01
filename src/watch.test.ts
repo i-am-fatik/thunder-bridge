@@ -2,14 +2,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { expect, test, vi } from "vitest";
 
-import { deliverySigned } from "../core/delivery.ts";
-import { signingKeyFromSeed, verifyHex } from "../core/ed25519.ts";
+import { signingKeyFromSeed } from "../core/ed25519.ts";
 import type { Send } from "../core/outbound.ts";
+import { GATEWAY_SIGNS, signerOf } from "../core/signature.ts";
 import type { Agents } from "./agents.ts";
 import type { Delivery, Payment } from "./payment.ts";
 import type { Settled, Store } from "./store.ts";
 import {
 	type Budget,
+	confirmVerify,
 	confirmWebhook,
 	nextDue,
 	pollDelayMs,
@@ -313,28 +314,24 @@ test("a delivery is signed with the key the gateway publishes, and nothing of th
 	await tick(watcher);
 
 	const sent = wire.calls.find((call) => call.url === url);
-	const signature = sent?.headers["x-signature"] ?? "";
-	const stamp = sent?.headers["x-timestamp"] ?? "";
+	const headers = new Headers(sent?.headers);
 
-	expect(signature).toMatch(/^ed25519=[0-9a-f]{128}$/);
-	expect(stamp).toMatch(/^\d{10}$/);
-
-	const payload = new TextEncoder().encode(`${stamp}.${owed().body}`);
+	expect([...headers.keys()].sort()).toEqual([
+		"content-digest",
+		"content-type",
+		"signature",
+		"signature-input",
+	]);
 	expect(
-		await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
-	).toBe(true);
-
-	const bound = (sent?.headers["x-signature-v2"] ?? "").slice("ed25519=".length);
+		await signerOf({ method: "POST", url, headers }, owed().body, GATEWAY_SIGNS),
+	).toMatchObject({ keyid: GATEWAY_KEY.publicKeyHex });
 	expect(
-		await verifyHex(GATEWAY_KEY.publicKeyHex, bound, deliverySigned(url, stamp, owed().body)),
-	).toBe(true);
-	expect(
-		await verifyHex(
-			GATEWAY_KEY.publicKeyHex,
-			bound,
-			deliverySigned("https://another.example/hook", stamp, owed().body),
+		await signerOf(
+			{ method: "POST", url: "https://another.example/hook", headers },
+			owed().body,
+			GATEWAY_SIGNS,
 		),
-	).toBe(false);
+	).toBeNull();
 });
 
 test("the webhook carries a deadline, and one that runs out puts it back on the outbox", async () => {
@@ -646,21 +643,18 @@ test("a challenge is signed with the gateway's own key, so a receiver can tell w
 		await confirmWebhook({ send: wire.send, webhookKey: GATEWAY_KEY }, { url: HOOK_URL }),
 	).toBe(true);
 
-	const sent = wire.calls[0]!;
-	const signature = sent.headers["x-signature"] ?? "";
-	expect(signature).toMatch(/^ed25519=[0-9a-f]{128}$/);
+	expect(await confirmVerify({ send: wire.send, webhookKey: GATEWAY_KEY }, VERIFY_URL)).toBe(true);
 
-	const payload = new TextEncoder().encode(`${sent.headers["x-timestamp"]}.${sent.body}`);
-	expect(
-		await verifyHex(GATEWAY_KEY.publicKeyHex, signature.slice("ed25519=".length), payload),
-	).toBe(true);
-	expect(
-		await verifyHex(
-			GATEWAY_KEY.publicKeyHex,
-			(sent.headers["x-signature-v2"] ?? "").slice("ed25519=".length),
-			deliverySigned(HOOK_URL, sent.headers["x-timestamp"] ?? "", sent.body ?? ""),
-		),
-	).toBe(true);
+	for (const [sent, url] of [
+		[wire.calls[0]!, HOOK_URL],
+		[wire.calls[1]!, VERIFY_URL],
+	] as const) {
+		const headers = new Headers(sent.headers);
+		expect(headers.has("x-signature")).toBe(false);
+		expect(
+			await signerOf({ method: "POST", url, headers }, sent.body ?? "", GATEWAY_SIGNS),
+		).toMatchObject({ keyid: GATEWAY_KEY.publicKeyHex });
+	}
 });
 
 test("a challenge answered from another origin a redirect led to is no consent at all", async () => {

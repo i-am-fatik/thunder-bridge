@@ -50,7 +50,14 @@ export class Store {
 	private readonly eagerDelayMs: number;
 	private convergedAt: number | null = null;
 
-	constructor(ledger: Ledger, key: Uint8Array, maxPending = 5000, eagerDelayMs = 5_000) {
+	constructor(
+		ledger: Ledger,
+		key: Uint8Array,
+		{
+			maxPending = 5000,
+			eagerDelayMs = 5_000,
+		}: { maxPending?: number; eagerDelayMs?: number } = {},
+	) {
 		this.ledger = ledger;
 		this.key = key;
 		this.maxPending = maxPending;

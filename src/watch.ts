@@ -1,10 +1,10 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { bytesToHex } from "../core/bytes.ts";
-import { deliverySigned } from "../core/delivery.ts";
 import type { SigningKey } from "../core/ed25519.ts";
 import { checkSettled, type Settlement } from "../core/lnurl.ts";
 import { ask, type Send } from "../core/outbound.ts";
+import { GATEWAY_SIGNS, signedBy } from "../core/signature.ts";
 import { agentAddressed } from "../core/url.ts";
 import { type Agents, askAnAgent } from "./agents.ts";
 import * as log from "./log.ts";
@@ -208,13 +208,9 @@ async function signedHeaders(
 	body: string,
 	gatewayKey: SigningKey,
 ): Promise<Record<string, string>> {
-	const stamped = String(unixNow());
-
 	return {
 		"content-type": "application/json",
-		"x-timestamp": stamped,
-		"x-signature": `ed25519=${await gatewayKey.sign(new TextEncoder().encode(`${stamped}.${body}`))}`,
-		"x-signature-v2": `ed25519=${await gatewayKey.sign(deliverySigned(url, stamped, body))}`,
+		...(await signedBy(gatewayKey, GATEWAY_SIGNS, { method: "POST", url }, body)),
 	};
 }
 

@@ -42,7 +42,7 @@ export function openStore({
 }: TestOptions = {}): Opened {
 	const path = ledgerPath ?? join(mkdtempSync(join(tmpdir(), "tbd-")), "ledger.db");
 	const ledger = new Ledger(path, key, { takeoverAfterSecs, deliveryBackoffSecs });
-	const store = new Store(ledger, key, maxPending);
+	const store = new Store(ledger, key, { maxPending });
 	const cluster = new Cluster(store.gossip, { key, listenPort, peers, swarm: false });
 
 	return {
