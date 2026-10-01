@@ -58,7 +58,7 @@ export interface BankTransferParams {
   iban: string;
 
   /**
-   * Where `bankVerifyEndpoint` is mounted, a public https URL with no query of
+   * Where `serve.bankVerify` is mounted, a public https URL with no query of
    * its own. Not needed when `answerBy` is "agent", because then nothing is polled
    */
   verifyUrl?: string;

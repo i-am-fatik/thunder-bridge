@@ -1,7 +1,7 @@
 {
   "name": "thunder-bridge",
   "version": "2.2.1",
-  "description": "Trustless JavaScript client for the Thunder Bridge Lightning payment gateway. Proves the invoice came from your own wallet before the payer sees it.",
+  "description": "Take Bitcoin Lightning and bank payments in JavaScript, paid straight into your own wallet or account. No node to run, no custodian, and every payment proven rather than taken on the gateway's word.",
   "author": "i-am-fatik",
   "homepage": "https://agora.gripe/en/tools/thunder-bridge",
   "repository": {
@@ -111,6 +111,11 @@
     "bitcoin",
     "lnurl",
     "lud-21",
+    "lightning-address",
+    "nwc",
+    "bank-transfer",
+    "non-custodial",
+    "payment-gateway",
     "trustless",
     "payments",
     "websocket"

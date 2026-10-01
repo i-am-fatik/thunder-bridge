@@ -130,7 +130,7 @@ function relayedFrom(opened: string): Relayed | null {
 
 /**
  * The URL to hand the gateway instead of the wallet's own, with the wallet's
- * sealed inside it. Point it at wherever `lightningVerifyEndpoint` is mounted
+ * sealed inside it. Point it at wherever `serve.lightningVerify` is mounted
  */
 export async function relayedVerifyUrl(
   endpoint: string,

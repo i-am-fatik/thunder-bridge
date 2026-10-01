@@ -1,103 +1,102 @@
 # Running one of these for somebody
 
-Reference for whoever is holding the pager. Why it is shaped this way is
-[design.md](design.md), what the variables mean is the
-[README](../README.md#configuration). This file is only what to do.
+What to do when you run a gateway for a client. Why it is built this way is
+[design.md](design.md). What each variable means is the
+[README](../README.md#configuration).
 
 ## What to run
 
-`ghcr.io/i-am-fatik/thunder-bridge-gateway:<version>`, pushed by the release workflow
-when a `v*` tag lands, and refused if that tag does not match the version in
-`package.json`. The name says gateway because `thunder-bridge` on npm is the client
-that talks to it, and because that container name is already taken by another
-repository.
+`ghcr.io/i-am-fatik/thunder-bridge-gateway:<version>`. The release workflow pushes it,
+tagged `<version>` and `latest`, when a `v*` tag lands, and refuses a tag that does not
+match the version in `package.json`. The npm package `thunder-bridge` is the client that
+talks to it.
 
-It is built for `linux/amd64` and `linux/arm64`, so Graviton and Apple Silicon run it
-native. The suite still runs once, on the builder's own architecture: the `check` stage
-is pinned to `$BUILDPLATFORM` and every native dependency here ships both `linux-x64`
-and `linux-arm64` prebuilds, which the prune step keeps. Only the two cheap steps in the
-final layer are emulated. Pin the version rather than `latest`: this gateway is one process
-holding a client's payment records, and a surprise upgrade on restart is not a thing
-you want to debug at two in the morning.
+The image is built for `linux/amd64` and `linux/arm64`. The `check` stage is pinned to
+`$BUILDPLATFORM`, so the test suite runs once, on the builder's own architecture, and
+the prune step keeps the `linux-x64` and `linux-arm64` prebuilds every native
+dependency ships. Only the two cheap steps of the final stage are emulated.
+
+Pin a version and its digest, never `latest`. The gateway holds a client's payment
+records, and a restart must not upgrade it by surprise.
 
 ## Deploy a new build
 
-Nothing deploys on a merge. A deployment moves when its manifest is pointed at a new
-image, pinned by tag and digest, and it has gone live once `/health` answers 200 to
-the liveness probe and `/ready` to the readiness one, so a rollout that finishes has
-at least booted. `/health` turns 503 when the watch loop stops being scheduled or a
-tick stays stuck in flight, which is the failure a restart actually fixes.
+Nothing deploys on a merge. Point the deployment's manifest at the new image, pinned by
+tag and digest. Wire the liveness probe to `/health` and the readiness probe to `/ready`,
+as [Check health](#check-health) describes, so a rollout that finishes has at least
+booted.
 
-A shutdown drains: the instance stops accepting, finishes the tick in flight, and
-leaves. `DRAIN_TIMEOUT_SECS` bounds the wait. A webhook may go out twice across a
-drain that timed out, which is the documented at-least-once contract, and the
-receiver deduplicates on `id`.
+A shutdown drains. The instance turns `/ready` down, finishes the tick in flight within
+`DRAIN_TIMEOUT_SECS`, and leaves. A webhook may go out twice across a drain that timed
+out. That is the at-least-once contract, and the receiver deduplicates on `id`.
 
 ### When the release changes what a delivery looks like
 
-That drain is not enough for a release that changes the shape of a webhook body, and
-1.0 was one. A settlement owed but not yet delivered is stored as a rendered body, so
-it goes out in the old shape after the new build is running, and a client on the new
-version reads it as nothing at all and drops it. The gateway sees a 2xx and retires
-it. Nobody is told about a payment that was made.
+A release that changes the shape of a webhook body is cut over, not deployed. A delivery
+owed but not yet sent is stored as a rendered body, so it goes out in the old shape
+after the new build runs. A client on the new version reads it as nothing and drops it,
+the gateway sees a 2xx and retires it, and nobody hears about a payment that was made.
+1.0 was such a release.
 
-So a release that touches the delivery body is cut over rather than deployed:
-
-1. Stop taking new work. Set `MAX_PENDING=0` and redeploy the current build, or point
+1. Stop taking new work. Set `MAX_PENDING=0` and redeploy the current build, or route
    traffic away. A create and a watch both answer 429 while it holds.
-2. Wait for the outbox to empty. `/ready` with the bearer reports `parked_deliveries`,
-   and `sync.rows.outbox` against `sync.rows.delivered` says whether anything is still
-   owed. Nothing owed means nothing can be dropped.
-3. Then deploy, and put `MAX_PENDING` back.
+2. Wait until nothing is owed. `/ready` with the bearer reports `parked_deliveries`,
+   and `sync.rows.outbox` against `sync.rows.delivered` shows whether anything is still
+   owed.
+3. Deploy, and put `MAX_PENDING` back.
 
-Watches already registered are a slower version of the same question. They keep being
-polled and they settle into the new shape, so they are fine as long as their receivers
-moved to the new client. Ones whose receivers did not are the payments that go quiet.
-Thirty days is the longest any watch lives, so a cutover with no overlap means waiting
-that out, and a cutover without waiting means telling those clients first.
+Watches already registered keep being polled and settle in the new shape. They are fine
+when their receivers run the new client, and the rest go quiet. A watch lives at most
+thirty days, so either wait that out or tell those clients first.
 
 ## Roll back
 
-Check the schema stamp first. `src/ledger.ts` refuses to open a ledger a newer
-build wrote, with `this ledger is at schema N and this build knows M`, and the
-process exits rather than starting on a file it does not understand. The stamp has
-moved twice, to 2 when the `pending` table was dropped and to 3 when the `kept`
-table arrived, and a build older than the stamp on a volume will not boot on it, so
-rolling back across either step means restoring the volume, not redeploying the
-image. The columns added since, `heardAt` on `paid` and `retryUntil` and `parkedAt`
-on `outbox`, are local and nullable and leave the stamp alone, so a build at the
-same stamp reads past them.
+Check the schema stamp first. A build refuses a ledger stamped higher than it knows,
+with `this ledger is at schema N and this build knows M`, and the process exits.
 
-Nothing else needs undoing. Facts are append-only and a worklist is a query over
-them, so an older build reads what a newer one wrote as long as the stamp allows
-it.
+| Stamp | What moved it |
+|---|---|
+| 2 | the `pending` table was dropped |
+| 3 | the `kept` table arrived |
 
-## Durability is the peers, so a lone instance needs a volume
+Rolling back across a stamp means restoring the volume, not redeploying the image. The
+columns `heardAt` on `paid`, and `retryUntil` and `parkedAt` on `outbox`, are local and
+nullable and leave the stamp alone.
 
-There is no backup job and no external database. A fact lives in every instance
-that heard it, and that is the whole durability story. One instance with no volume
-therefore loses the ledger on every redeploy. Run either a volume at `/data` with
-`LEDGER` pointing into it, or a second instance that has the same `CLUSTER_KEY`
-and can reach the first. Two instances with volumes is the arrangement that
-survives both a redeploy and a disk.
+Nothing else needs undoing. Facts are append-only and a worklist is a query over them,
+so an older build reads what a newer one wrote as long as the stamp allows it.
 
-`sync.marks` plus `sync.rows` compared across two instances is strong evidence
-they agree. Read from one instance it says what that instance holds and nothing
-about its peers: a mark covers only a run of an origin's facts with no hole in it,
-so equal marks mean equal runs, and a fact held above a hole is not counted.
+## Keep the ledger across a redeploy
+
+The gateway has no backup job and no external database. A fact lives in every instance
+that heard it. A lone instance with no volume loses the ledger on every redeploy, so
+run one of these:
+
+- a volume at `/data`, where the image's `LEDGER` points
+- a second instance with the same `CLUSTER_KEY` that can reach the first
+
+Two instances with volumes survive both a redeploy and a lost disk.
+
+To check that two instances agree, compare `sync.marks` and `sync.rows` across them.
+Read from one instance they say nothing about its peers. A mark covers only a run of an
+origin's facts with no gap in it, so a fact held above a gap is not counted.
 
 ## Three instances behind one hostname
 
-The instances are interchangeable behind a plain round-robin balancer. A
-settlement absorbed from a peer is published to the sockets held locally, so a
-websocket needs no stickiness, and a nonce or ticket spent on one instance is told
-to the others, so a replay sent to a different pod is refused too.
+The instances are interchangeable behind a plain round-robin balancer. A settlement
+absorbed from a peer is published to the sockets held locally, so a websocket needs no
+stickiness. A nonce or ticket spent on one instance is announced to the others, so a
+replay sent to a different pod is refused too.
 
-On Kubernetes that is a StatefulSet of three with `podManagementPolicy: Parallel`,
-a required anti-affinity on `kubernetes.io/hostname`, and a PodDisruptionBudget of
-`maxUnavailable: 1`. A headless Service gives the pods stable names, and every pod
-gets the same list, its own name included. An instance that dials itself notices
-and stops, quietly.
+On Kubernetes that is:
+
+- a StatefulSet of three with `podManagementPolicy: Parallel`
+- a required anti-affinity on `kubernetes.io/hostname`
+- a PodDisruptionBudget of `maxUnavailable: 1`
+- a headless Service, which gives the pods stable names
+
+Every pod gets the same peer list, its own name included. An instance that dials
+itself drops that address.
 
 ```
 CLUSTER_KEY=<one fixed secret for all three>
@@ -106,214 +105,183 @@ REPLICATE_LISTEN=7000
 REPLICATE_PEERS=gw-0.gw-peers:7000,gw-1.gw-peers:7000,gw-2.gw-peers:7000
 ```
 
-An instance with `REPLICATE_PEERS` answers `/ready` with 503 until it has caught
-up with a peer, or until 30 seconds pass without reaching one, so a pod that boots
-empty is not sent work before it holds the ledger. With three pods the peers are
-the backup and an `emptyDir` is enough. Only losing all three at once loses the
-ledger.
+An instance with `REPLICATE_PEERS` answers `/ready` with 503 until it has caught up with
+a peer, or until 30 seconds pass without reaching one. A pod that boots empty is not
+sent work before it holds the ledger. With three pods the peers are the backup and an
+`emptyDir` is enough. Only losing all three at once loses the ledger.
 
-## Where the bank rail's verify endpoint runs
+## Where the verify endpoint runs
 
-The bank rail needs a public https endpoint serving `bankVerifyEndpoint`, because the
-gateway polls it and refuses anything private. That endpoint, not the gateway, is what
-holds the client's bank read token, so where it runs is a question about who holds that
-token rather than about hosting.
+By default every rail verifies through an endpoint the client serves:
+`serve.lightningVerify`, `serve.bankVerify` or `serve.nwcVerify`. The gateway polls it
+and refuses anything that is not public https. Its query is sealed, so the gateway
+learns neither who is paid nor how much.
 
-Run it with the client's own application, on the client's own host. It is one route in
-whatever already serves them, it keeps the bank token on their side, and the gateway
-stays a thing that polls a URL and knows an amount only from a query string. Standing it
-up in our own infrastructure would mean holding a client's bank credential for them,
-which is a different business than running a gateway.
+Run it with the client's own application, on the client's own host. The bank endpoint
+holds the client's bank read token and the NWC endpoint holds their wallet connection.
+Hosting either yourself means holding that credential for them, which is a different
+business than running a gateway.
 
-An unreachable endpoint costs nothing but time. A poll that fails is logged and the
-payment is scheduled again, so an endpoint down for an afternoon means the settlement is
-noticed late rather than lost, as long as it is back inside the three day watch horizon.
-The money is in the account either way, which is the whole point of reading a bank
-statement rather than trusting a callback.
-
-What that does mean is that a client who takes their app down for a week and had an
-unpaid order open will see it expire unsettled with the money received. Say so in the
-integration, and re-register rather than arguing with it.
+An unreachable endpoint costs time, not money. A failed poll is logged and the payment
+is scheduled again, so the settlement is noticed late as long as the endpoint is back
+before the payment expires. A client whose app is down past an order's expiry sees it
+expire unsettled with the money received. Tell them to re-register the payment.
 
 ## Hold one key per client
 
-`CLUSTER_KEY` is 32 bytes of hex. It is the swarm topic and the right to write a
-fact, so two deployments sharing a key are one cluster and will replicate into
-each other. A client gets their own key, always, and mixing them silently merges
-two clients' payments.
+`CLUSTER_KEY` is 32 bytes of hex. It is the swarm topic and the right to write a fact,
+so two deployments sharing a key are one cluster and replicate into each other. Give
+every client their own key. A shared key merges two clients' payments.
 
-Losing the key locks you out of that cluster and nobody can reissue it. Copy it
-out of wherever the deployment keeps its secrets the moment the instance is up.
+Losing the key locks you out of that cluster, and nobody can reissue it. Copy it out of
+the deployment's secret store as soon as the instance is up.
+
+Where the keys are kept, who can read them, and what happens when their holder leaves
+is not decided yet. Decide it before the second client.
 
 ## Rotate a cluster key
 
-A rotation is a rotation. Set `CLUSTER_KEY` to the new value and restart: the ledger
-remembers which key signed it, by a fingerprint that proves the key without holding
-it, and a boot under a new one re-signs every fact it still holds in one transaction.
-The old value opens nothing afterwards, which is the point. There is no list of
-retired keys any more, because a key that still admits a peer and still writes facts
-was never retired.
+Set `CLUSTER_KEY` to the new value and restart every instance. The ledger stores a
+fingerprint of the key that signed it. A boot under a different key re-signs every fact
+the ledger holds, in one transaction, and the old value opens nothing afterwards. The
+pass covers only what the ledger still holds: open payments, settlements up to an hour
+old, and the settlements a trigger keeps for replay.
 
-The pass is bounded by what a ledger keeps rather than by history: an hour past
-settlement, the settlements a trigger was minted to keep under `MAX_REPLAY`, plus the
-window `KEEP_SEALED_DAYS` sets for sealed blobs.
+While a roll is half done the two halves are apart, because the swarm topic, the peer
+handshake, the socket ticket and the facts all come from the live key. A ticket minted
+by one half is refused by the other for its 60 second life, so the client mints another.
 
-Roll every instance. While a roll is half done the two halves are apart, because the
-swarm topic, the socket ticket and now the facts themselves all come from the live key
-alone. A ticket minted by one half and presented to the other is refused for its 60
-second life, which costs the client a re-mint.
+Clients see two effects:
 
-One thing does not survive a rotation, and it is worth knowing which. A payment its
-caller signed for is named after that caller, so it replicates across a rotation
-untouched. A payment nobody signed for is named by this instance's key, so after a
-rotation it stays readable here and a peer will refuse it, because it no longer names
-its own invoice. Minted payments are the ones that arrive unsigned, which is one more
-reason the minting endpoint is off unless an instance turns it on.
+- The webhook signing key is derived from `CLUSTER_KEY`, so it changes too. Tell
+  clients that a signature that stops verifying means read `/webhook-key` again.
+- A payment its caller signed for is named after that caller and replicates across a
+  rotation untouched. A payment nobody signed for is named under the cluster key. After
+  a rotation it stays readable where it is held, and a peer refuses it because its id
+  no longer names its invoice. A browser holds no secret, so a browser-only client's
+  payments are the unsigned ones.
 
-Where those keys are kept, who can read them, and what happens when the person
-holding them leaves is not decided yet, and this file will not pretend otherwise.
-Decide it before the second client.
+## Check health
 
-## Is it actually healthy
+`/health` is liveness. It answers 503 when the watch loop has gone unscheduled for
+longer than `TICK_STALL_SECS`, or when one tick has been in flight for 60 seconds past
+that. A restart fixes both.
 
-`/health` is liveness: it answers 503 when the watch loop has gone unscheduled for
-longer than `TICK_STALL_SECS`. `/ready` is readiness. They answer different
-questions on purpose, so a load balancer wants `/ready` and a restart policy wants
-`/health`.
+`/ready` is readiness. It answers 503 while the instance drains, and while an instance
+with `REPLICATE_PEERS` catches up. A load balancer wants `/ready` and a restart policy
+wants `/health`.
 
-A tick that hangs forever would not show on either, because what is measured is
-the loop being scheduled rather than how long a tick takes. The one unbounded wait
-it used to have, a name lookup, is bounded now.
+With the bearer, `/ready` also returns the vitals `openapi.yaml` describes, among them
+`parked_deliveries` and `sync`. An instance without `GATEWAY_TOKEN` has no bearer, so it
+returns none of them.
 
 ## Turn the logs down
 
-`LOG_LEVEL` defaults to `info`, and at `info` a line names every payment paid and
-every webhook delivered. That is a client's order flow sitting in your log
-aggregator. `warn` keeps the failures and drops the flow.
+At the default `info`, a line names every payment paid and every webhook delivered.
+That is a client's order flow sitting in your log aggregator. Set `LOG_LEVEL=warn` to
+keep the failures and drop the flow.
 
-## How often anything gets polled
+## Tune the polling pace
 
-Three separate things, and they used to be one number. `POLLS_PER_SEC` is politeness:
-a ceiling per host, so one wallet a thousand payments point at is never hit harder
-than that. `WORK_PER_TICK` is throughput: how many polls and deliveries a tick takes
-on at all, and it is the knob to raise when an instance is watching thousands and
-sweeping them too slowly. `POLL_INTERVAL_SECS` is only the fallback pace for an
-endpoint that does not name its own.
+Three variables govern polling, and each answers a different problem.
 
-An endpoint names its own with `Cache-Control: max-age` on any verify answer, clamped
-to between a second and an hour, and that pace then applies to every payment on that
-host. So a client's own endpoint sets the rate it wants to be asked at, and a wallet
-that says nothing keeps the widening interval. Nothing here is per payment: the pace,
-like the ceiling, belongs to the host being asked. In a cluster each instance takes
-its share of the ceiling, the whole divided by the instances it can see, so three of
-them together keep the rate one would.
+| Variable | What it governs |
+|---|---|
+| `POLLS_PER_SEC` | the ceiling per host, so one wallet a thousand payments point at is never hit harder than that |
+| `WORK_PER_TICK` | how many polls and deliveries a tick takes on. Raise it when an instance watching thousands sweeps them too slowly |
+| `POLL_INTERVAL_SECS` | the pace for an endpoint that names none of its own |
 
-The ceiling can be named the same way, with `RateLimit-Limit: 12;w=60` on any verify
-answer, which is the header the IETF draft defines for exactly this. Cadence and
-aggregate rate are different quantities and `max-age` can only express the first: a
-thousand open orders at `max-age=5` is two hundred requests a second however polite the
-interval looks. So an endpoint that expects volume should name both, and then
-`POLLS_PER_SEC` governs nothing it asks about. On an instance pinned with
-`VERIFY_HOSTS` where every endpoint speaks for itself, that variable governs nothing at
-all and is only there for the hosts that stay silent.
+An endpoint overrides both pace and ceiling for its own host, on any verify answer:
 
-## A gateway that talks to nobody but its clients
+- `Cache-Control: max-age=N` sets the pace, clamped to between a second and an hour.
+- `RateLimit-Limit: 12;w=60` sets the ceiling, in the header the IETF RateLimit draft
+  defines.
 
-Worth knowing when someone asks whether this thing calls out to strangers. By default
-it does, on one path only: a payment it minted is polled at the recipient's own wallet,
-because that is where the LUD-21 endpoint lives. `POLLS_PER_SEC` exists for exactly
-that, and it is politeness to a third party rather than protection of this process.
+Both apply to every payment on that host, never per payment. Name both when you expect
+volume, because a pace is not a rate: a thousand open orders at `max-age=5` is two
+hundred requests a second. In a cluster each instance takes the ceiling divided by the
+instances it can see, so the cluster together keeps the rate one instance would.
 
-A client who does not want that has the other arrangement. They register through
-`POST /watched-payments` only, resolving the address in their own service, and serve the
-verify endpoint themselves: the SDK's `lightningVerifyEndpoint` asks the wallet on our
-behalf and `bankVerifyEndpoint` already did the same for a bank. Then every host this
-gateway polls belongs to that client, every one of them names its own pace, and the
-per-host ceiling never binds.
+## Limit who the gateway polls
 
-On the watched path that arrangement is now the only one, and `VERIFY_CHALLENGE` is why.
-A `verify_url` a caller named is challenged before anything is polled and has to echo the
-nonce, which no wallet will do. The reason is not politeness. This gateway polls a URL
-for thirty days on a caller's word, and one caller pointing it at a big wallet gets that
-wallet's rate limit applied to this instance's address, which every other client here
-shares. Moving the last hop to the caller's own endpoint moves that cost onto the caller.
-An instance whose callers are all known can set `VERIFY_CHALLENGE=0` and go back to
-taking their word for it.
+By default the gateway polls only endpoints that agreed to be polled. `MINTING` is off,
+so every payment arrives through `POST /watched-payments`. With `VERIFY_CHALLENGE` on, a
+`verify_url` a caller names has to echo a challenge nonce before it is polled, and no
+wallet does that. The challenge exists because the gateway polls a URL for up to thirty
+days on a caller's word, and a big wallet rate limiting this instance's address would
+hit every client here.
 
-Minting is untouched by that, because there the caller named no URL: the gateway found it
-in the wallet's own callback. So a browser-only integration, which cannot serve anything
-for days, still works exactly as before.
+Three settings change that:
 
-`VERIFY_HOSTS` turns the second arrangement from something the client chooses into
-something the instance enforces. List the client's own hostnames and this gateway polls
-nothing else: a watch naming another host answers 403, and minting is refused outright,
-because an invoice this gateway mints is always verified on a wallet's host and failing
-after the mint would burn a real invoice. Then "this instance talks to these endpoints
-and no others" is a line in the config a client can read for themselves, rather than a
-promise they have to take on trust.
+- `MINTING=1` lets the gateway mint, and then it polls the recipient's wallet at the
+  verify URL the wallet's own callback named. That is the one path to a third party,
+  and `POLLS_PER_SEC` is politeness toward it. A browser-only integration needs it,
+  because it cannot serve a verify endpoint.
+- `VERIFY_CHALLENGE=0` takes callers at their word, so any LUD-21 host can be named.
+  Set it only where every caller is known.
+- `VERIFY_HOSTS` lists the hostnames this instance may poll, and it polls nothing else.
+  A watch naming another host answers 403, and minting is refused outright, because a
+  minted invoice is always verified on a wallet's host. A client can read the list in
+  the config instead of taking your word for it.
 
-## A settlement nobody was told about
+## Parked deliveries
 
-`parked_deliveries` on `/ready` counts webhooks this instance gave up on, and every one
-of them is a payment that settled while its receiver heard nothing. Above zero it wants
-a person. The gateway also says so once per delivery at error level, `webhook for <id>
-abandoned`, which is the line worth alerting on because every earlier attempt is only a
-warning.
+`parked_deliveries` on `/ready` counts the webhooks this instance gave up on. Each one is
+a payment that settled while its receiver heard nothing, and it wants a person.
 
-Giving up takes a while on purpose. A rejected delivery is retried `WEBHOOK_BACKOFF_SECS`
-further off each time, for as long as the payment itself had left to run and never for
-less than an hour, so a receiver down for an afternoon still gets told. What parks is a
-receiver that was down longer than the payment lasted.
+Alert on the error line `webhook for <id> abandoned`, logged once per delivery. Every
+earlier failed attempt logs only at warn. Do not alert on the count alone, because a
+parked delivery drops out of it an hour after it parks.
 
-There is no redelivery command. The payment is readable by id and on the trigger socket,
-so the answer is for the client to reconcile against `GET /incoming-payments/{id}`, which
-is what a client should be able to do anyway.
+A rejected delivery is retried `WEBHOOK_BACKOFF_SECS` further off each time, for as long
+as the payment had left to run and never for less than an hour. What parks is a
+receiver that was down longer than that.
 
-## A payment is read by its owner, and followed by whoever holds the id
+There is no redelivery command. The client reconciles against
+`GET /incoming-payments/{id}` or the trigger socket.
 
-An HTTP read of a payment answers 404 to anybody but the key that created it. A socket
-on `/ws/incoming-payments/{id}` does not, and that is on purpose: a browser holds no
-server side secret, so it cannot sign, and watching your own payment from a page is
-what the socket is for. The id is derived from the caller's key, so a payer holding the
-invoice cannot work it out.
+## Who can read a payment
 
-Tell a client who wants even that closed to ask for a ticket, or to run an instance
-with `GATEWAY_TOKEN`, which puts the socket handshake behind the bearer too.
+`GET /incoming-payments/{id}` on a payment a caller signed for answers 404 to every other
+caller. A payment nobody signed for is readable by whoever holds its id.
 
-## A client asking how a delivery is signed
+A socket on `/ws/incoming-payments/{id}` follows a payment by id with no signature,
+because a browser holds no secret and watching your own payment from a page is what the
+socket is for. A signed payment's id is the hash of the caller's public key and the
+payment hash. Neither is secret, so anybody who knows both can follow it.
 
-`ed25519=<signature>` with a key derived from `CLUSTER_KEY`, and there is no other
-answer any more. They fetch the public half from `/webhook-key`, which answers without
-a bearer, and verify against it. Every instance in one cluster publishes the same key,
-so a delivery from any of them checks out.
+To close the plain socket, set `CLIENT_KEYS` or `GATEWAY_TOKEN`. Then a socket opens on a
+ticket from `POST /ws-tickets`, which only the payment's owner can mint.
 
-There is no shared secret to register, and sending one is refused rather than ignored,
-so a client migrating from an older version hears about it instead of wondering why
-nothing verifies. You hold nothing of theirs.
+## Webhook signatures
 
-Rotating `CLUSTER_KEY` changes this key too, which makes a rotation something the
-clients see. Tell them a signature that stops verifying is a reason to read
-`/webhook-key` again before it is a reason to distrust you.
+A delivery is signed `ed25519=<signature>` with a key derived from `CLUSTER_KEY`.
+Clients fetch the public half from `/webhook-key`, which answers without a bearer. Every
+instance in one cluster publishes the same key, so a delivery from any of them verifies.
+The full check is in [Webhooks in full](proving-a-payment.md#webhooks-in-full).
 
-Their endpoint answers the challenge before the payment is taken on, so a client who
-registers a webhook against a server that is not up yet gets a 424 and no payment.
-Tell them to deploy the handler first and register second.
+There is no shared secret to register. A webhook that names a `secret` is refused, so a
+client migrating from an older version hears about it. You hold nothing of theirs.
+
+The webhook endpoint answers a challenge before the payment is taken on. A client who
+registers a webhook against a server that is not up yet gets a 424 and no payment, so
+tell them to deploy the handler first and register second.
 
 ## The instance is under abuse
 
-`MAX_PENDING` counts per signing key, so one caller filling its share leaves everybody
-else's alone and a caller over it gets 429 with the ceiling in the headers. Every
-caller that signs nothing shares one share between them, which is all you can fairly
-do for somebody who will not say who they are.
+`MAX_PENDING` counts per signing key. A caller over it gets 429 with the ceiling in the
+`RateLimit-Limit` header, and everybody else is unaffected. Every caller that signs
+nothing shares one share. That is fairness, not a defence, because a new keypair is free.
 
-That is fairness, not a defence. A keypair costs nothing to make, so the same stranger
-comes back under a new one. Two things actually stop them, and both are lists rather
-than counters. `CLIENT_KEYS` names the client keys this instance serves and refuses
-everybody else with 403, which on an instance whose clients you know is the whole
-answer. It holds for sockets too: with a list set, a socket opens only on a ticket,
-and only a listed key can sign for one. A ticket opens one socket, and `MAX_SOCKETS`
-caps how many the instance holds at once. `GATEWAY_TOKEN` turns every route except `/health`, `/ready`, `/openapi.yaml`,
-`/docs` and `/webhook-key` into a bearer route.
+These stop a stranger:
 
-An instance genuinely open to strangers wants a limiter in front of it, which is not in
-this process and will not be.
+- `CLIENT_KEYS` names the client keys this instance serves and refuses everybody else
+  with 403. With a list set, a socket opens only on a ticket, and only a listed key can
+  get one.
+- `GATEWAY_TOKEN` puts every route except `/health`, `/ready`, `/openapi.yaml`, `/docs`
+  and `/webhook-key` behind the bearer.
+- `MAX_SOCKETS` caps the sockets the instance holds at once, and refuses one past it
+  with 503.
+
+The gateway has no request rate limiter. An instance open to strangers needs one in
+front of it.

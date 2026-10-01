@@ -5,7 +5,7 @@ import { surfaceOf } from "./api-reference.ts";
 import { DOORS } from "./doors.ts";
 
 const BACKTICKED = /`([A-Za-z_$][\w$]*)`/g;
-const PROSE = ["sdk/README.md", "docs/api.md"];
+const PROSE = ["sdk/README.md", "docs/api.md", "docs/errors.md", "docs/proving-a-payment.md"];
 const CARED_ABOUT =
 	/Error$|Fault$|Code$|^Msat$|^Amount$|^prove|^carries|^sats$|^msat$|^fiat$|^requestPayment$|^settled$|^paid$|Payment$|^PaymentRequest/;
 
@@ -123,11 +123,11 @@ test("AmountError is recognisable across entry points, where instanceof is not",
 	expect((far as { code: string }).code).toBe("unknown-currency");
 });
 
-test("every problem type the readme tabulates is a static on ProblemError, so none is retyped", async () => {
+test("every problem type the error reference tabulates is a static on ProblemError, so none is retyped", async () => {
 	const { ProblemError } = await import("../sdk/dist/index.js");
 	const statics = ProblemError as unknown as Record<string, unknown>;
-	const readme = readFileSync("sdk/README.md", "utf8");
-	const tabulated = [...readme.matchAll(/^\| `([a-z-]+)` \| \d/gm)].map((row) => row[1] as string);
+	const errors = readFileSync("docs/errors.md", "utf8");
+	const tabulated = [...errors.matchAll(/^\| `([a-z-]+)` \| \d/gm)].map((row) => row[1] as string);
 	const carried = Object.getOwnPropertyNames(statics)
 		.map((name) => statics[name])
 		.filter((value): value is string => typeof value === "string");

@@ -276,7 +276,7 @@ export function nwcVerifyEndpoint(
 
 /**
  * The URL to hand the gateway, with the payment hash sealed inside it. Point it at
- * wherever `nwcVerifyEndpoint` is mounted
+ * wherever `serve.nwcVerify` is mounted
  */
 export async function nwcVerifyUrl(
   endpoint: string,

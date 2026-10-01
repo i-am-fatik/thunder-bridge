@@ -1,9 +1,0 @@
-vault/
-.agents/
-.claude/
-node_modules
-data/
-.env
-.git
-.idea
-.DS_Store

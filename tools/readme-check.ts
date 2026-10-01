@@ -10,6 +10,16 @@ const HEADING = /^#{1,4} (.+)$/gm;
 const LINK = /\[[^\]]*\]\(([^)]+)\)/g;
 const FENCE = /```[a-z]*\n[\s\S]*?```/g;
 const WALLET_ROW = /^\| ([A-Za-z][^|]*?) \| (`@[^|]+`) \|$/gm;
+const PROSE = ["sdk/README.md", "docs/errors.md", "docs/proving-a-payment.md"];
+const LINKED = [
+	"README.md",
+	"SECURITY.md",
+	"docs/design.md",
+	"docs/operations.md",
+	"docs/lud21-coverage.md",
+	...PROSE,
+];
+const FENCED = ["sdk/README.md", "docs/errors.md"];
 
 function everyMatch(text: string, pattern: RegExp, group = 1): string[] {
 	return [...text.matchAll(pattern)].map((hit) => hit[group] as string);
@@ -44,21 +54,21 @@ function sectionOf(readme: string, heading: string): string {
 	return closes === -1 ? rest : rest.slice(0, closes);
 }
 
-export function typesBothWays(readme: string, gateway: string): Drift[] {
+export function typesBothWays(errors: string, gateway: string): Drift[] {
 	const declared = new Set(everyMatch(gateway, PROBLEM_TYPE));
-	const documented = new Set(everyMatch(sectionOf(readme, "Errors"), TABLE_TYPE));
+	const documented = new Set(everyMatch(sectionOf(errors, "Problem types"), TABLE_TYPE));
 
 	return [
 		...[...declared]
 			.filter((type) => !documented.has(type))
 			.map((type) => ({
-				check: "a problem type the gateway sends and the readme does not name",
+				check: "a problem type the gateway sends and the error reference does not name",
 				detail: type,
 			})),
 		...[...documented]
 			.filter((type) => !declared.has(type))
 			.map((type) => ({
-				check: "a problem type the readme names and the gateway does not send",
+				check: "a problem type the error reference names and the gateway does not send",
 				detail: type,
 			})),
 	];
@@ -71,7 +81,7 @@ export function identifiersResolve(readme: string, source: string): Drift[] {
 		.filter((name) => !name.includes("."))
 		.filter((name) => !new RegExp(`\\b${name}\\b`).test(source))
 		.map((name) => ({
-			check: "an identifier the readme backticks and the source does not define",
+			check: "an identifier the docs backtick and the source does not define",
 			detail: name,
 		}));
 }
@@ -89,7 +99,7 @@ export function walletsWereMeasured(readme: string, survey: string): Drift[] {
 		});
 	}
 
-	for (const addresses of sectionOf(readme, "Whose wallets this works with").matchAll(WALLET_ROW)) {
+	for (const addresses of sectionOf(readme, "Which wallets work").matchAll(WALLET_ROW)) {
 		for (const ends of everyMatch(addresses[2] as string, /@([a-z0-9.-]+)/g)) {
 			if (!domains.includes(ends)) {
 				drift.push({
@@ -148,16 +158,21 @@ export function fencesIn(readme: string): string[] {
 	return [...readme.matchAll(/\n```ts\n([\s\S]*?)\n```\n/g)].map((hit) => hit[1] as string);
 }
 
+function named(path: string, drift: Drift[]): Drift[] {
+	return drift.map((found) => ({ ...found, detail: `${path}: ${found.detail}` }));
+}
+
 export function driftIn(root: string): Drift[] {
-	const readmePath = resolve(root, "sdk/README.md");
-	const readme = readFileSync(readmePath, "utf8");
+	const read = (path: string) => readFileSync(resolve(root, path), "utf8");
+	const source = sourceOf(root);
 
 	return [
-		...typesBothWays(readme, readFileSync(resolve(root, "src/problem.ts"), "utf8")),
-		...identifiersResolve(readme, sourceOf(root)),
-		...walletsWereMeasured(readme, readFileSync(resolve(root, "docs/lud21-measured.json"), "utf8")),
-		...rendersOnNpm(readme),
-		...linksResolve(readme, readmePath),
+		...typesBothWays(read("docs/errors.md"), read("src/problem.ts")),
+		...walletsWereMeasured(read("sdk/README.md"), read("docs/lud21-measured.json")),
+		...PROSE.flatMap((path) => named(path, identifiersResolve(read(path), source))),
+		...LINKED.flatMap((path) =>
+			named(path, [...rendersOnNpm(read(path)), ...linksResolve(read(path), resolve(root, path))]),
+		),
 	];
 }
 
@@ -166,7 +181,7 @@ if (process.argv[1]?.endsWith("readme-check.ts")) {
 	const into = process.argv[3] === "--fences" ? process.argv[4] : null;
 
 	if (into !== undefined && into !== null) {
-		const fences = fencesIn(readFileSync(resolve(root, "sdk/README.md"), "utf8"));
+		const fences = FENCED.flatMap((path) => fencesIn(readFileSync(resolve(root, path), "utf8")));
 		mkdirSync(resolve(into, "src"), { recursive: true });
 		fences.forEach((fence, index) => {
 			writeFileSync(resolve(into, "src", `fence${index}.ts`), `${fence}\n`);

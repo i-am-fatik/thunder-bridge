@@ -20,32 +20,32 @@ const SURVEY = JSON.stringify({
 });
 
 function errorsSection(rows: string): string {
-	return `## Errors\n\n| \`type\` | Status | What it is |\n|---|---|---|\n${rows}\n\n## Webhooks\n`;
+	return `## Problem types\n\n| \`type\` | Status | What it is |\n|---|---|---|\n${rows}\n\n## Webhooks\n`;
 }
 
 function walletSection(rows: string): string {
-	return `## Whose wallets this works with\n\n| Works | Address ends with |\n|---|---|\n${rows}\n\nlast surveyed 2026-08-12\n\n## Install\n`;
+	return `## Which wallets work\n\n| Works | Address ends with |\n|---|---|\n${rows}\n\nlast surveyed 2026-08-12\n\n## Install\n`;
 }
 
-test("a type the gateway sends and the readme never names is drift", () => {
+test("a type the gateway sends and the error reference never names is drift", () => {
 	const readme = errorsSection("| `invalid-request` | 400 | detail |");
 
 	expect(typesBothWays(readme, GATEWAY)).toEqual([
 		{
-			check: "a problem type the gateway sends and the readme does not name",
+			check: "a problem type the gateway sends and the error reference does not name",
 			detail: "too-many-pending",
 		},
 	]);
 });
 
-test("a type the readme names and the gateway never sends is drift", () => {
+test("a type the error reference names and the gateway never sends is drift", () => {
 	const readme = errorsSection(
 		"| `invalid-request` | 400 | detail |\n| `too-many-pending` | 429 | over its share |\n| `invented-type` | 418 | nothing sends this |",
 	);
 
 	expect(typesBothWays(readme, GATEWAY)).toEqual([
 		{
-			check: "a problem type the readme names and the gateway does not send",
+			check: "a problem type the error reference names and the gateway does not send",
 			detail: "invented-type",
 		},
 	]);
@@ -71,7 +71,7 @@ test("a backticked identifier the source never defines is drift", () => {
 
 	expect(identifiersResolve("call `invoiceFrom` and then `mintTheThing`", source)).toEqual([
 		{
-			check: "an identifier the readme backticks and the source does not define",
+			check: "an identifier the docs backtick and the source does not define",
 			detail: "mintTheThing",
 		},
 	]);
@@ -120,6 +120,6 @@ test("a link to a heading that moved is drift", () => {
 	]);
 });
 
-test("the readme this repository ships has not drifted", () => {
+test("the readme and the docs it hands off to have not drifted", () => {
 	expect(driftIn(".")).toEqual([]);
 });
