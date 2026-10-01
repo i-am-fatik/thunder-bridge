@@ -286,6 +286,26 @@ export function demoIn(root: string): { at: string; body: string }[] {
 	});
 }
 
+export function bundleDemo(root: string, outfile: string): void {
+	execFileSync(
+		resolve(root, "node_modules/.bin/esbuild"),
+		[
+			resolve(root, "docs/demo/entry.ts"),
+			"--bundle",
+			"--format=esm",
+			"--platform=browser",
+			"--external:dns/promises",
+			"--external:timers/promises",
+			"--external:https",
+			"--external:net",
+			"--external:stream",
+			"--log-level=error",
+			`--outfile=${outfile}`,
+		],
+		{ stdio: "pipe" },
+	);
+}
+
 if (process.argv[1]?.endsWith("demo.ts")) {
 	const root = process.argv[2] === "--check" ? (process.argv[3] ?? ".") : (process.argv[2] ?? ".");
 	const checking = process.argv.includes("--check");
@@ -304,21 +324,8 @@ if (process.argv[1]?.endsWith("demo.ts")) {
 	}
 
 	if (!checking) {
-		execFileSync(
-			resolve(root, "node_modules/.bin/esbuild"),
-			[
-				resolve(root, "docs/demo/entry.ts"),
-				"--bundle",
-				"--format=esm",
-				"--platform=browser",
-				"--external:dns/promises",
-				"--external:timers/promises",
-				"--external:https",
-				"--external:stream",
-				`--outfile=${resolve(root, "docs/demo/bundle.js")}`,
-			],
-			{ stdio: "inherit" },
-		);
-		console.log(`${relative(root, resolve(root, "docs/demo/bundle.js"))} written`);
+		const bundle = resolve(root, "docs/demo/bundle.js");
+		bundleDemo(root, bundle);
+		console.log(`${relative(root, bundle)} written`);
 	}
 }
