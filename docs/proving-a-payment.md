@@ -86,15 +86,16 @@ already in the account, are in
 [the README](../sdk/README.md#what-each-one-costs-you) with the rest of the rail's
 risks.
 
-## Making the gateway poll nobody but you
+## The gateway polls nobody but you
 
-By default a Lightning watch hands the gateway the wallet's own verify URL, so the
-gateway polls `blink.sv` or `coinos.io` directly and its logs, its ledger and its
-peers all carry that domain. If you would rather it never touched a third party and
-never learned which provider your recipient uses, put your own endpoint in between.
+A Lightning rail hands the gateway a URL of yours by default, the same as the bank
+and NWC rails do. The gateway never polls `blink.sv` or `coinos.io` itself, so its
+logs, its ledger and its peers never learn which provider your recipient uses. Only
+`gatewayMints: true` makes it mint and poll the wallet directly, and that is for a
+client with no server to put in between.
 
 ```ts
-import { ThunderBridge } from "thunder-bridge";
+import { msat, ThunderBridge } from "thunder-bridge";
 
 declare const gateway: ThunderBridge;
 
@@ -105,10 +106,10 @@ export const serveVerify = gateway.serve.lightningVerify({
   pollEverySecs: 5,
 });
 
-export const rail = gateway.rails.blindLightning({
-  to: ["you@blink.sv"],
-  amount: (order) => order.amountMinor * 40,
-  relayThrough: { endpoint: "https://shop.example/verify/lightning", secret: RELAY_SECRET },
+export const rail = gateway.rails.lightning({
+  paidTo: ["you@blink.sv"],
+  amount: (order) => msat(order.amountMinor * 40),
+  verifyThrough: { endpoint: "https://shop.example/verify/lightning", secret: RELAY_SECRET },
 });
 ```
 
@@ -259,7 +260,7 @@ first thing a caller needs and the README is what npm hands them.
 
 ### Every rail sends the same body
 
-`bankRail` and `blindLightningRail` used to need a parser of their own, because their
+`bankRail` and the Lightning rail through your endpoint used to need a parser of their own, because their
 webhook carried no address, no amount and no invoice while a minted one did. A
 delivery is a `Settlement` on every rail now, so `serve.readSettlement` is the only
 one to reach for. `parseWatchedWebhookRequest` is still there for reading the shape a

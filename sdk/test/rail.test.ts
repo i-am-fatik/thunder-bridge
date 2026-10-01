@@ -3,17 +3,16 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preimageMatchesHash } from "../../core/bolt11.js";
 import { checkSettled } from "../../core/lnurl.js";
-import { unseal } from "../../core/sealed.js";
+import { unseal, unsealFor } from "../../core/sealed.js";
 import { bankVerifyEndpoint, type Credit } from "../src/bank";
 import { ThunderBridge } from "../src/client";
 import { NoWalletAvailableError } from "../src/errors";
 import {
   type BankRailConfig,
-  type BlindLightningRailConfig,
   bankRail,
-  blindLightningRail,
   type Leg,
   type LightningRailConfig,
+  type LightningRailSettings,
   lightningRail,
   type Order,
   type Rail,
@@ -39,6 +38,8 @@ const SECRET = "keep-me-server-side-and-thirty-two-plus";
 const IBAN = "CZ6508000000192000145399";
 const MOUNT = "https://shop.example.org/verify/bank";
 const EXPIRES_AT = 1_900_000_000;
+const RELAY = "https://shop.example.org/verify/lightning";
+const RELAY_SECRET = "the-relay-secret-kept-on-the-shop-server";
 
 const INVOICE = bolt11({
   paymentHash: PAYMENT_HASH,
@@ -108,19 +109,21 @@ function bank(overrides: Partial<BankRailConfig> = {}): Rail {
   });
 }
 
-function lightning(overrides: Partial<LightningRailConfig> = {}): Rail {
+function lightning(overrides: Partial<LightningRailSettings> = {}): Rail {
   return lightningRail(new ThunderBridge(GATEWAY), {
     paidTo: [LN_ADDRESS],
     amount: () => msat(AMOUNT_MSAT),
+    gatewayMints: true,
     ...overrides,
   });
 }
 
-function blind(overrides: Partial<BlindLightningRailConfig> = {}): Rail {
-  return blindLightningRail(new ThunderBridge(GATEWAY, { token: "hunter2" }), {
+function relayed(overrides: Partial<LightningRailSettings> = {}): Rail {
+  return lightningRail(new ThunderBridge(GATEWAY, { token: "hunter2" }), {
     send: throughFetch,
     paidTo: [LN_ADDRESS],
     amount: () => msat(AMOUNT_MSAT),
+    verifyThrough: { endpoint: RELAY, secret: RELAY_SECRET },
     ...overrides,
   });
 }
@@ -138,7 +141,7 @@ afterEach(() => {
 describe("every rail answers the same question", () => {
   it("hands back the same six fields whichever rail built the leg", async () => {
     stubFetch(railsServing());
-    const rails: Rail[] = [bank(), lightning(), blind()];
+    const rails: Rail[] = [bank(), lightning(), relayed()];
 
     const legs: Leg[] = [];
     for (const rail of rails) legs.push(await rail(ORDER));
@@ -251,7 +254,7 @@ describe("bankRail", () => {
   });
 });
 
-describe("lightningRail", () => {
+describe("lightningRail with gatewayMints", () => {
   it("sends no idempotency key unless one was asked for, because a stable one is joinable", async () => {
     const calls = stubFetch(railsServing());
 
@@ -289,24 +292,36 @@ describe("lightningRail", () => {
   });
 });
 
-describe("blindLightningRail", () => {
-  it("hands the gateway a hash and a URL, and never the address or the amount", async () => {
+describe("lightningRail through your own endpoint", () => {
+  it("hands the gateway a hash and a URL of yours, and never the address, the amount or the wallet", async () => {
     const calls = stubFetch(railsServing());
 
-    await blind()(ORDER);
+    await relayed()(ORDER);
 
     const body = bodyOf(`${GATEWAY}/watched-payments`, calls);
+    const polled = new URL(String(body["verify_url"]));
     expect(body["payment_hash"]).toBe(PAYMENT_HASH);
-    expect(body["verify_url"]).toBe(VERIFY);
+    expect(`${polled.origin}${polled.pathname}`).toBe(RELAY);
     expect(JSON.stringify(body)).not.toContain(LN_ADDRESS);
     expect(JSON.stringify(body)).not.toContain(String(AMOUNT_MSAT));
+    expect(JSON.stringify(body)).not.toContain("example.com");
+  });
+
+  it("seals the wallet's own URL into yours, so only your endpoint can ask the wallet", async () => {
+    const calls = stubFetch(railsServing());
+
+    await relayed()(ORDER);
+
+    const polled = new URL(String(bodyOf(`${GATEWAY}/watched-payments`, calls)["verify_url"]));
+    const opened = await unsealFor("relay", RELAY_SECRET, polled.searchParams.get("w") ?? "");
+    expect(JSON.parse(opened ?? "null")).toEqual({ url: VERIFY, hash: PAYMENT_HASH });
   });
 
   it("seals what the watcher needs for the invoice it resolved, and for no other", async () => {
     const calls = stubFetch(railsServing());
     const sealing = "the-watchers-own-thirty-two-char-key";
 
-    await blind({ sealed: { secret: sealing, data: (order) => ({ order: order.reference }) } })(ORDER);
+    await relayed({ sealed: { secret: sealing, data: (order) => ({ order: order.reference }) } })(ORDER);
 
     const sealed = String(bodyOf(`${GATEWAY}/watched-payments`, calls)["sealed"]);
     expect(await unseal(sealing, sealed, PAYMENT_HASH)).toBe('{"order":"ORDER-2026-77"}');
@@ -316,7 +331,7 @@ describe("blindLightningRail", () => {
   it("never asks the gateway to mint", async () => {
     const calls = stubFetch(railsServing());
 
-    await blind()(ORDER);
+    await relayed()(ORDER);
 
     expect(calls.some((call) => call.url === `${GATEWAY}/incoming-payments`)).toBe(false);
   });
@@ -324,7 +339,33 @@ describe("blindLightningRail", () => {
   it("refuses with the same error type the minting rail throws, so one catch covers both", async () => {
     stubFetch(railsServing({ [PAY_REQUEST]: () => jsonResponse({ status: "ERROR" }, 404) }));
 
-    await expect(blind()(ORDER)).rejects.toBeInstanceOf(NoWalletAvailableError);
+    await expect(relayed()(ORDER)).rejects.toBeInstanceOf(NoWalletAvailableError);
+  });
+});
+
+describe("a Lightning rail names who the gateway polls", () => {
+  const settings = { paidTo: [LN_ADDRESS], amount: () => msat(AMOUNT_MSAT) };
+  const through = { endpoint: RELAY, secret: RELAY_SECRET };
+
+  it("refuses to be built without saying, and names both ways to say it", () => {
+    const neither = settings as unknown as LightningRailConfig;
+
+    expect(() => lightningRail(new ThunderBridge(GATEWAY), neither)).toThrow(/verifyThrough.*gatewayMints/);
+  });
+
+  it("refuses to be built with both, because they are two different paths", () => {
+    const both = { ...settings, gatewayMints: true, verifyThrough: through } as unknown as LightningRailConfig;
+
+    expect(() => lightningRail(new ThunderBridge(GATEWAY), both)).toThrow(/only one/);
+  });
+
+  it("will not type-check with neither or with both", () => {
+    // @ts-expect-error neither path is named
+    const neither: LightningRailConfig = settings;
+    // @ts-expect-error both paths are named
+    const both: LightningRailConfig = { ...settings, gatewayMints: true, verifyThrough: through };
+
+    expect([neither, both]).toHaveLength(2);
   });
 });
 

@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { preimageMatchesHash } from "../core/bolt11.ts";
-import { nwcConnection, nwcInvoice, nwcVerifyEndpoint, nwcVerifyUrl } from "../sdk/dist/nwc.js";
+import { ThunderBridge } from "../sdk/dist/index.js";
+import { nwcConnection, nwcInvoice, nwcVerifyUrl } from "../sdk/dist/nwc.js";
 
 const SEALING_SECRET = "smoke_secret_a41f7c02be93d5681047ff2c";
 const PORT = Number(process.env.PORT ?? 8477);
@@ -23,7 +24,11 @@ console.log(`hash    ${invoice.paymentHash}`);
 console.log(`expires ${new Date(invoice.expiresAt * 1000).toISOString()}\n`);
 console.log(`${invoice.bolt11}\n`);
 
-const endpoint = nwcVerifyEndpoint({ connection, secret: SEALING_SECRET, pollEverySecs: 3 });
+const endpoint = new ThunderBridge("https://unused.example").serve.nwcVerify({
+	connection,
+	secret: SEALING_SECRET,
+	pollEverySecs: 3,
+});
 createServer(async (incoming, outgoing) => {
 	const answer = await endpoint(
 		new Request(`http://127.0.0.1:${PORT}${incoming.url}`, { method: incoming.method }),

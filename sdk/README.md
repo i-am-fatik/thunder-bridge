@@ -123,7 +123,21 @@ Every rail ends the same way, with a preimage that has to hash to the payment ha
 the gateway was given. What differs is who obtains the invoice, who is asked for the
 preimage, and which side does the checking.
 
-| `rails.lightning` | the gateway asks, at the recipient's LNURL callback |
+Every rail is verified through an endpoint of yours by default: `verifyThrough` on the
+Lightning and NWC rails and on `serve.lnurlPay`, the verify URL on the bank rail. The
+gateway mints and polls a wallet itself only when you say `gatewayMints: true`, which
+is for a client with no server of its own.
+
+| `rails.lightning` with `verifyThrough` | you ask, with `invoiceFrom` on your server |
+|---|---|
+| the gateway is told | a hash, an expiry and your URL, with the wallet's sealed inside |
+| the invoice is checked by | nobody needs to, you resolved the address yourself |
+| the gateway probes first | `speaksVerify`: a GET on the URL, then a signed POST nonce it must echo |
+| the gateway polls | your `serve.lightningVerify` endpoint |
+| `settled` comes from | your endpoint, which unseals, asks the wallet and relays the answer |
+| the pace is set by | you, `pollEverySecs` |
+
+| `rails.lightning` with `gatewayMints` | the gateway asks, at the recipient's LNURL callback |
 |---|---|
 | the gateway is told | the address list and the amount, and nothing else. It derives the hash and the `verify` URL by resolving the address, and hands both back |
 | the invoice is checked by | you, `proveOrigin` runs five checks against the recipient's own domain |
@@ -131,15 +145,6 @@ preimage, and which side does the checking.
 | the gateway polls | the wallet, directly |
 | `settled` comes from | the wallet releasing its preimage |
 | the pace is set by | the wallet, when it sends `Cache-Control: max-age`. When it sends none the gateway's own schedule decides |
-
-| `rails.blindLightning` | you ask, with `invoiceFrom` on your server |
-|---|---|
-| the gateway is told | a hash, an expiry and your URL, with the wallet's sealed inside |
-| the invoice is checked by | nobody needs to, you resolved the address yourself |
-| the gateway probes first | `speaksVerify`: a GET on the URL, then a signed POST nonce it must echo |
-| the gateway polls | your `serve.lightningVerify` endpoint, once `relayThrough` is set. Leave it off and the gateway polls the wallet directly, as on the minted rail |
-| `settled` comes from | your endpoint, which unseals, asks the wallet and relays the answer |
-| the pace is set by | you, `pollEverySecs` |
 
 | `rails.nwc` | your own wallet mints it, over NIP-47 `make_invoice` |
 |---|---|
@@ -182,7 +187,7 @@ without saying whether either invoice was paid.
 
 ### What each one costs you
 
-**`rails.lightning`**
+**`rails.lightning` with `gatewayMints`**
 
 - the gateway holds the address and the amount, so your order book is readable
   from its own logs
@@ -191,10 +196,10 @@ without saying whether either invoice was paid.
 - the wallet's `Cache-Control` sets the poll pace, so how fast a settlement is
   noticed is not yours to decide
 
-**`rails.blindLightning`**
+**`rails.lightning` with `verifyThrough`**
 
-- a service of your own that has to stay up, so a browser-only integration cannot
-  use this rail at all
+- a service of your own that has to stay up, so a browser-only integration has to
+  say `gatewayMints` instead
 - one long-lived sealing secret, which `seal` refuses under 32 characters, so
   `openssl rand -hex 16` is the shortest thing that works
 - your endpoint being down means the gateway cannot verify and the payment sits
@@ -296,12 +301,22 @@ const asked = await gateway.requestPayment({ paidTo: "iamfatik@blink.sv", amount
 const read = await gateway.payment(asked);
 const quoted = await gateway.quote({ paidTo: "iamfatik@blink.sv", amount: sats(21) });
 
+const verifyThrough = {
+  endpoint: "https://shop.example/verify/lightning",
+  secret: "another-long-lived-server-side-secret",
+};
+const verify = gateway.serve.lightningVerify({ secret: verifyThrough.secret });
 const lnurl = gateway.serve.lnurlPay({
   paidTo: "iamfatik@blink.sv",
   amount: sats(21),
   secret: "a-long-lived-server-side-secret",
+  verifyThrough,
 });
-const rail = gateway.rails.lightning({ paidTo: "iamfatik@blink.sv", amount: () => sats(21) });
+const rail = gateway.rails.lightning({
+  paidTo: "iamfatik@blink.sv",
+  amount: () => sats(21),
+  verifyThrough,
+});
 ```
 
 - **the payments themselves** are `requestPayment`, `mint`, `quote`, `watch`, `payment`,
@@ -310,8 +325,8 @@ const rail = gateway.rails.lightning({ paidTo: "iamfatik@blink.sv", amount: () =
 - **what you mount** is on `gateway.serve`: an LNURL-pay endpoint, the two ticket
   endpoints, the verify endpoints `lightningVerify`, `bankVerify` and `nwcVerify`, the
   webhook route, and the readers under it
-- **one call per sale** is on `gateway.rails`: `lightning`, `blindLightning`,
-  `bank`, `nwc`, and `transfer` for a bank transfer on its own. What the NWC rail
+- **one call per sale** is on `gateway.rails`: `lightning`, `bank`, `nwc`, and
+  `transfer` for a bank transfer on its own. What the NWC rail
   needs to reach your wallet, `nwcConnection` and the wallet calls, stays in
   `thunder-bridge/nwc`
 - **the proofs** are free functions, deliberately, because a proof you cannot run

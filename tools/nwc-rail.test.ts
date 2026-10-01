@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Send } from "../core/outbound.ts";
 import { decodeInvoice, msat, ThunderBridge } from "../sdk/dist/index.js";
-import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "../sdk/dist/nwc.js";
+import { nwcConnection } from "../sdk/dist/nwc.js";
 import { type Service, start } from "../src/index.ts";
 import { CLUSTER_KEY, openStore } from "../src/testing.ts";
 import { type RegtestWallet, startRegtestWallet } from "./nwc-regtest-wallet.ts";
@@ -28,7 +28,10 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 		ensureWrapCanFlow();
 		own = await startRegtestWallet();
 		served = servedInProcess(
-			nwcVerifyEndpoint({ connection: nwcConnection(own.uri), secret: SEALING_SECRET }),
+			new ThunderBridge("https://unused.example").serve.nwcVerify({
+				connection: nwcConnection(own.uri),
+				secret: SEALING_SECRET,
+			}),
 		);
 
 		const opened = openStore();
@@ -53,7 +56,7 @@ describe.skipIf(!nodesUp())("a rail that mints on the shop's own wallet", () => 
 	});
 
 	it("mints on the real wallet and hands the gateway a verify url of ours", async () => {
-		const rail = nwcRail(new ThunderBridge(`http://127.0.0.1:${gateway.at}`), {
+		const rail = new ThunderBridge(`http://127.0.0.1:${gateway.at}`).rails.nwc({
 			connection: nwcConnection(own.uri),
 			amount: () => msat(OWN_AMOUNT_MSAT),
 			verifyThrough: { endpoint: MOUNT, secret: SEALING_SECRET },

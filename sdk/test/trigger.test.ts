@@ -2,16 +2,18 @@ import { msat } from "../src/amount";
 import { createHash, createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThunderBridge } from "../src/client";
-import { unseal } from "../../core/sealed.js";
+import { unseal, unsealFor } from "../../core/sealed.js";
 import { ProblemError } from "../src/errors";
 import {
   lnurlPayEndpoint,
   publicWatchTicketEndpoint,
   type Minted,
   type TriggerConfig,
+  type TriggerSettings,
   watchTicketEndpoint,
   type WatchTicketConfig,
 } from "../src/trigger";
+import type { VerifyPath } from "../src/relay";
 import { bolt11 } from "./encode";
 import { jsonResponse, problemResponse, stubFetch, throughFetch, type FetchCall, type Routes } from "./harness";
 
@@ -26,6 +28,10 @@ const AMOUNT_MSAT = 21_000;
 const PAYMENT_HASH = "ab".repeat(32);
 const SECRET = "keep-me-server-side";
 const SEALING_SECRET = "s".repeat(32);
+const RELAY = "https://tips.example.org/verify/lightning";
+const THROUGH_YOU: VerifyPath = {
+  verifyThrough: { endpoint: RELAY, secret: "the-relay-secret-kept-on-the-tip-server" },
+};
 
 function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
@@ -82,13 +88,17 @@ function gatewayServing(overrides: Record<string, unknown> = {}): Routes {
   };
 }
 
-function endpoint(overrides: Partial<TriggerConfig> = {}) {
+function endpoint(
+  overrides: Partial<TriggerSettings> = {},
+  path: VerifyPath = { gatewayMints: true },
+) {
   return lnurlPayEndpoint(new ThunderBridge(GATEWAY), {
     send: throughFetch,
     paidTo: [FALLBACK, WINNER],
     amount: () => msat(AMOUNT_MSAT),
     secret: SECRET,
     ...overrides,
+    ...path,
   });
 }
 
@@ -356,7 +366,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
 
   it("hands the gateway a hash and a URL, and never the address or the amount", async () => {
     const calls = stubFetch(recipientAndBlindGateway());
-    const handler = endpoint({ blind: true });
+    const handler = endpoint({}, THROUGH_YOU);
 
     const offer = await payRequest(handler);
     const minted = (await (
@@ -366,8 +376,16 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
     expect(minted["pr"]).toBe(INVOICE);
     const watch = calls.find((call) => call.url === `${GATEWAY}/watched-payments`);
     const body = JSON.parse(String(watch?.init?.body)) as Record<string, unknown>;
+    const polled = new URL(String(body["verify_url"]));
     expect(body["payment_hash"]).toBe(PAYMENT_HASH);
-    expect(body["verify_url"]).toBe(VERIFY);
+    expect(`${polled.origin}${polled.pathname}`).toBe(RELAY);
+    expect(JSON.stringify(body)).not.toContain("coinos.io");
+    const opened = await unsealFor(
+      "relay",
+      "the-relay-secret-kept-on-the-tip-server",
+      polled.searchParams.get("w") ?? "",
+    );
+    expect(JSON.parse(opened ?? "null")).toEqual({ url: VERIFY, hash: PAYMENT_HASH });
     expect(body).not.toHaveProperty("ln_addresses");
     expect(body).not.toHaveProperty("incoming_amount");
     expect(JSON.stringify(body)).not.toContain(WINNER);
@@ -377,7 +395,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
   it("quotes the list itself, so the gateway is told neither the addresses nor the amount", async () => {
     const calls = stubFetch(recipientAndBlindGateway());
 
-    const offer = await payRequest(endpoint({ blind: true }));
+    const offer = await payRequest(endpoint({}, THROUGH_YOU));
 
     expect(offer["metadata"]).toBe(METADATA);
     expect(new URL(offer.callback).searchParams.get("to")).toBe(WINNER);
@@ -386,7 +404,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
 
   it("asks the blind watch to keep settlements too, since the socket is the same either way", async () => {
     const calls = stubFetch(recipientAndBlindGateway());
-    const handler = endpoint({ blind: true, watchSecret: "the-overlay-holds-this", replay: 10 });
+    const handler = endpoint({ watchSecret: "the-overlay-holds-this", replay: 10 }, THROUGH_YOU);
 
     await handler(new Request((await payRequest(handler)).callback));
 
@@ -397,7 +415,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
 
   it("never asks the gateway to mint, so the gateway never sees the callback either", async () => {
     const calls = stubFetch(recipientAndBlindGateway());
-    const handler = endpoint({ blind: true });
+    const handler = endpoint({}, THROUGH_YOU);
 
     await handler(new Request((await payRequest(handler)).callback));
 
@@ -406,13 +424,15 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
 
   it("encrypts what the watcher needs, so the gateway is handed nothing readable", async () => {
     const calls = stubFetch(recipientAndBlindGateway());
-    const handler = endpoint({
-      blind: true,
-      sealed: {
-        secret: SEALING_SECRET,
-        data: (minted: Minted) => ({ amountMsat: minted.amountMsat, lnAddress: minted.lnAddress }),
+    const handler = endpoint(
+      {
+        sealed: {
+          secret: SEALING_SECRET,
+          data: (minted: Minted) => ({ amountMsat: minted.amountMsat, lnAddress: minted.lnAddress }),
+        },
       },
-    });
+      THROUGH_YOU,
+    );
 
     await handler(new Request((await payRequest(handler)).callback));
 
@@ -429,10 +449,12 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
 
   it("hands the watcher back exactly what was sealed, and nobody else", async () => {
     const calls = stubFetch(recipientAndBlindGateway());
-    const handler = endpoint({
-      blind: true,
-      sealed: { secret: SEALING_SECRET, data: (minted: Minted) => ({ amountMsat: minted.amountMsat }) },
-    });
+    const handler = endpoint(
+      {
+        sealed: { secret: SEALING_SECRET, data: (minted: Minted) => ({ amountMsat: minted.amountMsat }) },
+      },
+      THROUGH_YOU,
+    );
 
     await handler(new Request((await payRequest(handler)).callback));
 
@@ -459,7 +481,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
           { status: 409, headers: { "content-type": "application/problem+json" } },
         ),
     });
-    const handler = endpoint({ blind: true });
+    const handler = endpoint({}, THROUGH_YOU);
 
     const offer = await payRequest(handler);
     const minted = (await (
@@ -479,7 +501,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
           headers: { "content-type": "application/problem+json" },
         }),
     });
-    const handler = endpoint({ blind: true });
+    const handler = endpoint({}, THROUGH_YOU);
 
     const offer = await payRequest(handler);
     const answer = (await (
@@ -492,7 +514,7 @@ describe("the blind half, where the gateway is told nothing worth censoring on",
 
   it("still refuses an unsigned callback before resolving anything", async () => {
     const calls = stubFetch(recipientAndBlindGateway());
-    const handler = endpoint({ blind: true });
+    const handler = endpoint({}, THROUGH_YOU);
     const callback = new URL((await payRequest(handler)).callback);
     callback.searchParams.set("to", "attacker@example.com");
 
@@ -545,6 +567,7 @@ describe("the binding finding 1 is about", () => {
       paidTo: [FALLBACK, WINNER],
       amount: () => msat(AMOUNT_MSAT),
       secret: SECRET,
+      gatewayMints: true,
     });
     const offer = await payRequest(handler);
     const answer = (await (
@@ -680,6 +703,7 @@ describe("a trigger a payer chooses the amount on", () => {
       paidTo: [FALLBACK, WINNER],
       amount: { least: msat(least), most: msat(most) },
       secret: SECRET,
+      gatewayMints: true,
     });
   }
 
@@ -765,5 +789,23 @@ describe("a trigger a payer chooses the amount on", () => {
 
     expect(offer["status"]).toBe("ERROR");
     expect(offer["reason"]).toContain("cannot end at 1000 msat when it starts at 1000000");
+  });
+});
+
+describe("the trigger names who the gateway polls", () => {
+  const settings = { paidTo: [WINNER], amount: () => msat(AMOUNT_MSAT), secret: SECRET };
+
+  it("refuses to be built without saying, before any payer arrives", () => {
+    const neither = settings as unknown as TriggerConfig;
+
+    expect(() => lnurlPayEndpoint(new ThunderBridge(GATEWAY), neither)).toThrow(
+      /verifyThrough.*gatewayMints/,
+    );
+  });
+
+  it("refuses to be built with both", () => {
+    const both = { ...settings, gatewayMints: true, ...THROUGH_YOU } as unknown as TriggerConfig;
+
+    expect(() => lnurlPayEndpoint(new ThunderBridge(GATEWAY), both)).toThrow(/only one/);
   });
 });

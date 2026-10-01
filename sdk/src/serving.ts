@@ -99,15 +99,6 @@ export class Serve {
     return lightningVerifyEndpoint(config);
   }
 
-  /**
-   * What `lightningVerify` was called before 2.2.0
-   *
-   * @deprecated Use `lightningVerify`, beside `bankVerify` and `nwcVerify`
-   */
-  verify(config: LightningVerifyConfig): Handler {
-    return this.lightningVerify(config);
-  }
-
   /** The verify endpoint a bank rail is polled at, answering off your own statement */
   bankVerify(config: BankVerifyConfig): Handler {
     return bankVerifyEndpoint(config);

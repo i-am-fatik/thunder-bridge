@@ -141,17 +141,15 @@ describe("the handler on gateway.serve", () => {
     vi.unstubAllGlobals();
   });
 
-  it("is lightningVerify, and verify still answers the same for callers older than 2.2.0", async () => {
+  it("is lightningVerify on the gateway's serve", async () => {
     const serve = new Serve({} as ThunderBridge);
     const asked = walletSaying({ settled: true, preimage: PREIMAGE });
 
-    for (const handler of [
-      serve.lightningVerify({ secret: SECRET, send: throughFetch }),
-      serve.verify({ secret: SECRET, send: throughFetch }),
-    ]) {
-      const answer = await handler(new Request(await relayed()));
-      expect(await answer.json()).toEqual({ settled: true, preimage: PREIMAGE });
-    }
-    expect(asked.length).toBe(2);
+    const answer = await serve.lightningVerify({ secret: SECRET, send: throughFetch })(
+      new Request(await relayed()),
+    );
+
+    expect(await answer.json()).toEqual({ settled: true, preimage: PREIMAGE });
+    expect(asked.length).toBe(1);
   });
 });

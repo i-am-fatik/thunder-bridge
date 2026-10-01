@@ -4,7 +4,7 @@ import type { GatewayCheatCode } from "../src/errors";
 import { GatewayCheatError, UnverifiedRecipientError } from "../src/errors";
 import type { MintedPayment, Priced } from "../src/types";
 import { preimageMatchesHash } from "../../core/bolt11.js";
-import { agreesWithItself, carriesProof, proveOrigin, proveSettlement } from "../src/verify";
+import { agreesWithItself, proveOrigin, proveSettlement } from "../src/verify";
 import { bolt11 } from "./encode";
 
 const ADDRESS = "fatik@agora.gripe";
@@ -389,11 +389,6 @@ describe("agreesWithItself", () => {
   it("is false for a paid payment whose preimage is empty", () => {
     expect(agreesWithItself(payment({ status: "paid", preimage: "" }))).toBe(false);
   });
-
-  it("still answers under the name it had before 2.2.0", () => {
-    expect(carriesProof(payment({ status: "paid", preimage: PREIMAGE }))).toBe(true);
-    expect(carriesProof(payment({ status: "paid", preimage: "00".repeat(32) }))).toBe(false);
-  });
 });
 
 describe("preimageMatchesHash", () => {
@@ -510,7 +505,7 @@ describe("a settlement the gateway invented for itself", () => {
       paymentHash: sha256OfHex(invented),
     });
 
-    expect(carriesProof(forged)).toBe(false);
+    expect(agreesWithItself(forged)).toBe(false);
   });
 });
 

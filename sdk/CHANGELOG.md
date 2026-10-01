@@ -13,6 +13,70 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## Unreleased (3.0.0)
+
+### Changed
+
+- **Breaking.** Every rail is verified through an endpoint of yours by default.
+  `rails.lightning` and `serve.lnurlPay` take `verifyThrough: { endpoint, secret }`,
+  resolve the invoice on your server and hand the gateway only a hash and a URL of
+  yours, with the wallet's own URL sealed inside for your `serve.lightningVerify`. The
+  gateway mints and polls the wallet itself only when you say `gatewayMints: true`,
+  which is for a client with no server of its own. Naming neither, or both, fails
+  when the rail or endpoint is built, and TypeScript refuses it before that.
+- `rails.nwc` takes the same `VerifyThrough` type it always had in shape.
+
+### Removed
+
+- **Breaking.** `rails.blindLightning` and `BlindLightningRailConfig`. What they did
+  is now what `rails.lightning` does with `verifyThrough`.
+- **Breaking.** `blind` and `relayThrough` on `serve.lnurlPay`. Blind is the default
+  now, and `relayThrough` is `verifyThrough`.
+- **Breaking.** The names 2.2.0 deprecated: `carriesProof` (use `agreesWithItself`),
+  `Proven` (use `SelfConsistent`), `serve.verify` (use `serve.lightningVerify`), and
+  the free functions `nwcRail` and `nwcVerifyEndpoint` on `thunder-bridge/nwc` (use
+  `gateway.rails.nwc` and `gateway.serve.nwcVerify`).
+- **Breaking.** `serve.lightningVerify`, `serve.bankVerify` and `serve.nwcVerify` no
+  longer open a verify URL sealed before 2.2.0, when blobs were not yet bound to their
+  purpose. A watch registered by 2.1.x or earlier is answered as not ours once you
+  upgrade, so upgrade after the last such watch has expired. Bank watches can run
+  for days, so check the longest `expiresAt` you handed out before switching.
+
+### Migrating from 2.x
+
+A Lightning rail that let the gateway mint:
+
+```ts
+// 2.x
+gateway.rails.lightning({ paidTo, amount });
+// 3.0, the same behaviour, now asked for by name
+gateway.rails.lightning({ paidTo, amount, gatewayMints: true });
+// 3.0, the default: mount serve.lightningVerify at endpoint first
+gateway.rails.lightning({ paidTo, amount, verifyThrough: { endpoint, secret } });
+```
+
+A blind rail:
+
+```ts
+// 2.x
+gateway.rails.blindLightning({ paidTo, amount, relayThrough: { endpoint, secret } });
+// 3.0
+gateway.rails.lightning({ paidTo, amount, verifyThrough: { endpoint, secret } });
+```
+
+A Lightning address endpoint:
+
+```ts
+// 2.x
+gateway.serve.lnurlPay({ paidTo, amount, secret });
+gateway.serve.lnurlPay({ paidTo, amount, secret, blind: true, relayThrough });
+// 3.0
+gateway.serve.lnurlPay({ paidTo, amount, secret, gatewayMints: true });
+gateway.serve.lnurlPay({ paidTo, amount, secret, verifyThrough: relayThrough });
+```
+
+The bank and NWC rails do not change.
+
 ## 2.2.1
 
 ### Added

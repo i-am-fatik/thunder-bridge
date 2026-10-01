@@ -106,9 +106,10 @@
 				"a range instead of one amount is what makes a wallet offer a field to type in",
 				"the QR carries your own url, so the addresses behind it can change without reprinting it",
 				"the secret signs the callback, so nobody else can make the endpoint mint on your wallets",
-				"the watch secret is a second, weaker key, and watch-a-place is what reads it"
+				"the watch secret is a second, weaker key, and watch-a-place is what reads it",
+				"gatewayMints is asked for by name because this endpoint answers on localhost, where no gateway could poll a verify endpoint of yours"
 			],
-			"source": "import { type Handler, type Range, sats, ThunderBridge } from \"thunder-bridge\";\nimport { lnurlEndpointToSvg } from \"thunder-bridge/qr\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport function payMe(\n  into: { innerHTML: string },\n  endpoint: string,\n  secret: string,\n  watchSecret: string,\n  paidTo: string | string[] = [\"iamfatik@blink.sv\"],\n  range: Range = { least: sats(21), most: sats(210_000) },\n  via = DEMO_GATEWAY,\n): Handler {\n  const gateway = new ThunderBridge(via);\n\n  into.innerHTML = lnurlEndpointToSvg(endpoint);\n\n  return gateway.serve.lnurlPay({ paidTo, amount: range, secret, watchSecret });\n}\n",
+			"source": "import { type Handler, type Range, sats, ThunderBridge } from \"thunder-bridge\";\nimport { lnurlEndpointToSvg } from \"thunder-bridge/qr\";\n\nexport const DEMO_GATEWAY = \"https://public.thunder-bridge.agora.gripe\";\n\nexport function payMe(\n  into: { innerHTML: string },\n  endpoint: string,\n  secret: string,\n  watchSecret: string,\n  paidTo: string | string[] = [\"iamfatik@blink.sv\"],\n  range: Range = { least: sats(21), most: sats(210_000) },\n  via = DEMO_GATEWAY,\n): Handler {\n  const gateway = new ThunderBridge(via);\n\n  into.innerHTML = lnurlEndpointToSvg(endpoint);\n\n  return gateway.serve.lnurlPay({ paidTo, amount: range, secret, watchSecret, gatewayMints: true });\n}\n",
 			"calls": [
 				{
 					"name": "Handler",

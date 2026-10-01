@@ -10,7 +10,7 @@ import { NoWalletAvailableError } from "./errors.js";
 import { type NwcRailConfig, nwcRail } from "./nwc.js";
 import { medianOf, msatFor, type Ticker } from "./price.js";
 import { toLightningUri } from "./qr.js";
-import { relayedVerifyUrl } from "./relay.js";
+import { relayedVerifyUrl, type VerifyPath, type VerifyThrough, verifiedThrough } from "./relay.js";
 
 const BANK = "bank";
 const LIGHTNING = "lightning";
@@ -67,8 +67,8 @@ export interface RailConfig {
   name?: string;
 }
 
-/** A Lightning rail the gateway mints for, bound once and then given one order at a time */
-export interface LightningRailConfig extends RailConfig {
+/** Who a Lightning rail pays and what one order costs there, whichever path verifies it */
+export interface LightningRailSettings extends RailConfig {
   /** Priority list, the first address that can prove an invoice wins */
   paidTo: string | string[];
 
@@ -81,28 +81,26 @@ export interface LightningRailConfig extends RailConfig {
   /** Where the default conversion gets its rate, the median of four venues by default */
   rate?: Ticker;
 
-  /** Makes the mint safe to retry, the order's reference by default */
+  /** Makes the gateway's mint safe to retry, so it applies with `gatewayMints` only */
   idempotencyKey?: (order: Order) => string | undefined;
-}
 
-/** The same rail with the invoice resolved here, so the gateway is told neither address nor amount */
-export interface BlindLightningRailConfig extends LightningRailConfig {
   /**
    * What the watcher needs and the gateway must not read, sealed under `secret`
    * for the invoice's payment hash before it goes anywhere near the gateway
    */
   sealed?: { secret: string; data: (order: Order) => unknown };
 
-  /**
-   * Where your own `serve.verify` endpoint is mounted, and its secret. Without
-   * it the gateway is handed the wallet's own URL, which a gateway enforcing its
-   * verify challenge will refuse to poll
-   */
-  relayThrough?: { endpoint: string; secret: string };
-
   /** How the rail reaches wallets, pinned to the address it verified unless you say otherwise */
   send?: Send;
 }
+
+/**
+ * A Lightning rail, bound once and then given one order at a time. With
+ * `verifyThrough` the invoice is resolved here and the gateway polls your
+ * `serve.lightningVerify`, learning neither who is paid nor how much. With
+ * `gatewayMints` the gateway is told both, mints, and polls the wallet itself
+ */
+export type LightningRailConfig = LightningRailSettings & VerifyPath;
 
 /** A bank rail: the account the money lands in, and where its arrival is read back from */
 export interface BankRailConfig extends RailConfig {
@@ -118,7 +116,7 @@ export interface BankRailConfig extends RailConfig {
   /** When this leg stops being payable, in unix seconds */
   expiresAt: (order: Order) => number;
 
-  /** Sealed before the gateway sees it, the way the blind Lightning rail does */
+  /** Sealed before the gateway sees it, the way the Lightning rail does */
   sealed?: { secret: string; data: (order: Order) => unknown };
 
   /** The Czech variable symbol, taken off the reference's digits by default */
@@ -169,11 +167,20 @@ export function bankRail(gateway: ThunderBridge, config: BankRailConfig): Rail {
 }
 
 /**
- * Sell for Lightning, with the gateway minting the invoice. It is told the
- * address list and the amount, which is the round trip `blindLightning` spends
- * to avoid.
+ * Sell for Lightning. By default the address is resolved here and the gateway is
+ * handed only a hash and a URL of yours, which costs one round trip and a server.
+ * `gatewayMints` spends neither and tells the gateway the address list and the
+ * amount instead.
  */
 export function lightningRail(gateway: ThunderBridge, config: LightningRailConfig): Rail {
+  const through = verifiedThrough(config);
+
+  return through === null
+    ? mintedByGateway(gateway, config)
+    : resolvedHere(gateway, config, through);
+}
+
+function mintedByGateway(gateway: ThunderBridge, config: LightningRailSettings): Rail {
   return async (order) => {
     const payment = await gateway.mint(
       {
@@ -199,29 +206,24 @@ export function lightningRail(gateway: ThunderBridge, config: LightningRailConfi
   };
 }
 
-/**
- * Sell for Lightning, resolving the address here and handing the gateway only a
- * hash and a URL to poll. It costs one more round trip and the gateway learns
- * neither who is being paid nor how much, so the only refusal left to it is
- * refusing everyone.
- */
-export function blindLightningRail(gateway: ThunderBridge, config: BlindLightningRailConfig): Rail {
+function resolvedHere(
+  gateway: ThunderBridge,
+  config: LightningRailSettings,
+  through: VerifyThrough,
+): Rail {
   return async (order) => {
     const resolved = await invoiceFrom(
       config.paidTo,
       await msatForOrder(order, config.amount, config.rate),
       config.send,
     );
-    const relay = config.relayThrough;
     const watched = await gateway.watch({
       paymentHash: resolved.paymentHash,
-      verifyUrl: relay
-        ? await relayedVerifyUrl(
-            relay.endpoint,
-            { url: resolved.verifyUrl, hash: resolved.paymentHash },
-            relay.secret,
-          )
-        : resolved.verifyUrl,
+      verifyUrl: await relayedVerifyUrl(
+        through.endpoint,
+        { url: resolved.verifyUrl, hash: resolved.paymentHash },
+        through.secret,
+      ),
       expiresAt: resolved.expiresAt,
       trigger: config.trigger,
       replay: config.replay,
@@ -295,17 +297,12 @@ export async function msatForOrder(
 export class Rails {
   constructor(private readonly gateway: ThunderBridge) {}
 
-  /** Lightning, with the gateway minting against a priority list of addresses */
+  /**
+   * Lightning against a priority list of addresses, verified through your
+   * `serve.lightningVerify`, or minted by the gateway when you say `gatewayMints`
+   */
   lightning(config: LightningRailConfig): Rail {
     return lightningRail(this.gateway, config);
-  }
-
-  /**
-   * Lightning, with the invoice resolved here so the gateway is told neither the
-   * address nor the amount
-   */
-  blindLightning(config: BlindLightningRailConfig): Rail {
-    return blindLightningRail(this.gateway, config);
   }
 
   /** A bank transfer, proved the way a Lightning payment is */

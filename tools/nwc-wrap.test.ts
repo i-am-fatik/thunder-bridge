@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { preimageMatchesHash, proveWrapped } from "../sdk/dist/index.js";
+import { preimageMatchesHash, proveWrapped, ThunderBridge } from "../sdk/dist/index.js";
 import {
 	askWallet,
 	nwcConnection,
@@ -10,7 +10,6 @@ import {
 	nwcInvoice,
 	nwcPay,
 	nwcSettlement,
-	nwcVerifyEndpoint,
 	nwcVerifyUrl,
 } from "../sdk/dist/nwc.js";
 import {
@@ -268,7 +267,10 @@ describe.skipIf(!nodesUp())("the recipient's own wallet, answering LUD-21 over N
 	it("answers not settled while nobody has paid, then the real preimage once they have", async () => {
 		const connection = nwcConnection(own.uri);
 		const minted = await nwcInvoice(connection, OWN_AMOUNT_MSAT, "watched through a connection");
-		const answering = nwcVerifyEndpoint({ connection, secret: SEALING_SECRET });
+		const answering = new ThunderBridge("https://unused.example").serve.nwcVerify({
+			connection,
+			secret: SEALING_SECRET,
+		});
 		const sealed = await nwcVerifyUrl(MOUNT, minted.paymentHash, SEALING_SECRET);
 
 		const unpaid = await answering(new Request(sealed));
@@ -286,7 +288,10 @@ describe.skipIf(!nodesUp())("the recipient's own wallet, answering LUD-21 over N
 	it("refuses a hash somebody sealed with another secret", async () => {
 		const connection = nwcConnection(own.uri);
 		const minted = await nwcInvoice(connection, OWN_AMOUNT_MSAT, "sealed by a stranger");
-		const answering = nwcVerifyEndpoint({ connection, secret: SEALING_SECRET });
+		const answering = new ThunderBridge("https://unused.example").serve.nwcVerify({
+			connection,
+			secret: SEALING_SECRET,
+		});
 		const elsewhere = await nwcVerifyUrl(
 			MOUNT,
 			minted.paymentHash,

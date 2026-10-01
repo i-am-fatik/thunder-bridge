@@ -35,16 +35,16 @@ export { Gateways } from "./gateways.js";
 export type { NwcConnection, NwcRailConfig, NwcVerifyConfig } from "./nwc.js";
 export type {
   BankRailConfig,
-  BlindLightningRailConfig,
   Leg,
   LightningRailConfig,
+  LightningRailSettings,
   Order,
   Rail,
   RailConfig,
   Rails,
 } from "./rail.js";
 export { invoiceFrom } from "./rail.js";
-export type { LightningVerifyConfig, Relayed } from "./relay.js";
+export type { LightningVerifyConfig, Relayed, VerifyPath, VerifyThrough } from "./relay.js";
 export { relayedVerifyUrl } from "./relay.js";
 export type {
   PaymentRequest,
@@ -52,7 +52,13 @@ export type {
   PaymentRequestOptions,
 } from "./request.js";
 export type { Handler, Serve, WebhookHandlers } from "./serving.js";
-export type { Minted, Range, TriggerConfig, WatchTicketConfig } from "./trigger.js";
+export type {
+  Minted,
+  Range,
+  TriggerConfig,
+  TriggerSettings,
+  WatchTicketConfig,
+} from "./trigger.js";
 export type {
   Charge,
   Handover,
@@ -68,10 +74,9 @@ export type {
   WalletReason,
   WatchedPayment,
 } from "./types.js";
-export type { Provable, Proven, SelfConsistent, WrapAllowance } from "./verify.js";
+export type { Provable, SelfConsistent, WrapAllowance } from "./verify.js";
 export {
   agreesWithItself,
-  carriesProof,
   proveOrigin,
   proveSettlement,
   proveWrapped,

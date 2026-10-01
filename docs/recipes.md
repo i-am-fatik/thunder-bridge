@@ -72,7 +72,7 @@ export function payMe(
 
   into.innerHTML = <a href="api.md#thunder-bridge-qr-function-lnurlendpointtosvg">lnurlEndpointToSvg</a>(endpoint);
 
-  return gateway.<a href="api.md#thunder-bridge-class-thunderbridge-serve">serve</a>.<a href="api.md#thunder-bridge-class-serve-lnurlpay">lnurlPay</a>({ paidTo, amount: range, secret, watchSecret });
+  return gateway.<a href="api.md#thunder-bridge-class-thunderbridge-serve">serve</a>.<a href="api.md#thunder-bridge-class-serve-lnurlpay">lnurlPay</a>({ paidTo, amount: range, secret, watchSecret, gatewayMints: true });
 }</code></pre>
 
 - the endpoint is a fetch handler, so it mounts on anything that speaks Request and Response
@@ -80,6 +80,7 @@ export function payMe(
 - the QR carries your own url, so the addresses behind it can change without reprinting it
 - the secret signs the callback, so nobody else can make the endpoint mint on your wallets
 - the watch secret is a second, weaker key, and watch-a-place is what reads it
+- gatewayMints is asked for by name because this endpoint answers on localhost, where no gateway could poll a verify endpoint of yours
 
 ## <a id="resume-a-wait"></a>Pick a wait back up after a reload
 

@@ -138,9 +138,9 @@ test("a blob relabelled from a purpose to the version a watcher opens is refused
 	expect(await unsealFor("relay", SECRET, `v2.${relayed.slice(3)}`)).toBeNull();
 });
 
-test("a blob an older release sealed before purposes existed still opens, so a running watch keeps its answers", async () => {
-	expect(await unsealFor("bank-verify", SECRET, await seal(SECRET, PLAIN))).toBe(PLAIN);
-	expect(await unsealFor("relay", SECRET, SEALED_BEFORE_PADDING)).not.toBeNull();
+test("a blob sealed before purposes existed opens as none of them, so a gateway cannot hand one endpoint another's", async () => {
+	expect(await unsealFor("bank-verify", SECRET, await seal(SECRET, PLAIN))).toBeNull();
+	expect(await unsealFor("relay", SECRET, SEALED_BEFORE_PADDING)).toBeNull();
 });
 
 const HASH = "ab".repeat(32);

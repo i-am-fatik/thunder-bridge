@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { preimageMatchesHash } from "../core/bolt11.ts";
 import { msat, type Order, ThunderBridge } from "../sdk/dist/index.js";
-import { nwcConnection, nwcRail, nwcVerifyEndpoint } from "../sdk/dist/nwc.js";
+import { nwcConnection } from "../sdk/dist/nwc.js";
 
 const SEALING_SECRET = "rail_smoke_secret_b73e4f19ac0d258614fa";
 const PORT = Number(process.env.PORT ?? 8477);
@@ -17,7 +17,8 @@ if (!uri || !gatewayUrl || !publicEndpoint) {
 }
 
 const connection = nwcConnection(uri);
-const endpoint = nwcVerifyEndpoint({ connection, secret: SEALING_SECRET, pollEverySecs: 3 });
+const gateway = new ThunderBridge(gatewayUrl);
+const endpoint = gateway.serve.nwcVerify({ connection, secret: SEALING_SECRET, pollEverySecs: 3 });
 createServer(async (incoming, outgoing) => {
 	const answer = await endpoint(
 		new Request(`${publicEndpoint}${incoming.url}`, {
@@ -33,7 +34,7 @@ console.log(`wallet   ${connection.walletPubkey}`);
 console.log(`gateway  ${gatewayUrl}`);
 console.log(`endpoint ${publicEndpoint}\n`);
 
-const rail = nwcRail(new ThunderBridge(gatewayUrl), {
+const rail = gateway.rails.nwc({
 	connection,
 	amount: () => msat(AMOUNT_MSAT),
 	verifyThrough: { endpoint: publicEndpoint, secret: SEALING_SECRET },

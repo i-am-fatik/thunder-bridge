@@ -55,18 +55,14 @@ export async function sealFor(
 	);
 }
 
-/**
- * Read back a blob `sealFor` sealed for this purpose. A blob an older release
- * sealed before purposes existed still opens, so a watch already running keeps
- * being answered
- */
+/** Read back a blob `sealFor` sealed for this purpose */
 export async function unsealFor(
 	purpose: Purpose,
 	secret: string,
 	sealed: string,
 ): Promise<string | null> {
 	if (!sealed.startsWith(`${PURPOSE_VERSION}.`)) {
-		return await unseal(secret, sealed);
+		return null;
 	}
 
 	return await opened(

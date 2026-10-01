@@ -8,12 +8,12 @@ import type { Amount } from "./amount.js";
 import { amountNow, msat } from "./amount.js";
 import type { ThunderBridge } from "./client.js";
 import { isProblemType, PAYMENT_ALREADY_WATCHED, ProblemError } from "./errors.js";
-import { relayedVerifyUrl } from "./relay.js";
+import { relayedVerifyUrl, type VerifyPath, type VerifyThrough, verifiedThrough } from "./relay.js";
 
 const NONCE_BYTES = 16;
 
 /** An LNURL-pay endpoint of your own: whose wallets it stands for, and what it charges */
-export interface TriggerConfig {
+export interface TriggerSettings {
   /** Priority list, quoted at payRequest and then pinned for the callback */
   paidTo: string | string[];
 
@@ -50,25 +50,6 @@ export interface TriggerConfig {
   baseUrl?: string;
 
   /**
-   * Resolve the address here and hand the gateway only a hash and a URL to poll,
-   * instead of asking it to mint. It then cannot tell who is being paid beyond
-   * the domain in the verify URL, nor how much at all, so the only refusal left
-   * to it is refusing everyone. Costs one more round trip and gives up the
-   * gateway's CORS proxying, which a server does not need anyway.
-   *
-   * A gateway that enforces its verify challenge will not poll a wallet's own
-   * LUD-21 URL, so pass `relayThrough` as well and the poll comes to you
-   */
-  blind?: boolean;
-
-  /**
-   * Where your own `serve.verify` endpoint is mounted, and the secret it was
-   * given. The wallet's URL is sealed inside the one the gateway is handed, so
-   * the gateway polls you and learns neither the wallet nor its provider
-   */
-  relayThrough?: { endpoint: string; secret: string };
-
-  /**
    * What the watcher needs and the gateway must not have. `data` returns it and
    * `secret` encrypts it, so there is no way to hand the gateway something it
    * can read. Needs 32 characters of randomness, not a passphrase, and every
@@ -77,7 +58,14 @@ export interface TriggerConfig {
   sealed?: { secret: string; data: (minted: Minted) => unknown };
 }
 
-/** What a blind mint produced, which is what the sealed payload is built from */
+/**
+ * The endpoint's settings and who the gateway polls. With `verifyThrough` the
+ * address is resolved here and the gateway polls your `serve.lightningVerify`,
+ * learning neither who is paid nor how much. With `gatewayMints` it quotes and
+ * mints, and polls the wallet itself
+ */
+export type TriggerConfig = TriggerSettings & VerifyPath;
+
 /**
  * What a payer may choose to send, when the endpoint lets them choose at all.
  * Both ends are asked once per payRequest, so a fiat range moves with the rate
@@ -87,7 +75,7 @@ export interface Range {
   most: Amount;
 }
 
-/** What a blind mint produced, which is what the sealed payload is built from */
+/** What a mint through your endpoint produced, which is what the sealed payload is built from */
 export interface Minted {
   lnAddress: string;
   amountMsat: number;
@@ -130,14 +118,16 @@ export function lnurlPayEndpoint(
   gateway: ThunderBridge,
   config: TriggerConfig,
 ): (request: Request) => Promise<Response> {
+  const through = verifiedThrough(config);
+
   return async (request: Request) => {
     const url = new URL(request.url);
     const asked = url.searchParams.get("to");
 
     try {
       return asked === null
-        ? await offer(gateway, config, url)
-        : await mint(gateway, config, url, asked);
+        ? await offer(gateway, config, through, url)
+        : await mint(gateway, config, through, url, asked);
     } catch (failure: unknown) {
       return refuse(failure instanceof Error ? failure.message : "the trigger could not be served");
     }
@@ -182,9 +172,14 @@ export function publicWatchTicketEndpoint(
   return () => issue(gateway, config);
 }
 
-async function offer(gateway: ThunderBridge, config: TriggerConfig, url: URL): Promise<Response> {
+async function offer(
+  gateway: ThunderBridge,
+  config: TriggerSettings,
+  through: VerifyThrough | null,
+  url: URL,
+): Promise<Response> {
   const { least, most } = await spread(config.amount);
-  const winner = await quoted(gateway, config, least);
+  const winner = await quoted(gateway, config, through, least);
 
   const nonce = randomNonce();
   const callback = new URL(config.baseUrl ?? `${url.origin}${url.pathname}`);
@@ -205,10 +200,11 @@ async function offer(gateway: ThunderBridge, config: TriggerConfig, url: URL): P
 
 async function quoted(
   gateway: ThunderBridge,
-  config: TriggerConfig,
+  config: TriggerSettings,
+  through: VerifyThrough | null,
   amountMsat: number,
 ): Promise<{ address: string; metadata: string }> {
-  if (config.blind) {
+  if (through !== null) {
     const { won } = await quote(
       config.send ?? pinnedToTheAddressWeVerified,
       listed(config.paidTo),
@@ -243,7 +239,8 @@ async function spread(amount: Amount | Range): Promise<{ least: number; most: nu
 
 async function mint(
   gateway: ThunderBridge,
-  config: TriggerConfig,
+  config: TriggerSettings,
+  through: VerifyThrough | null,
   url: URL,
   address: string,
 ): Promise<Response> {
@@ -269,9 +266,10 @@ async function mint(
     );
   }
 
-  const minted = config.blind
-    ? await mintBlind(gateway, config, address, amountMsat)
-    : await mintThroughGateway(gateway, config, address, amountMsat, nonce);
+  const minted =
+    through === null
+      ? await mintThroughGateway(gateway, config, address, amountMsat, nonce)
+      : await mintHere(gateway, config, through, address, amountMsat);
 
   return Response.json({
     status: "OK",
@@ -283,7 +281,7 @@ async function mint(
 
 async function mintThroughGateway(
   gateway: ThunderBridge,
-  config: TriggerConfig,
+  config: TriggerSettings,
   address: string,
   amountMsat: number,
   nonce: string,
@@ -296,9 +294,10 @@ async function mintThroughGateway(
   return { bolt11: payment.bolt11, verifyUrl: payment.verifyUrl };
 }
 
-async function mintBlind(
+async function mintHere(
   gateway: ThunderBridge,
-  config: TriggerConfig,
+  config: TriggerSettings,
+  through: VerifyThrough,
   address: string,
   amountMsat: number,
 ): Promise<{ bolt11: string; verifyUrl: string }> {
@@ -309,18 +308,15 @@ async function mintBlind(
   );
   const minted: Minted = { ...resolved, amountMsat, lnAddress: resolved.address };
   const locked = config.sealed;
-  const relay = config.relayThrough;
 
   try {
     await gateway.watch({
       paymentHash: resolved.paymentHash,
-      verifyUrl: relay
-        ? await relayedVerifyUrl(
-            relay.endpoint,
-            { url: resolved.verifyUrl, hash: resolved.paymentHash },
-            relay.secret,
-          )
-        : resolved.verifyUrl,
+      verifyUrl: await relayedVerifyUrl(
+        through.endpoint,
+        { url: resolved.verifyUrl, hash: resolved.paymentHash },
+        through.secret,
+      ),
       expiresAt: resolved.expiresAt,
       trigger: config.watchSecret,
       replay: config.replay,

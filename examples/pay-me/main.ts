@@ -16,5 +16,5 @@ export function payMe(
 
   into.innerHTML = lnurlEndpointToSvg(endpoint);
 
-  return gateway.serve.lnurlPay({ paidTo, amount: range, secret, watchSecret });
+  return gateway.serve.lnurlPay({ paidTo, amount: range, secret, watchSecret, gatewayMints: true });
 }

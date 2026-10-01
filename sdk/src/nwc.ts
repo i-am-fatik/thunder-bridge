@@ -15,6 +15,7 @@ import {
 import type { Ticker } from "./price.js";
 import { toLightningUri } from "./qr.js";
 import { type Leg, msatForOrder, type Order, type Rail, type RailConfig } from "./rail.js";
+import type { VerifyThrough } from "./relay.js";
 import { answerVerifyChallenge } from "./webhook.js";
 
 const REQUEST_KIND = 23194;
@@ -489,12 +490,12 @@ export interface NwcRailConfig extends RailConfig {
   rate?: Ticker;
 
   /** Where `serve.nwcVerify` is mounted, and the secret the hash is sealed with */
-  verifyThrough: { endpoint: string; secret: string };
+  verifyThrough: VerifyThrough;
 
   /** What the payer's wallet shows, the order's reference by default */
   description?: (order: Order) => string;
 
-  /** Sealed before the gateway sees it, the way the blind Lightning rail does */
+  /** Sealed before the gateway sees it, the way the Lightning rail does */
   sealed?: { secret: string; data: (order: Order) => unknown };
 }
 

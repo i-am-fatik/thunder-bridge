@@ -13,6 +13,36 @@ export interface Relayed {
   hash: string;
 }
 
+/** Where your own verify endpoint is mounted, and the secret it was given */
+export interface VerifyThrough {
+  endpoint: string;
+  secret: string;
+}
+
+/**
+ * Who the gateway polls. `verifyThrough` is an endpoint of yours, which needs a
+ * server and keeps the wallet and the amount from the gateway. `gatewayMints`
+ * lets the gateway mint and poll the wallet itself, for a client with no server
+ */
+export type VerifyPath =
+  | { verifyThrough: VerifyThrough; gatewayMints?: never }
+  | { gatewayMints: true; verifyThrough?: never };
+
+export function verifiedThrough(path: VerifyPath): VerifyThrough | null {
+  const through = path.verifyThrough ?? null;
+  const mints = path.gatewayMints === true;
+  if (through !== null && mints) {
+    throw new Error("verifyThrough and gatewayMints are two different paths, name only one");
+  }
+  if (through === null && !mints) {
+    throw new Error(
+      "name verifyThrough, where your serve.lightningVerify is mounted, or gatewayMints: true to let the gateway mint and poll the wallet itself",
+    );
+  }
+
+  return through;
+}
+
 /** The verify endpoint that asks the wallet for the gateway, and how often it may be asked */
 export interface LightningVerifyConfig {
   /** The secret the sealed wallet URL was made with, and nothing else uses it */

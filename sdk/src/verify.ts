@@ -162,13 +162,6 @@ export interface Provable {
 export type SelfConsistent<T extends Provable> = T & { status: "paid"; preimage: string };
 
 /**
- * What `SelfConsistent` was called before 2.2.0
- *
- * @deprecated Use `SelfConsistent`, which says the report was checked against itself and nothing else
- */
-export type Proven<T extends Provable> = SelfConsistent<T>;
-
-/**
  * Whether a report agrees with itself: it says paid, and it carries a preimage
  * that hashes to the payment hash it itself names. Where an invoice comes with it,
  * the invoice's own hash has to agree too.
@@ -194,13 +187,6 @@ export function agreesWithItself<T extends Provable>(report: T): report is SelfC
 
   return preimageMatchesHash(report.preimage, report.paymentHash);
 }
-
-/**
- * What `agreesWithItself` was called before 2.2.0
- *
- * @deprecated Use `agreesWithItself`, because it proves nothing beyond the report itself
- */
-export const carriesProof = agreesWithItself;
 
 /**
  * The most an operator may add over the recipient's own amount, in millisatoshi.

@@ -7,6 +7,7 @@
     "a range instead of one amount is what makes a wallet offer a field to type in",
     "the QR carries your own url, so the addresses behind it can change without reprinting it",
     "the secret signs the callback, so nobody else can make the endpoint mint on your wallets",
-    "the watch secret is a second, weaker key, and watch-a-place is what reads it"
+    "the watch secret is a second, weaker key, and watch-a-place is what reads it",
+    "gatewayMints is asked for by name because this endpoint answers on localhost, where no gateway could poll a verify endpoint of yours"
   ]
 }
