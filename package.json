@@ -34,6 +34,6 @@
     "protomux": "3.11.0",
     "structured-headers": "2.1.0",
     "thunder-bridge": "file:./sdk",
-    "ws": "^8.21.3"
+    "ws": "^8.22.0"
   }
 }
