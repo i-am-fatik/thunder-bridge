@@ -85,15 +85,15 @@ export async function addressesToReach(url: string): Promise<Verified[]> {
 }
 
 async function resolved(url: string): Promise<Verified[]> {
-	const { isIP } = await import("node:net");
+	const { isIP } = await import(/* webpackIgnore: true */ "node:net");
 	const host = new URL(url).hostname.replace(/^\[|]$/g, "");
 	const literal = isIP(host);
 	if (literal !== 0) {
 		return [{ address: host, family: literal }];
 	}
 
-	const { Resolver } = await import("node:dns/promises");
-	const { setTimeout: sleep } = await import("node:timers/promises");
+	const { Resolver } = await import(/* webpackIgnore: true */ "node:dns/promises");
+	const { setTimeout: sleep } = await import(/* webpackIgnore: true */ "node:timers/promises");
 	const resolver = new Resolver({ timeout: LOOKUP_TIMEOUT_MS, tries: 1 });
 	const found = await Promise.race([
 		Promise.all([

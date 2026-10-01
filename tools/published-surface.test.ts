@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { builtinModules } from "node:module";
 import { expect, test } from "vitest";
 
 import { surfaceOf } from "./api-reference.ts";
@@ -182,4 +183,27 @@ test("every type in a public member's signature can be named by a consumer", () 
 	}
 
 	expect([...owed]).toEqual([]);
+});
+
+test("every node built-in the built client reaches for keeps its node: prefix and tells a bundler to leave it", () => {
+	const DYNAMIC_IMPORT = /import\(\s*((?:\/\*[^*]*\*\/\s*)*)"([^"]+)"\s*\)/g;
+	const builtins = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
+	const reached: string[] = [];
+
+	for (const file of readdirSync("sdk/dist").filter((name) => /\.(c?js)$/.test(name))) {
+		for (const [, hints, specifier] of readFileSync(`sdk/dist/${file}`, "utf8").matchAll(
+			DYNAMIC_IMPORT,
+		)) {
+			if (!builtins.has(specifier as string)) {
+				continue;
+			}
+			reached.push(specifier as string);
+			expect(specifier, `${file} strips the prefix Deno needs`).toMatch(/^node:/);
+			expect(hints, `${file} lets a browser bundler try to resolve ${specifier}`).toContain(
+				"webpackIgnore: true",
+			);
+		}
+	}
+
+	expect(reached).toContain("node:net");
 });

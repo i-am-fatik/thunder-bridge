@@ -145,8 +145,10 @@ checkout page should not have to download.
 Anything that opens a socket needs Node 22 or newer: `requestPayment`, `settled`,
 `firstSettled`, `follow`, `attend` and every NWC call. `invoiceFrom`,
 `serve.lightningVerify` and `rails.lightning` without `gatewayMints` resolve wallet
-hostnames through `node:dns`, so they will not run on Cloudflare Workers. Everything
-else runs on any runtime with `fetch` and `crypto.subtle`.
+hostnames through `node:dns` and pin the connection to the checked address through
+`node:https`, so they need Node and run on neither Cloudflare Workers nor Deno.
+Everything else runs on any runtime with `fetch` and `crypto.subtle`, and a browser
+bundler leaves those Node imports alone.
 
 ## More
 

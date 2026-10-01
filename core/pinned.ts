@@ -12,8 +12,8 @@ export const pinnedToTheAddressWeVerified: Send = async (url, sent, signal, at) 
 	if (first === undefined) {
 		throw new Error(`${url} resolved to nothing worth connecting to`);
 	}
-	const { request } = await import("node:https");
-	const { Readable } = await import("node:stream");
+	const { request } = await import(/* webpackIgnore: true */ "node:https");
+	const { Readable } = await import(/* webpackIgnore: true */ "node:stream");
 
 	return new Promise<Response>((settle, fail) => {
 		if (signal.aborted) {
