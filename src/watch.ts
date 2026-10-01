@@ -13,7 +13,7 @@ import type { Store } from "./store.ts";
 
 const EAGER_WINDOW_SECS = 300;
 const STALENESS = 0.1;
-const LEASE_SECS = 30;
+export const LEASE_SECS = 30;
 const LONGEST_WAIT_MS = 5_000;
 const NONCE_BYTES = 32;
 
@@ -28,6 +28,7 @@ export type Budget = {
 	nextAt: Map<string, number>;
 	pace: Map<string, number>;
 	ceiling: Map<string, number>;
+	sharedBy?: () => number;
 };
 
 export type Outbound = {
@@ -61,9 +62,13 @@ async function pollDue(watcher: Watcher): Promise<void> {
 
 async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 	const agent = agentAddressed(payment.verifyUrl);
+	if (agent !== null && !watcher.agents.has(agent)) {
+		watcher.store.postponed(payment, nextDue(payment, watcher.eagerDelayMs));
+		return;
+	}
 	const host = agent ?? hostOf(payment.verifyUrl);
 	if (!(await spend(watcher.budget, host))) {
-		watcher.store.polled(payment.id, turnOf(watcher.budget, host));
+		watcher.store.postponed(payment, turnOf(watcher.budget, host));
 		return;
 	}
 
@@ -78,11 +83,13 @@ async function poll(watcher: Watcher, payment: Payment): Promise<void> {
 		watcher.budget.ceiling.set(host, settlement.ceiling);
 	}
 
-	if (!settlement?.preimage) {
-		watcher.store.polled(
-			payment.id,
-			nextDue(payment, watcher.eagerDelayMs, paceAsked(watcher, host)),
-		);
+	const next = nextDue(payment, watcher.eagerDelayMs, paceAsked(watcher, host));
+	if (settlement === null) {
+		watcher.store.missed(payment, next);
+		return;
+	}
+	if (!settlement.preimage) {
+		watcher.store.polled(payment, next);
 		return;
 	}
 
@@ -231,7 +238,8 @@ export async function spend(budget: Budget, host: string): Promise<boolean> {
 	if (slot - now > LONGEST_WAIT_MS) {
 		return false;
 	}
-	budget.nextAt.set(host, slot + 1000 / (budget.ceiling.get(host) ?? budget.perSecond));
+	const rate = (budget.ceiling.get(host) ?? budget.perSecond) / (budget.sharedBy?.() ?? 1);
+	budget.nextAt.set(host, slot + 1000 / rate);
 	await sleep(slot - now);
 
 	return true;

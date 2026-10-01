@@ -273,15 +273,6 @@ export class Ledger {
 		).run(id, expiresAt, dueAt);
 	}
 
-	private watchAfter(id: string): number {
-		const rank =
-			createHash("sha256").update(`${id}\x00${this.origin}`).digest().readUInt32BE(0) %
-			TAKEOVER_SPREAD;
-		const after = this.takeoverAfterSecs;
-
-		return unixNow() + after + Math.max(1, Math.round(after / TAKEOVER_SPREAD)) * rank;
-	}
-
 	forget(id: string): void {
 		this.sql("DELETE FROM schedule WHERE id = ?").run(id);
 	}
@@ -297,6 +288,13 @@ export class Ledger {
 
 	polled(id: string, dueAt: number | null): void {
 		this.sql("UPDATE schedule SET dueAt = ? WHERE id = ?").run(dueAt, id);
+	}
+
+	broughtForward(id: string, dueAt: number): void {
+		this.sql("UPDATE schedule SET dueAt = min(dueAt, ?) WHERE id = ? AND dueAt IS NOT NULL").run(
+			dueAt,
+			id,
+		);
 	}
 
 	nextDueAt(): number | null {
@@ -527,7 +525,11 @@ export class Ledger {
 		};
 	}
 
-	absorb(facts: Facts, through?: Watermarks): PublicPayment[] {
+	absorb(
+		facts: Facts,
+		through: Watermarks | undefined,
+		dueAt: (accepted: AcceptedFact) => number,
+	): PublicPayment[] {
 		return this.transact(() => {
 			const settled: PublicPayment[] = [];
 
@@ -536,7 +538,7 @@ export class Ledger {
 					continue;
 				}
 				this.recordAccepted(fact);
-				this.scheduleWatch(fact.id, fact.expiresAt, this.watchAfter(fact.id));
+				this.scheduleWatch(fact.id, fact.expiresAt, dueAt(fact));
 			}
 
 			for (const fact of inSeqOrder(facts.paid ?? [])) {

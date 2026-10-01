@@ -86,6 +86,32 @@ they agree. Read from one instance it says what that instance holds and nothing
 about its peers: a mark covers only a run of an origin's facts with no hole in it,
 so equal marks mean equal runs, and a fact held above a hole is not counted.
 
+## Three instances behind one hostname
+
+The instances are interchangeable behind a plain round-robin balancer. A
+settlement absorbed from a peer is published to the sockets held locally, so a
+websocket needs no stickiness, and a nonce or ticket spent on one instance is told
+to the others, so a replay sent to a different pod is refused too.
+
+On Kubernetes that is a StatefulSet of three with `podManagementPolicy: Parallel`,
+a required anti-affinity on `kubernetes.io/hostname`, and a PodDisruptionBudget of
+`maxUnavailable: 1`. A headless Service gives the pods stable names, and every pod
+gets the same list, its own name included. An instance that dials itself notices
+and stops, quietly.
+
+```
+CLUSTER_KEY=<one fixed secret for all three>
+SWARM=0
+REPLICATE_LISTEN=7000
+REPLICATE_PEERS=gw-0.gw-peers:7000,gw-1.gw-peers:7000,gw-2.gw-peers:7000
+```
+
+An instance with `REPLICATE_PEERS` answers `/ready` with 503 until it has caught
+up with a peer, or until 30 seconds pass without reaching one, so a pod that boots
+empty is not sent work before it holds the ledger. With three pods the peers are
+the backup and an `emptyDir` is enough. Only losing all three at once loses the
+ledger.
+
 ## Where the bank rail's verify endpoint runs
 
 The bank rail needs a public https endpoint serving `bankVerifyEndpoint`, because the
@@ -178,7 +204,9 @@ An endpoint names its own with `Cache-Control: max-age` on any verify answer, cl
 to between a second and an hour, and that pace then applies to every payment on that
 host. So a client's own endpoint sets the rate it wants to be asked at, and a wallet
 that says nothing keeps the widening interval. Nothing here is per payment: the pace,
-like the ceiling, belongs to the host being asked.
+like the ceiling, belongs to the host being asked. In a cluster each instance takes
+its share of the ceiling, the whole divided by the instances it can see, so three of
+them together keep the rate one would.
 
 The ceiling can be named the same way, with `RateLimit-Limit: 12;w=60` on any verify
 answer, which is the header the IETF draft defines for exactly this. Cadence and

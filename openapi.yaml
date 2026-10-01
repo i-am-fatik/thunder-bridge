@@ -88,6 +88,9 @@ paths:
         Whether this instance should be sent work, which is a different question from whether
         it is alive. It turns 503 once the instance is draining, so a balancer takes it out of
         rotation before the listener closes and a redeploy costs nobody a refused request.
+        An instance given `REPLICATE_PEERS` also answers 503 until it has caught up with a
+        peer, or until 30 seconds pass without reaching one, so a pod that boots empty is
+        not sent work before it holds the ledger.
 
         A full worklist is reported, never a refusal: an instance at `MAX_PENDING` still
         settles and still serves, and `POST /incoming-payments` is where a caller learns it

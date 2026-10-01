@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
+
 import { paymentNamedBy } from "../core/caller.ts";
 import { announce, type Gossip } from "./gossip.ts";
 import {
+	type AcceptedFact,
 	type Claim,
 	type Facts,
 	type Kept,
@@ -12,6 +15,7 @@ import {
 	type Watermarks,
 } from "./ledger.ts";
 import type { Delivery, Payment, PublicPayment, UnsavedPayment } from "./payment.ts";
+import { LEASE_SECS, pollDelayMs, unixNow } from "./watch.ts";
 
 export type Info = {
 	origin: string;
@@ -27,6 +31,8 @@ export type Info = {
 
 export type Settled = { payment: Payment; won: boolean };
 
+type Watched = Pick<Payment, "id" | "verifyUrl">;
+
 export class Store {
 	readonly gossip: Gossip;
 
@@ -34,21 +40,27 @@ export class Store {
 
 	onScheduled: () => void = () => {};
 
+	onSpent: (once: string, until: number) => void = () => {};
+
+	answersAlone: (verifyUrl: string) => boolean = () => false;
+
 	private readonly ledger: Ledger;
 	private readonly key: Uint8Array;
 	private readonly maxPending: number;
+	private readonly eagerDelayMs: number;
 	private convergedAt: number | null = null;
 
-	constructor(ledger: Ledger, key: Uint8Array, maxPending = 5000) {
+	constructor(ledger: Ledger, key: Uint8Array, maxPending = 5000, eagerDelayMs = 5_000) {
 		this.ledger = ledger;
 		this.key = key;
 		this.maxPending = maxPending;
+		this.eagerDelayMs = eagerDelayMs;
 		this.gossip = {
 			self: this.ledger.origin,
 			key: this.key,
 			peers: new Map(),
 			onFacts: (facts, through) => {
-				for (const settled of this.ledger.absorb(facts, through)) {
+				for (const settled of this.ledger.absorb(facts, through, (fact) => this.standby(fact))) {
 					this.onChange(asPayment(settled));
 				}
 				this.onScheduled();
@@ -56,6 +68,23 @@ export class Store {
 			onConverged: () => {
 				this.convergedAt = Math.floor(Date.now() / 1000);
 			},
+			onPolled: (id, next) => {
+				const held = this.ledger.read(id);
+				if (held) {
+					this.postponed(held, next);
+					this.onScheduled();
+				}
+			},
+			onMissed: (id, by) => {
+				const held = this.ledger.read(id);
+				if (held) {
+					const others = [...this.gossip.peers.keys()].filter((peer) => peer !== by);
+					const now = unixNow();
+					this.ledger.broughtForward(id, this.turn(held, now, this.eagerDelayMs / 1000, others));
+					this.onScheduled();
+				}
+			},
+			onSpent: (once, until) => this.onSpent(once, until),
 			watermarks: () => this.ledger.watermarks(),
 			since: (theirs) => this.ledger.since(theirs),
 		};
@@ -85,7 +114,10 @@ export class Store {
 			return asPayment(settled);
 		}
 
-		const taken = this.ledger.accept({ ...unsaved, id });
+		const taken = this.ledger.accept(
+			{ ...unsaved, id },
+			this.turn({ id, verifyUrl: unsaved.verifyUrl }, unixNow(), this.eagerDelayMs / 1000),
+		);
 		this.spread(taken.facts);
 		this.onScheduled();
 
@@ -151,8 +183,57 @@ export class Store {
 		return this.ledger.duePolls(limit, leaseSecs);
 	}
 
-	polled(id: string, dueAt: number | null): void {
-		this.ledger.polled(id, dueAt);
+	polled(payment: Watched, next: number | null): void {
+		this.postponed(payment, next);
+		announce(this.gossip, { polled: { id: payment.id, next } });
+	}
+
+	missed(payment: Watched, next: number | null): void {
+		this.postponed(payment, next);
+		announce(this.gossip, { missed: { id: payment.id } });
+	}
+
+	postponed(payment: Watched, next: number | null): void {
+		this.ledger.polled(
+			payment.id,
+			next === null ? null : this.turn(payment, next, next - unixNow()),
+		);
+	}
+
+	spent(once: string, until: number): void {
+		announce(this.gossip, { spent: { once, until } });
+	}
+
+	instances(): number {
+		return 1 + this.gossip.peers.size;
+	}
+
+	caughtUp(): boolean {
+		return this.convergedAt !== null;
+	}
+
+	private turn(
+		payment: Watched,
+		next: number,
+		gapSecs: number,
+		among: Iterable<string> = this.gossip.peers.keys(),
+	): number {
+		const wait = Math.min(Math.max(Math.ceil(gapSecs), 1), LEASE_SECS);
+		const ahead = this.answersAlone(payment.verifyUrl)
+			? 0
+			: rankAmong(payment.id, this.gossip.self, among);
+
+		return next + ahead * wait;
+	}
+
+	private standby(accepted: AcceptedFact): number {
+		const now = unixNow();
+		const waited = now - accepted.acceptedAt;
+		const gapSecs = pollDelayMs(waited, this.eagerDelayMs) / 1000;
+		const next = waited < gapSecs ? accepted.acceptedAt : now + Math.ceil(gapSecs);
+		const { verifyUrl } = JSON.parse(accepted.payment) as Payment;
+
+		return this.turn({ id: accepted.id, verifyUrl }, next, gapSecs);
 	}
 
 	nextDueAt(): number | null {
@@ -197,6 +278,22 @@ export class Store {
 	close(): void {
 		this.ledger.close();
 	}
+}
+
+export function rankAmong(id: string, self: string, peers: Iterable<string>): number {
+	const mine = standing(id, self);
+	let ahead = 0;
+	for (const peer of peers) {
+		if (standing(id, peer) > mine) {
+			ahead += 1;
+		}
+	}
+
+	return ahead;
+}
+
+function standing(id: string, origin: string): string {
+	return createHash("sha256").update(`${id}\x00${origin}`).digest("hex");
 }
 
 function sequenceTotals(marks: Watermarks): Record<Source, number> {

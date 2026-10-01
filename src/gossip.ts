@@ -8,7 +8,12 @@ import * as log from "./log.ts";
 
 const PROTOCOL = "thunder-cluster";
 
-export type Note = { have: Watermarks } | { facts: Facts; more: boolean; through?: Watermarks };
+export type Note =
+	| { have: Watermarks }
+	| { facts: Facts; more: boolean; through?: Watermarks }
+	| { polled: { id: string; next: number | null } }
+	| { missed: { id: string } }
+	| { spent: { once: string; until: number } };
 
 export type Gossip = {
 	self: string;
@@ -16,6 +21,9 @@ export type Gossip = {
 	peers: Map<string, (note: Note) => void>;
 	onFacts: (facts: Facts, through?: Watermarks) => void;
 	onConverged: () => void;
+	onPolled: (id: string, next: number | null) => void;
+	onMissed: (id: string, by: string) => void;
+	onSpent: (once: string, until: number) => void;
 	watermarks: () => Watermarks;
 	since: (theirs: Watermarks) => { facts: Facts; more: boolean; through: Watermarks };
 };
@@ -32,16 +40,23 @@ export function resync(gossip: Gossip): void {
 	announce(gossip, { have: gossip.watermarks() });
 }
 
-export function attach(gossip: Gossip, stream: SecretStream): void {
+export function attach(gossip: Gossip, stream: SecretStream, onSelf?: () => void): void {
 	let peer = "";
 	const send = (outgoing: Note) => note.send(outgoing);
 	const channel = Protomux.from(stream).createChannel({
 		protocol: PROTOCOL,
 		handshake: c.json,
 		onopen: (them: Introduction) => {
-			if (them?.self === gossip.self || !introduces([gossip.key], stream.handshakeHash, them)) {
+			if (!introduces([gossip.key], stream.handshakeHash, them)) {
 				log.warn("a peer without the cluster key tried to join");
 				stream.destroy();
+				return;
+			}
+			if (them.self === gossip.self) {
+				if (onSelf) {
+					onSelf();
+					stream.destroy();
+				}
 				return;
 			}
 			peer = them.self;
@@ -62,7 +77,7 @@ export function attach(gossip: Gossip, stream: SecretStream): void {
 		encoding: c.json,
 		onmessage: (incoming: Note) => {
 			try {
-				receive(gossip, incoming, note);
+				receive(gossip, incoming, note, peer);
 			} catch (error: unknown) {
 				log.warn(`dropping a peer that sent an unusable note: ${String(error)}`);
 				stream.destroy();
@@ -78,7 +93,12 @@ export function attach(gossip: Gossip, stream: SecretStream): void {
 	});
 }
 
-function receive(gossip: Gossip, note: Note, reply: { send(note: Note): void }): void {
+function receive(
+	gossip: Gossip,
+	note: Note,
+	reply: { send(note: Note): void },
+	peer: string,
+): void {
 	if ("have" in note) {
 		reply.send(gossip.since(note.have));
 	} else if ("facts" in note) {
@@ -89,6 +109,23 @@ function receive(gossip: Gossip, note: Note, reply: { send(note: Note): void }):
 		} else if (reach(gossip.watermarks()) > asked) {
 			reply.send({ have: gossip.watermarks() });
 		}
+	} else if ("polled" in note) {
+		const { id, next } = note.polled;
+		if (typeof id !== "string" || (next !== null && !Number.isFinite(next))) {
+			throw new Error("a polled note names no payment or no due time");
+		}
+		gossip.onPolled(id, next);
+	} else if ("missed" in note) {
+		if (typeof note.missed.id !== "string") {
+			throw new Error("a missed note names no payment");
+		}
+		gossip.onMissed(note.missed.id, peer);
+	} else if ("spent" in note) {
+		const { once, until } = note.spent;
+		if (typeof once !== "string" || !Number.isFinite(until)) {
+			throw new Error("a spent note names nothing or no expiry");
+		}
+		gossip.onSpent(once, until);
 	}
 }
 

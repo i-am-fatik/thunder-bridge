@@ -26,8 +26,8 @@ import {
 	VERIFY_UNCONSENTED,
 	WEBHOOK_UNCONFIRMED,
 } from "./problem.ts";
-import type { Store } from "./store.ts";
-import { CLUSTER_KEY, openStore, until } from "./testing.ts";
+import { rankAmong, type Store } from "./store.ts";
+import { CLUSTER_KEY, freePort, type Opened, openStore, until } from "./testing.ts";
 import { VERIFY_CHALLENGE } from "./watch.ts";
 import { fingerprint, readCreateRequest } from "./wire.ts";
 
@@ -2250,5 +2250,139 @@ test("behind a proxy the spec names the outside origin, and names it once", asyn
 		).toHaveLength(1);
 	} finally {
 		app.stop();
+	}
+});
+
+async function serving(opened: Opened, more: Partial<Options>): Promise<App> {
+	const outbound = { send: nothingAnswers };
+	const service = await start(
+		{
+			key: CLUSTER_KEY,
+			port: 0,
+			send: (...asked) => outbound.send(...asked),
+			mints: true,
+			eagerDelayMs: 3000,
+			...more,
+		},
+		opened.store,
+	);
+
+	return {
+		service,
+		store: opened.store,
+		outbound,
+		stop: () => {
+			service.stop();
+			opened.stop();
+		},
+	};
+}
+
+async function twoInstances(more: Partial<Options> = {}): Promise<[App, App]> {
+	const port = await freePort();
+	const one = openStore({ listenPort: port });
+	const two = openStore({ peers: [`127.0.0.1:${port}`] });
+	await until(
+		() => one.store.caughtUp() && two.store.caughtUp(),
+		"the two instances to catch up with each other",
+	);
+
+	return [await serving(one, more), await serving(two, more)];
+}
+
+const A_NOTE_CROSSES_MS = 300;
+
+test("a signed request spent on one instance is refused as a replay by the other", async () => {
+	const host = "gateway.example.net";
+	const [one, two] = await twoInstances({ publicHosts: new Set([host]) });
+	const mine = one.store.insert(pendingPayment({ caller: (await callerKey(OWNER)).publicKeyHex }));
+	await until(() => two.store.get(mine.id) !== null, "the payment to reach the other instance");
+	const asked = JSON.stringify({ payment_id: mine.id });
+	const headers = {
+		"content-type": "application/json",
+		host,
+		...(await signedAs(await callerKey(OWNER), "POST", "/ws-tickets", asked, host)),
+	};
+
+	expect(await postedWithHost(one, "/ws-tickets", asked, headers)).toBe(200);
+	await new Promise((crossed) => setTimeout(crossed, A_NOTE_CROSSES_MS));
+	expect(await postedWithHost(two, "/ws-tickets", asked, headers)).toBe(404);
+	one.stop();
+	two.stop();
+});
+
+test("a ticket that opened a socket on one instance opens nothing on the other", async () => {
+	const [one, two] = await twoInstances();
+	const ticket = await ticketFor(one, { trigger_secret: "one-socket-anywhere" });
+
+	const first = await openedWith(one, ticket);
+	await new Promise((crossed) => setTimeout(crossed, A_NOTE_CROSSES_MS));
+	const second = await openedWith(two, ticket);
+
+	expect(first.readyState).toBe(WebSocket.OPEN);
+	expect(second.readyState).not.toBe(WebSocket.OPEN);
+	first.close();
+	one.stop();
+	two.stop();
+});
+
+async function readiness(app: App): Promise<number> {
+	return (await fetch(`http://127.0.0.1:${app.service.at}/ready`)).status;
+}
+
+test("an instance waiting for peers nobody answers is not ready until its grace runs out", async () => {
+	const app = await running(null, 10_000, { awaitPeers: true, readyGraceMs: 400 });
+
+	expect(await readiness(app)).toBe(503);
+	await new Promise((waited) => setTimeout(waited, 500));
+	expect(await readiness(app)).toBe(200);
+	app.stop();
+});
+
+test("an instance that has caught up with its peer is ready at once, grace or no grace", async () => {
+	const [one, two] = await twoInstances({ awaitPeers: true, readyGraceMs: 60_000 });
+
+	expect([await readiness(one), await readiness(two)]).toEqual([200, 200]);
+	one.stop();
+	two.stop();
+});
+
+async function agentSocketOn(app: App, secret: string): Promise<WebSocket> {
+	const asked = JSON.stringify({ agent: true });
+	const minted = await fetch(`http://127.0.0.1:${app.service.at}/ws-tickets`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...(await speaking(app, secret, "POST", "/ws-tickets", asked)),
+		},
+		body: asked,
+	});
+	const { ticket } = (await minted.json()) as { ticket: string };
+	const socket = new WebSocket(`ws://127.0.0.1:${app.service.at}/ws/tickets/${ticket}`);
+	await new Promise((ready) => socket.addEventListener("open", ready, { once: true }));
+
+	return socket;
+}
+
+test("the instance holding a caller's agent socket asks about its payment at once, wherever the hash ranks it", async () => {
+	const pair = await twoInstances();
+	const owner = (await callerKey(OWNER)).publicKeyHex;
+	const id = paymentNamedBy(owner, WATCHED_HASH);
+	const behind = pair.find(
+		(one) => rankAmong(id, one.store.gossip.self, one.store.gossip.peers.keys()) === 1,
+	)!;
+	const agent = await agentSocketOn(behind, OWNER);
+	const asked = new Promise<number>((heard) =>
+		agent.addEventListener("message", () => heard(Date.now()), { once: true }),
+	);
+
+	const registeredAt = Date.now();
+	const answer = await postWatch(behind, { ...WATCHABLE, verify_url: `agent:${owner}` }, OWNER);
+
+	expect(answer.status).toBe(201);
+	expect((await asked) - registeredAt).toBeLessThan(1500);
+	agent.close();
+	for (const one of pair) {
+		one.stop();
 	}
 });

@@ -99,16 +99,21 @@ function payment(overrides: Partial<Payment> = {}): Payment {
 	};
 }
 
+type Outcome = "polled" | "missed" | "postponed";
+
 function queueing(send: Send, work: Payment[], settle: (id: string, preimage: string) => Settled) {
 	const due = [...work];
-	const parked: { id: string; dueAt: number | null }[] = [];
+	const parked: { id: string; dueAt: number | null; outcome: Outcome }[] = [];
 	const handed: string[] = [];
+	const park = (outcome: Outcome) => (payment: Payment, dueAt: number | null) => {
+		parked.push({ id: payment.id, dueAt, outcome });
+	};
 	const store = {
 		duePolls: (limit: number) => due.splice(0, limit),
 		dueDeliveries: () => [],
-		polled: (id: string, dueAt: number | null) => {
-			parked.push({ id, dueAt });
-		},
+		polled: park("polled"),
+		missed: park("missed"),
+		postponed: park("postponed"),
 		paid: (id: string, preimage: string) => {
 			handed.push(preimage);
 			return settle(id, preimage);
@@ -247,7 +252,7 @@ test("a payment whose agent is offline is left due rather than failed", async ()
 	await tick(watcher);
 
 	expect(handed).toEqual([]);
-	expect(parked).toHaveLength(1);
+	expect(parked.map((one) => one.outcome)).toEqual(["postponed"]);
 });
 
 test("a settled payment is handed to the store with its preimage", async () => {
@@ -270,7 +275,7 @@ test("a payment at its expiry is asked once more and then parked for good", asyn
 	await tick(watcher);
 
 	expect(wire.calls.map((call) => call.url)).toEqual([VERIFY_URL]);
-	expect(parked).toEqual([{ id: expiring.id, dueAt: null }]);
+	expect(parked).toEqual([{ id: expiring.id, dueAt: null, outcome: "polled" }]);
 });
 
 test("a webhook the merchant takes is struck off the outbox", async () => {
@@ -431,6 +436,36 @@ test("the next poll never lands after the invoice has expired", () => {
 	} finally {
 		vi.useRealTimers();
 	}
+});
+
+test("three instances each take a third of a host's pace, so together they keep one gateway's", async () => {
+	const alone = paced(10);
+	const shared = { ...paced(10), sharedBy: () => 3 };
+	await spend(alone, "coinos.io");
+	await spend(shared, "coinos.io");
+	const now = Date.now();
+
+	expect(alone.nextAt.get("coinos.io")! - now).toBeLessThanOrEqual(100);
+	expect(shared.nextAt.get("coinos.io")! - now).toBeGreaterThan(250);
+});
+
+test("an answered poll is told as the next turn and a failed one as a miss", async () => {
+	const answering = queueing(
+		intercepting(() => verified(false)).send,
+		[payment()],
+		settlesAs(true),
+	);
+	const failing = queueing(
+		intercepting(() => new Response("", { status: 429 })).send,
+		[payment()],
+		settlesAs(true),
+	);
+
+	await tick(answering.watcher);
+	await tick(failing.watcher);
+
+	expect(answering.parked.map((one) => one.outcome)).toEqual(["polled"]);
+	expect(failing.parked.map((one) => one.outcome)).toEqual(["missed"]);
 });
 
 test("one busy wallet host does not slow the polls aimed at another", async () => {

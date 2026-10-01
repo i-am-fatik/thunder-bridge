@@ -198,28 +198,52 @@ An expired invoice fires nothing. Anyone holding an invoice can register a
 webhook against it, so a hook that fired without a payment would make this
 service an outbound cannon aimed wherever they chose.
 
-## Why the work is not split, and why a copy waits
+## One poll per turn, whoever holds the payment
 
 Nobody hands out leases and nobody splits the pending set. Every instance holds
-every pending payment it hears about, and the one that took the payment on polls
-it at once while everyone else stands by: a mirrored row is due after
-`TAKEOVER_AFTER_SECS` plus a stagger from a hash of the payment and the instance,
-which is the same shape the outbox already uses to take over a webhook.
+every pending payment it hears about, and every one of them could poll it. What
+keeps the wallet from being asked once per instance is an order, not an owner.
+Each instance ranks itself and the peers it can see by a hash of the payment and
+their identity, and it waits one poll interval, never more than the 30 second
+lease, for each instance ranked ahead of it. The first in line polls on time.
 
-That is what keeps politeness flat. In the ordinary case the settlement arrives as
-a fact and the standby row is deleted before its turn ever comes, so a second
-instance costs the recipient's server nothing. When the owner dies, the copy comes
-due and polls, which is the whole point of holding it.
+A poll that gets an answer is told to the peers as the payment's next turn, and
+they adopt it as if they had polled themselves. So the second in line never
+reaches its turn while the first keeps answering, and the schedules agree again
+on every answer instead of drifting apart per instance. A pace the host asked for
+travels with the turn, because the turn already includes it.
 
-Splitting by a hash of the payment id looks cheaper and is not. Ownership needs
-membership everyone agrees on, and without it the failure is not a duplicate poll
-but a payment nobody polls at all. Standing by buys the same saving from the other
-end and needs nobody to agree on anything.
+A poll that gets no answer is told as a miss, and the peers pass the turn on at
+once: they rank themselves again without the one that missed, and the next in line
+polls now instead of an interval later. A dead or frozen instance tells nothing at
+all, and then the order alone does the work: no turn arrives, and the next in line
+polls one interval later. Either way nobody has to agree on who is alive. A
+wallet refusing one node, a broken route from one node, and a stalled one all cost
+at most one interval, and none of them costs a poll.
 
-The cost is admitted: a payment whose owner dies is noticed up to one takeover
-window late rather than immediately. Against a three day horizon that is nothing,
-and against a wallet host asked the same question by every instance at once it is
-a bargain.
+A payment answered by an agent is the one case where only some instances can ask.
+The agent's socket lands on whichever instance the balancer picked, so that
+instance puts itself first for the agent's payments whatever the hash says, and
+an instance with no socket for that agent never counts a turn as a poll. It stands
+aside quietly and adopts the holder's next turn like any other.
+
+Splitting by a hash looks as if it needs membership everyone agrees on, and a
+split with a wrong view is how a payment ends up polled by nobody. This one needs
+no agreement because nobody gives anything up. A wrong view costs a second poll
+when two instances each think they are first, or one interval of delay when an
+instance still counts a peer that is gone. The true first in line always counts
+itself, so a live one always polls.
+
+The same hash, rendezvous hashing, spreads the first places evenly, so three
+instances each lead about a third of the payments. When one leaves, only its
+third moves. The pace a host is owed is divided the same way: each instance takes
+its share of `POLLS_PER_SEC` and of any ceiling the host named, so a cluster
+touches a wallet no harder than one gateway would.
+
+A copy that arrives inside the payment's first interval joins that first turn. A
+copy that arrives later, from a peer catching up after a restart, waits one
+interval from now instead. That keeps a catch-up of a thousand old payments from
+burying the one made a second ago.
 
 The queue is a schedule, not a line. Every row carries the moment it is next due,
 and `claim` takes the most overdue first, so a payment created a second ago is not

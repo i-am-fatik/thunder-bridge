@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,14 +9,40 @@ import { setTimeout as sleep } from "node:timers/promises";
 import SecretStream from "@hyperswarm/secret-stream";
 import c from "compact-encoding";
 import Protomux from "protomux";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { callerKey, paymentNamedBy } from "../core/caller.ts";
+import { signingKeyFromSeed } from "../core/ed25519.ts";
+import type { Send } from "../core/outbound.ts";
 
 import { attach } from "./gossip.ts";
 import type { UnsavedPayment } from "./payment.ts";
-import type { Store } from "./store.ts";
+import { rankAmong, type Store } from "./store.ts";
 
-import { CLUSTER_KEY, freePort, openStore, refusals, type TestOptions, until } from "./testing.ts";
+import {
+	CLUSTER_KEY,
+	freePort,
+	type Opened,
+	openStore,
+	refusals,
+	type TestOptions,
+	until,
+} from "./testing.ts";
+import { tick, unixNow, type Watcher } from "./watch.ts";
+
+vi.mock("node:dns/promises", () => ({ Resolver: everyHostResolvesPublic }));
+
+function everyHostResolvesPublic() {
+	return { resolve4: async () => ["93.184.216.34"], resolve6: async () => [], cancel: () => {} };
+}
+
+afterEach(() => {
+	vi.useRealTimers();
+});
+
+function at(unix: number): void {
+	vi.useFakeTimers({ toFake: ["Date"] });
+	vi.setSystemTime(unix * 1000);
+}
 
 const TAKEOVER_TIMEOUT_MS = 25_000;
 
@@ -325,36 +352,58 @@ test("two instances at their cap still both hold every payment", async () => {
 	}
 });
 
-test("a mirrored payment stands by, so the instance that took it on polls it first", async () => {
+function fresh(nth: number): UnsavedPayment {
+	return { ...payment(nth), createdAt: unixNow(), expiresAt: unixNow() + 3600 };
+}
+
+function inLine(store: Store, id: string): number {
+	return rankAmong(id, store.gossip.self, store.gossip.peers.keys());
+}
+
+test("of two instances only the first in line finds a new payment due, the other one poll interval later", async () => {
 	const cluster = await connected();
 	try {
-		const mine = cluster.first.insert(payment(0));
-		await until(() => cluster.second.get(mine.id) !== null, "the payment to gossip across");
+		const now = unixNow();
+		at(now);
+		const made = cluster.first.insert(fresh(0));
+		await until(() => cluster.second.get(made.id) !== null, "the payment to gossip across");
+		const [ahead, behind] =
+			inLine(cluster.first, made.id) === 0
+				? [cluster.first, cluster.second]
+				: [cluster.second, cluster.first];
 
-		expect(cluster.second.duePolls(10, 30)).toEqual([]);
-		expect(cluster.first.duePolls(10, 30).map((one) => one.id)).toEqual([mine.id]);
+		expect(ahead.duePolls(10, 30).map((one) => one.id)).toEqual([made.id]);
+		expect(behind.duePolls(10, 30)).toEqual([]);
+
+		at(now + 5);
+		expect(behind.duePolls(10, 30).map((one) => one.id)).toEqual([made.id]);
 	} finally {
 		cluster.stop();
 	}
 });
 
-test("a payment of my own is polled at once, however much a peer handed over", async () => {
-	const cluster = await connected();
+test("a worklist a late peer catches up on waits its turn, so it cannot bury a payment made a second ago", async () => {
+	const port = await freePort();
+	const first = openStore({ listenPort: port });
+	const now = unixNow();
+	at(now);
+	const theirs: string[] = [];
+	for (let n = 0; n < 20; n += 1) {
+		theirs.push(first.store.insert({ ...spread(n), createdAt: now, expiresAt: now + 86_400 }).id);
+	}
+
+	at(now + 3600);
+	const late = openStore({ peers: [`127.0.0.1:${port}`] });
 	try {
-		const theirs: string[] = [];
-		for (let n = 0; n < 20; n += 1) {
-			theirs.push(cluster.first.insert(spread(n)).id);
-		}
 		await until(
-			() => theirs.every((one) => cluster.second.get(one) !== null),
-			"the worklist to gossip across",
+			() => theirs.every((one) => late.store.get(one) !== null),
+			"the worklist to reach the late peer",
 		);
 
-		const mine = cluster.second.insert(payment(0));
-
-		expect(cluster.second.duePolls(5, 30).map((one) => one.id)).toEqual([mine.id]);
+		expect(late.store.duePolls(50, 30)).toEqual([]);
 	} finally {
-		cluster.stop();
+		late.stop();
+		first.stop();
 	}
 });
 
@@ -697,5 +746,259 @@ test("every kind of fact survives a rotation, because re-signing reads the same 
 	} finally {
 		peer.stop();
 		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+const WEBHOOK_KEY = await signingKeyFromSeed(new Uint8Array(32).fill(7));
+
+type Trio = { opened: Opened[]; stores: Store[]; stop: () => void };
+
+async function trio(): Promise<Trio> {
+	const ports = [await freePort(), await freePort(), await freePort()];
+	const opened = [
+		openStore({ listenPort: ports[0] }),
+		openStore({ listenPort: ports[1], peers: [`127.0.0.1:${ports[0]}`] }),
+		openStore({ listenPort: ports[2], peers: [`127.0.0.1:${ports[0]}`, `127.0.0.1:${ports[1]}`] }),
+	];
+	await until(
+		() => opened.every((one) => one.store.info().peers === 2),
+		"three instances to find each other",
+	);
+	const stopped = new Set<Opened>();
+
+	return {
+		opened,
+		stores: opened.map((one) => one.store),
+		stop: () => {
+			for (const one of opened) {
+				if (!stopped.has(one)) {
+					stopped.add(one);
+					one.stop();
+				}
+			}
+		},
+	};
+}
+
+function watching(store: Store, send: Send): Watcher {
+	return {
+		store,
+		eagerDelayMs: 5_000,
+		budget: {
+			perSecond: 1000,
+			perTick: 100,
+			nextAt: new Map(),
+			pace: new Map(),
+			ceiling: new Map(),
+			sharedBy: () => store.instances(),
+		},
+		webhookKey: WEBHOOK_KEY,
+		agents: new Map(),
+		send,
+	};
+}
+
+function wallet(asked: Store[], who: Store, settled: () => boolean): Send {
+	return async () => {
+		asked.push(who);
+		return Response.json(settled() ? { settled: true, preimage: preimage(0) } : { settled: false });
+	};
+}
+
+function byTurn(stores: Store[], id: string): Store[] {
+	return stores.toSorted((one, other) => inLine(one, id) - inLine(other, id));
+}
+
+async function heldByAll(stores: Store[], id: string): Promise<void> {
+	await until(
+		() => stores.every((one) => one.get(id) !== null),
+		"every instance to hold the payment",
+	);
+}
+
+test("three instances ask the wallet once per turn, and all three move on to the answer's next turn", async () => {
+	const cluster = await trio();
+	try {
+		const now = unixNow();
+		at(now);
+		const made = cluster.stores[0]!.insert(fresh(0));
+		await heldByAll(cluster.stores, made.id);
+		const asked: Store[] = [];
+
+		await Promise.all(
+			cluster.stores.map((one) =>
+				tick(
+					watching(
+						one,
+						wallet(asked, one, () => false),
+					),
+				),
+			),
+		);
+
+		expect(asked).toEqual([byTurn(cluster.stores, made.id)[0]]);
+		await until(
+			() =>
+				byTurn(cluster.stores, made.id)
+					.map((one) => one.nextDueAt())
+					.join() === [now + 5, now + 10, now + 15].join(),
+			"the other two to move on to the same next turn",
+		);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("when the first in line is gone, the second polls one poll interval later and the third still waits", async () => {
+	const cluster = await trio();
+	try {
+		const now = unixNow();
+		at(now);
+		const made = cluster.stores[0]!.insert(fresh(0));
+		await heldByAll(cluster.stores, made.id);
+		const [first, second, third] = byTurn(cluster.stores, made.id) as [Store, Store, Store];
+		cluster.opened.find((one) => one.store === first)!.stop();
+		await until(
+			() => second.info().peers === 1 && third.info().peers === 1,
+			"the survivors to notice",
+		);
+		const asked: Store[] = [];
+
+		at(now + 5);
+		await Promise.all(
+			[second, third].map((one) =>
+				tick(
+					watching(
+						one,
+						wallet(asked, one, () => false),
+					),
+				),
+			),
+		);
+
+		expect(asked).toEqual([second]);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("a first in line that cannot reach the wallet hands its turn on at once, and the second settles it", async () => {
+	const cluster = await trio();
+	try {
+		const now = unixNow();
+		at(now);
+		const made = cluster.stores[0]!.insert(fresh(0));
+		await heldByAll(cluster.stores, made.id);
+		const [first, second, third] = byTurn(cluster.stores, made.id) as [Store, Store, Store];
+		const asked: Store[] = [];
+		const cutOff: Send = async (url) => {
+			throw new Error(`${url} is unreachable from here`);
+		};
+
+		await tick(watching(first, cutOff));
+		await until(() => second.nextDueAt() === now, "the miss to hand the turn to the second");
+		await Promise.all(
+			[second, third].map((one) =>
+				tick(
+					watching(
+						one,
+						wallet(asked, one, () => true),
+					),
+				),
+			),
+		);
+
+		expect(asked).toEqual([second]);
+		await until(
+			() => cluster.stores.every((one) => one.get(made.id)?.status === "paid"),
+			"the settlement to reach every instance",
+		);
+	} finally {
+		cluster.stop();
+	}
+});
+
+const AGENT = "ab".repeat(32);
+
+class AnsweringAgent {
+	asked = 0;
+	private heard: ((said: unknown) => void) | null = null;
+
+	on(event: string, listener: (said: unknown) => void): this {
+		if (event === "message") {
+			this.heard = listener;
+		}
+		return this;
+	}
+
+	off(): this {
+		this.heard = null;
+		return this;
+	}
+
+	send(frame: string): void {
+		this.asked += 1;
+		const { ask } = JSON.parse(frame) as { ask: string };
+		this.heard?.(JSON.stringify({ ask, settled: false }));
+	}
+}
+
+test("the instance holding the agent's socket asks on time wherever the hash puts it, and the others stand aside", async () => {
+	const cluster = await trio();
+	try {
+		const now = unixNow();
+		at(now);
+		const watched = { ...fresh(0), verifyUrl: `agent:${AGENT}` };
+		const id = cluster.stores[0]!.names({ caller: null, paymentHash: watched.paymentHash });
+		const holder = byTurn(cluster.stores, id)[2]!;
+		holder.answersAlone = (verifyUrl) => verifyUrl === watched.verifyUrl;
+		const agent = new AnsweringAgent();
+		const nothingFetched: Send = async (url) => {
+			throw new Error(`${url} must not be fetched for an agent payment`);
+		};
+
+		cluster.stores[0]!.insert(watched);
+		await heldByAll(cluster.stores, id);
+		await Promise.all(
+			cluster.stores.map((one) => {
+				const watcher = watching(one, nothingFetched);
+				if (one === holder) {
+					watcher.agents = new Map([[AGENT, new Set([agent as never])]]);
+				}
+				return tick(watcher);
+			}),
+		);
+
+		expect(agent.asked).toBe(1);
+		expect(holder.nextDueAt()).toBe(now + 5);
+	} finally {
+		cluster.stop();
+	}
+});
+
+test("an instance that finds its own address among its peers drops it quietly and never dials it again", async () => {
+	const port = await freePort();
+	const relay = await freePort();
+	let dialled = 0;
+	const hop = createServer((incoming) => {
+		dialled += 1;
+		const onward = connect({ host: "127.0.0.1", port });
+		incoming.pipe(onward).pipe(incoming);
+		incoming.on("error", () => onward.destroy());
+		onward.on("error", () => incoming.destroy());
+	}).listen(relay);
+	const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+	const alone = openStore({ listenPort: port, peers: [`127.0.0.1:${relay}`] });
+	try {
+		await until(() => dialled === 1, "the instance to dial its own address");
+		await new Promise((waited) => setTimeout(waited, 2500));
+
+		expect(dialled).toBe(1);
+		expect(warned).not.toHaveBeenCalled();
+		expect(alone.store.info().peers).toBe(0);
+	} finally {
+		warned.mockRestore();
+		alone.stop();
+		hop.close();
 	}
 });

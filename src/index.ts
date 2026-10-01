@@ -91,6 +91,7 @@ const UNGATED = new Set(["/health", "/ready", "/openapi.yaml", "/docs", "/webhoo
 const WEBHOOK_SIGNING_LABEL = "webhook-signing-v1";
 const STALLED = "the watch loop has stopped being scheduled, so this instance needs replacing";
 const LEAVING = "this instance is shutting down and is not taking new work";
+const CATCHING_UP = "this instance is still catching up with its peers";
 const AT_CAPACITY = "this instance is watching as many payments as it can";
 const SPEC = readFileSync(new URL("../openapi.yaml", import.meta.url), "utf8");
 const RENDERER =
@@ -142,6 +143,8 @@ export type Options = {
 	keepSealedSecs?: number;
 	maxReplay?: number;
 	maxSockets?: number;
+	awaitPeers?: boolean;
+	readyGraceMs?: number;
 	send?: Send;
 };
 
@@ -150,7 +153,7 @@ export type Service = {
 	stop: () => Promise<void>;
 };
 
-type Vitals = "serving" | "stalled" | "draining";
+type Vitals = "serving" | "stalled" | "draining" | "catching-up";
 
 type Serving = {
 	token: string | null;
@@ -158,7 +161,7 @@ type Serving = {
 	keepSealedSecs: number;
 	clientKeys: Set<string> | null;
 	publicHosts: Set<string> | null;
-	spentNonces: Map<string, number>;
+	firstUse: (once: string, ttlSecs: number) => boolean;
 	mints: boolean;
 	webhookKey: SigningKey;
 	verifyHosts: Set<string> | null;
@@ -188,6 +191,8 @@ export async function start(
 		keepSealedSecs = 90 * 86_400,
 		maxReplay = 100,
 		maxSockets = 10_000,
+		awaitPeers = false,
+		readyGraceMs = 30_000,
 		send = pinnedToTheAddressWeVerified,
 	}: Options,
 	store: Store,
@@ -199,6 +204,23 @@ export async function start(
 		nextAt: new Map(),
 		pace: new Map(),
 		ceiling: new Map(),
+		sharedBy: () => store.instances(),
+	};
+	const spent = new Map<string, number>();
+	const firstUse = (once: string, ttlSecs: number): boolean => {
+		if (spent.has(once)) {
+			return false;
+		}
+		const until = unixNow() + ttlSecs;
+		spent.set(once, until);
+		store.spent(once, until);
+
+		return true;
+	};
+	store.onSpent = (once, until) => spent.set(once, Math.max(until, spent.get(once) ?? 0));
+	store.answersAlone = (verifyUrl) => {
+		const agent = agentAddressed(verifyUrl);
+		return agent !== null && agents.has(agent);
 	};
 	const serving: Serving = {
 		token: token === "" ? null : token,
@@ -206,7 +228,7 @@ export async function start(
 		keepSealedSecs,
 		clientKeys,
 		publicHosts,
-		spentNonces: new Map(),
+		firstUse,
 		mints,
 		webhookKey: await webhookSigningKey(key),
 		verifyHosts,
@@ -232,10 +254,15 @@ export async function start(
 		ticking
 			? Date.now() - tickStartedAt > tickStallMs + LONGEST_TICK_MS
 			: Date.now() - tickDueAt > tickStallMs;
-	const vitals = (): Vitals => (draining ? "draining" : stalled() ? "stalled" : "serving");
+	const startedAt = Date.now();
+	const catchingUp = (): boolean =>
+		awaitPeers &&
+		!store.caughtUp() &&
+		(store.instances() > 1 || Date.now() - startedAt < readyGraceMs);
+	const vitals = (): Vitals =>
+		draining ? "draining" : stalled() ? "stalled" : catchingUp() ? "catching-up" : "serving";
 
 	const followers = new Map<WebSocket, Follower>();
-	const spentTickets = new Map<string, number>();
 	const socketsOpen = (): number =>
 		followers.size + [...agents.values()].reduce((all, held) => all + held.size, 0);
 	const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_BYTES });
@@ -253,11 +280,10 @@ export async function start(
 		if (socket.destroyed) {
 			return;
 		}
-		if (permits === null || spentTickets.has(permits.jti)) {
+		if (permits === null || !firstUse(`ticket:${permits.jti}`, TICKET_TTL_SECS)) {
 			refuseUpgrade(socket);
 			return;
 		}
-		spentTickets.set(permits.jti, unixNow() + TICKET_TTL_SECS);
 
 		upgrades.handleUpgrade(incoming, socket, head, (accepted) => {
 			if (permits.kind === "trigger") {
@@ -353,11 +379,9 @@ export async function start(
 			socket.ping();
 		}
 		keepAlive(agents);
-		for (const spent of [spentTickets, serving.spentNonces]) {
-			for (const [once, expiresAt] of spent) {
-				if (expiresAt <= unixNow()) {
-					spent.delete(once);
-				}
+		for (const [once, expiresAt] of spent) {
+			if (expiresAt <= unixNow()) {
+				spent.delete(once);
 			}
 		}
 	}, PING_INTERVAL_MS);
@@ -527,6 +551,9 @@ function readiness(
 	if (vitals === "draining") {
 		return unavailable(LEAVING);
 	}
+	if (vitals === "catching-up") {
+		return unavailable(CATCHING_UP);
+	}
 
 	const trusted = token !== null && bearerMatches(incoming, token);
 	if (!trusted) {
@@ -659,18 +686,9 @@ async function callerFor(request: Request, serving: Serving): Promise<string | n
 		await request.clone().text(),
 		{
 			host: serving.publicHosts === null || serving.publicHosts.has(host) ? host : "",
-			fresh: (caller, nonce) => spentOnce(serving.spentNonces, `${caller}.${nonce}`),
+			fresh: (caller, nonce) => serving.firstUse(`nonce:${caller}.${nonce}`, 2 * TOLERANCE_SECS),
 		},
 	);
-}
-
-function spentOnce(spent: Map<string, number>, once: string): boolean {
-	if (spent.has(once)) {
-		return false;
-	}
-	spent.set(once, unixNow() + 2 * TOLERANCE_SECS);
-
-	return true;
 }
 
 async function create(
@@ -1226,11 +1244,13 @@ if (import.meta.main) {
 		takeoverAfterSecs: whole("TAKEOVER_AFTER_SECS"),
 		deliveryBackoffSecs: whole("WEBHOOK_BACKOFF_SECS"),
 	});
-	const store = new Store(ledger, clusterKey, whole("MAX_PENDING"));
+	const eagerDelayMs = secsToMs(positive("POLL_INTERVAL_SECS"));
+	const peers = (process.env["REPLICATE_PEERS"] ?? "").split(",").filter((peer) => peer.length > 0);
+	const store = new Store(ledger, clusterKey, whole("MAX_PENDING"), eagerDelayMs);
 	const cluster = new Cluster(store.gossip, {
 		key: clusterKey,
 		listenPort: whole("REPLICATE_LISTEN"),
-		peers: (process.env["REPLICATE_PEERS"] ?? "").split(",").filter((peer) => peer.length > 0),
+		peers,
 		swarm: process.env["SWARM"] !== "0",
 	});
 	log.info(`ledger ${path}, origin ${store.info().origin}`);
@@ -1247,7 +1267,7 @@ if (import.meta.main) {
 			publicHosts: allowed("PUBLIC_HOSTS"),
 			verifyHosts: allowed("VERIFY_HOSTS"),
 			verifyChallenge: process.env["VERIFY_CHALLENGE"] !== "0",
-			eagerDelayMs: secsToMs(positive("POLL_INTERVAL_SECS")),
+			eagerDelayMs,
 			pollsPerSecond: positive("POLLS_PER_SEC"),
 			workPerTick: positive("WORK_PER_TICK"),
 			tickStallMs: secsToMs(positive("TICK_STALL_SECS")),
@@ -1255,6 +1275,7 @@ if (import.meta.main) {
 			keepSealedSecs: daysToSecs(positive("KEEP_SEALED_DAYS")),
 			maxReplay: whole("MAX_REPLAY"),
 			maxSockets: positive("MAX_SOCKETS"),
+			awaitPeers: peers.length > 0,
 		},
 		store,
 	);

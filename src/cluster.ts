@@ -20,6 +20,7 @@ export class Cluster {
 	private readonly gossip: Gossip;
 	private readonly sockets = new Set<Socket>();
 	private readonly timers = new Set<NodeJS.Timeout>();
+	private readonly ourselves = new Set<string>();
 	private readonly listener: Server | null;
 	private readonly swarm: Hyperswarm | null;
 	private closed = false;
@@ -64,13 +65,13 @@ export class Cluster {
 	}
 
 	private dial(peer: string): void {
-		if (this.closed) {
+		if (this.closed || this.ourselves.has(peer)) {
 			return;
 		}
 		const [host, port] = peer.split(":");
 		const socket = connect({ host, port: Number(port) });
 		socket.on("close", () => this.redial(peer));
-		this.link(socket, true);
+		this.link(socket, true, () => this.ourselves.add(peer));
 	}
 
 	private redial(peer: string): void {
@@ -81,10 +82,10 @@ export class Cluster {
 		this.timers.add(retry);
 	}
 
-	private link(socket: Socket, initiator: boolean): void {
+	private link(socket: Socket, initiator: boolean, onSelf?: () => void): void {
 		this.sockets.add(socket);
 		socket.on("close", () => this.sockets.delete(socket));
 		socket.on("error", () => socket.destroy());
-		attach(this.gossip, new SecretStream(initiator, socket));
+		attach(this.gossip, new SecretStream(initiator, socket), onSelf);
 	}
 }

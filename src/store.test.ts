@@ -7,6 +7,7 @@ import { Worker } from "node:worker_threads";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { UnsavedPayment } from "./payment.ts";
+import { rankAmong } from "./store.ts";
 import { openStore, refusals } from "./testing.ts";
 import { unixNow } from "./watch.ts";
 
@@ -119,7 +120,7 @@ test("a worklist with nothing on it is due at no moment, so the watcher has noth
 		const one = store.insert(payment(0));
 		expect(store.nextDueAt()).toBe(unixNow());
 
-		store.polled(one.id, null);
+		store.polled(one, null);
 		expect(store.nextDueAt()).toBeNull();
 	} finally {
 		stop();
@@ -131,7 +132,7 @@ test("the watcher sleeps until the sooner of a poll and a webhook, not until whi
 	try {
 		at(unixNow());
 		const polling = store.insert(payment(0));
-		store.polled(polling.id, unixNow() + 600);
+		store.polled(polling, unixNow() + 600);
 		expect(store.nextDueAt()).toBe(unixNow() + 600);
 
 		store.paid(store.insert(payment(1)).id, preimage(1));
@@ -145,7 +146,7 @@ test("a payment parked with no due time is never handed out again", () => {
 	const { store, stop } = openStore();
 	try {
 		const one = store.insert(payment(5));
-		store.polled(one.id, null);
+		store.polled(one, null);
 
 		expect(store.duePolls(10, 0)).toEqual([]);
 		expect(store.get(one.id)?.id).toBe(one.id);
@@ -940,5 +941,84 @@ test("replay hands back the newest of a trigger oldest first, and only as many a
 		expect(store.replay("ef".repeat(32), 2)).toEqual([]);
 	} finally {
 		stop();
+	}
+});
+
+const ORIGINS = ["0a", "0b", "0c"].map((one) => one.repeat(16));
+const IDS = Array.from({ length: 300 }, (_, nth) => nth.toString(16).padStart(64, "0"));
+
+function firstAmong(id: string, origins: string[]): string {
+	return origins.find(
+		(one) =>
+			rankAmong(
+				id,
+				one,
+				origins.filter((other) => other !== one),
+			) === 0,
+	)!;
+}
+
+test("every instance ranks a payment the same way, and each is first for about a third", () => {
+	const firsts = new Map<string, number>();
+	for (const id of IDS) {
+		const ranks = ORIGINS.map((one) =>
+			rankAmong(
+				id,
+				one,
+				ORIGINS.filter((other) => other !== one),
+			),
+		);
+		expect(ranks.toSorted()).toEqual([0, 1, 2]);
+		const first = firstAmong(id, ORIGINS);
+		firsts.set(first, (firsts.get(first) ?? 0) + 1);
+	}
+
+	for (const origin of ORIGINS) {
+		expect(firsts.get(origin)).toBeGreaterThan(60);
+	}
+});
+
+test("an instance leaving hands on only the payments it was first for", () => {
+	const staying = ORIGINS.slice(0, 2);
+	for (const id of IDS) {
+		const before = firstAmong(id, ORIGINS);
+		if (before !== ORIGINS[2]) {
+			expect(firstAmong(id, staying)).toBe(before);
+		}
+	}
+});
+
+function standingAhead(id: string, self: string, wanted: number): string[] {
+	const ahead: string[] = [];
+	for (let nth = 0; ahead.length < wanted; nth += 1) {
+		const candidate = nth.toString(16).padStart(32, "f");
+		if (rankAmong(id, self, [candidate]) === 1) {
+			ahead.push(candidate);
+		}
+	}
+
+	return ahead;
+}
+
+test("a payment waits one poll interval per instance ahead of this one, and never more than a lease", () => {
+	for (const ahead of [0, 1, 2]) {
+		const { store, stop } = openStore();
+		try {
+			const now = unixNow();
+			at(now);
+			const fresh = { ...payment(ahead), createdAt: now, expiresAt: now + 3600 };
+			const id = store.names({ caller: null, paymentHash: fresh.paymentHash });
+			for (const peer of standingAhead(id, store.info().origin, ahead)) {
+				store.gossip.peers.set(peer, () => {});
+			}
+
+			store.insert(fresh);
+			expect(store.nextDueAt()).toBe(now + ahead * 5);
+
+			store.polled({ id, verifyUrl: fresh.verifyUrl }, now + 600);
+			expect(store.nextDueAt()).toBe(now + 600 + ahead * 30);
+		} finally {
+			stop();
+		}
 	}
 });
