@@ -13,7 +13,7 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
-## Unreleased (3.0.0)
+## 3.0.0
 
 ### Changed
 

@@ -1,6 +1,6 @@
 {
   "name": "thunder-bridge",
-  "version": "2.2.1",
+  "version": "3.0.0",
   "description": "Take Bitcoin Lightning and bank payments in JavaScript, paid straight into your own wallet or account. No node to run, no custodian, and every payment proven rather than taken on the gateway's word.",
   "author": "i-am-fatik",
   "homepage": "https://agora.gripe/en/tools/thunder-bridge",
