@@ -12,7 +12,10 @@
     "outDir": "dist",
     "skipLibCheck": true,
     "types": ["node"],
-    "ignoreDeprecations": "6.0"
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "structured-headers": ["./node_modules/structured-headers/dist/index.d.ts"]
+    }
   },
   "include": ["src"]
 }
