@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { NoWalletAvailable, statusForWallets } from "../src/problem.ts";
-import { cannotReleaseAPreimage, quote, resolve, toLnurl } from "./lnurl.ts";
+import { cannotReleaseAPreimage, namesTheAddress, quote, resolve, toLnurl } from "./lnurl.ts";
 import type { Send } from "./outbound.ts";
 
 vi.mock("node:dns/promises", () => ({ Resolver: everyHostResolvesPublic }));
@@ -225,22 +225,59 @@ test("a quote for an amount nobody takes refuses exactly as a create does", asyn
 	}
 });
 
+function servingMetadata(metadata: string, seen: string[] = []): Send {
+	return answering(
+		{
+			...servedBy({
+				[WELL_KNOWN]: {
+					tag: "payRequest",
+					callback: CALLBACK,
+					metadata,
+					minSendable: 1_000,
+					maxSendable: 100_000_000,
+				},
+			}),
+			[`${CALLBACK}?amount=21000`]: { pr: ISSUED_INVOICE, verify: PROOF_URL },
+		},
+		seen,
+	);
+}
+
 test("an invoice that does not match the metadata is refused, not minted", async () => {
-	const send = answering({
-		...servedBy({
-			[WELL_KNOWN]: {
-				tag: "payRequest",
-				callback: CALLBACK,
-				metadata: '[["text/identifier","mallory@coinos.io"]]',
-				minSendable: 1_000,
-				maxSendable: 100_000_000,
-			},
-		}),
-		[`${CALLBACK}?amount=21000`]: { pr: ISSUED_INVOICE, verify: PROOF_URL },
-	});
+	const send = servingMetadata(
+		'[["text/plain","Paying somebody else"],["text/identifier","charter@coinos.io"]]',
+	);
 	const refusal = await refusedBy(send, ["charter@coinos.io"]);
 	expect(refusal.wallets).toEqual([{ address: "charter@coinos.io", reason: "invoice-refused" }]);
 	expect(statusForWallets(refusal.wallets)).toBe(422);
+});
+
+test("metadata naming another account is refused before an invoice is asked for", async () => {
+	const seen: string[] = [];
+	const send = servingMetadata('[["text/identifier","mallory@coinos.io"]]', seen);
+	const refusal = await refusedBy(send, ["charter@coinos.io"]);
+	expect(refusal.wallets).toEqual([
+		{ address: "charter@coinos.io", reason: "cannot-prove-delivery" },
+	]);
+	expect(seen).toEqual([WELL_KNOWN]);
+});
+
+test("metadata naming nobody is refused, and so is a quote against it", async () => {
+	const send = servingMetadata('[["text/plain","Paying charter"]]');
+	const refusal = await refusedBy(send, ["charter@coinos.io"]);
+	expect(refusal.wallets).toEqual([
+		{ address: "charter@coinos.io", reason: "cannot-prove-delivery" },
+	]);
+	await expect(quote(send, ["charter@coinos.io"], 21_000)).rejects.toBeInstanceOf(
+		NoWalletAvailable,
+	);
+});
+
+test("the address is matched whatever its case, and as text/email too", () => {
+	expect(namesTheAddress('[["text/email","Charter@Coinos.io"]]', "charter@coinos.io")).toBe(true);
+	expect(namesTheAddress('[["text/plain","charter@coinos.io"]]', "charter@coinos.io")).toBe(false);
+	expect(namesTheAddress("not json", "charter@coinos.io")).toBe(false);
+	expect(namesTheAddress(undefined, "charter@coinos.io")).toBe(false);
 });
 
 test("an endpoint bech32-encodes to the LNURL string LUD-01 spells out", () => {

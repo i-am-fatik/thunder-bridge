@@ -11,6 +11,7 @@ import { sha256Hex } from "./sha256.ts";
 import { publicHttps } from "./url.ts";
 
 export const VERIFY_WITHOUT_PREIMAGE = ["zeuspay.com", "zeusnuts.com", "ecash.love"];
+const NAMES_AN_ADDRESS = ["text/identifier", "text/email"];
 const CHECKSUM_SLOTS = [0, 1, 2, 3, 4, 5];
 const LNURL_HRP = "lnurl";
 
@@ -143,6 +144,12 @@ async function probe(
 	if (pay.tag !== "payRequest" || !pay.callback) {
 		throw new WalletRefused("unreachable", `${address} answered with no payRequest`);
 	}
+	if (!namesTheAddress(pay.metadata, address)) {
+		throw new WalletRefused(
+			"cannot-prove-delivery",
+			`${address} serves metadata that does not name it, so no invoice binds to it`,
+		);
+	}
 	if (amountMsat < pay.minSendable || amountMsat > pay.maxSendable) {
 		throw new WalletRefused(
 			"amount-not-accepted",
@@ -268,6 +275,28 @@ function ceilingAskedFor(headers: Headers): number | null {
 	}
 
 	return Math.min(Math.max(perWindow / window, MIN_PER_SECOND), MAX_PER_SECOND);
+}
+
+export function namesTheAddress(metadata: unknown, address: string): boolean {
+	if (typeof metadata !== "string") {
+		return false;
+	}
+	try {
+		const entries: unknown = JSON.parse(metadata);
+
+		return (
+			Array.isArray(entries) &&
+			entries.some(
+				(entry: unknown) =>
+					Array.isArray(entry) &&
+					NAMES_AN_ADDRESS.includes(entry[0]) &&
+					typeof entry[1] === "string" &&
+					entry[1].toLowerCase() === address.toLowerCase(),
+			)
+		);
+	} catch {
+		return false;
+	}
 }
 
 export function cannotReleaseAPreimage(host: string): boolean {

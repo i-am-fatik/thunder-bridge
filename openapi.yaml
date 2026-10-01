@@ -1349,8 +1349,9 @@ components:
               also covers an unknown user. Retry, or check the wallet.
             - `amount-not-accepted` - the amount is outside that wallet's min and max.
               Change the amount.
-            - `cannot-prove-delivery` - no usable LUD-21 `verify` endpoint, or a provider
-              known never to release a preimage. Use another provider.
+            - `cannot-prove-delivery` - no usable LUD-21 `verify` endpoint, metadata that
+              does not name the address as its `text/identifier` or `text/email`, or a
+              provider known never to release a preimage. Use another provider.
             - `invoice-refused` - it issued an invoice this gateway will not accept: wrong
               amount, unbound metadata, or undecodable. Report it, use another wallet.
       required: [address, reason]

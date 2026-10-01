@@ -25,7 +25,7 @@ wallet itself. Minting is for a client with no server of its own.
 | `rails.lightning` with `verifyThrough` | invoice: you, with `invoiceFrom` on your server |
 |---|---|
 | the gateway is told | a hash, an expiry and your URL, with the wallet's verify URL sealed inside |
-| the invoice is checked by | `invoiceFrom` as it resolves: the amount, and the description hash against the metadata the address serves |
+| the invoice is checked by | `invoiceFrom` as it resolves: the metadata has to name the address, the invoice has to carry the amount and the description hash of that metadata |
 | the gateway probes first | a GET that must answer a boolean `settled`, then a signed POST of a nonce it must echo |
 | the gateway polls | your `serve.lightningVerify` endpoint |
 | `settled` comes from | your endpoint, which unseals the wallet's URL, asks the wallet and relays the answer |
@@ -378,10 +378,9 @@ are not equally constrained.
 The gateway cannot invent a settlement because it never chooses the payment hash, so it
 cannot hold the preimage before the recipient releases it. `proveOrigin` pins a minted
 invoice to one account: the description hash commits to the metadata under LUD-06, and
-the metadata has to name the address. `invoiceFrom` checks the description hash but not
-the name, so on the `verifyThrough` path that pin holds only where the provider serves
-each account its own metadata. A recipient inflating a total is outside what any of it
-proves.
+the metadata has to name the address. `invoiceFrom` refuses on the same two checks, so
+an invoice resolved on the `verifyThrough` path is pinned the same way. A recipient
+inflating a total is outside what any of it proves.
 
 Four limits remain.
 

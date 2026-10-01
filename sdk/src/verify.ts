@@ -1,4 +1,5 @@
 import { decodeInvoice, preimageMatchesHash } from "../../core/bolt11.js";
+import { namesTheAddress } from "../../core/lnurl.js";
 import { BODY_LIMIT_BYTES } from "../../core/outbound.js";
 import { sha256Hex } from "../../core/sha256.js";
 import { publicHttps, sameOrigin } from "../../core/url.js";
@@ -14,7 +15,6 @@ import type { MintedPayment, PaymentStatus, Priced } from "./types.js";
 
 const HTTP_TIMEOUT_MS = 15_000;
 const ISSUED_SKEW_SECS = 300;
-const NAMES_AN_ADDRESS = ["text/identifier", "text/email"];
 const DEFAULT_WRAP_PROPORTION = 0.01;
 const DEFAULT_WRAP_BASE_MSAT = 1000;
 
@@ -103,25 +103,6 @@ export async function proveOrigin(
   }
   if (askedAt !== undefined && issued.settled === true) {
     throw cheat("invoice_settled");
-  }
-}
-
-function namesTheAddress(metadata: string, address: string): boolean {
-  try {
-    const entries: unknown = JSON.parse(metadata);
-
-    return (
-      Array.isArray(entries) &&
-      entries.some(
-        (entry: unknown) =>
-          Array.isArray(entry) &&
-          NAMES_AN_ADDRESS.includes(entry[0]) &&
-          typeof entry[1] === "string" &&
-          equalIgnoringCase(entry[1], address),
-      )
-    );
-  } catch {
-    return false;
   }
 }
 

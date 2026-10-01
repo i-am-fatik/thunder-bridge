@@ -25,6 +25,11 @@ releases a version number once it has been published.
   which is for a client with no server of its own. Naming neither, or both, fails
   when the rail or endpoint is built, and TypeScript refuses it before that.
 - `rails.nwc` takes the same `VerifyThrough` type it always had in shape.
+- `invoiceFrom`, and so `rails.lightning` with `verifyThrough` and `serve.lnurlPay`,
+  refuse an address whose LUD-06 metadata does not name it as its `text/identifier` or
+  `text/email`, with `cannot-prove-delivery`, and try the next address on the list. It
+  is the check `proveOrigin` already ran on a minted invoice, now run before an invoice
+  is asked for. A gateway minting or quoting skips such an address the same way.
 
 ### Removed
 

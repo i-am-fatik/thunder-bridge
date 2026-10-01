@@ -257,7 +257,8 @@ const MINTABLE = { ln_addresses: ["charter@coinos.io"], incoming_amount: MSAT_21
 
 function walletMinting(app: App): () => void {
 	const was = app.outbound.send;
-	const metadata = '[["text/plain","Paying charter@coinos.io"]]';
+	const metadata =
+		'[["text/plain","Paying charter@coinos.io"],["text/identifier","charter@coinos.io"]]';
 	app.outbound.send = async (url) => {
 		if (url === "https://coinos.io/.well-known/lnurlp/charter") {
 			return Response.json({
@@ -385,7 +386,8 @@ test("a create that mints nothing hands its key back so the retry is not stuck",
 });
 
 const WELL_KNOWN = "https://coinos.io/.well-known/lnurlp/charter";
-const WALLET_METADATA = '[["text/plain","Paying charter@coinos.io"]]';
+const WALLET_METADATA =
+	'[["text/plain","Paying charter@coinos.io"],["text/identifier","charter@coinos.io"]]';
 const MSAT_0 = { value: "0", asset_code: "BTC", asset_scale: 11 };
 const MSAT_1K = { value: "1000", asset_code: "BTC", asset_scale: 11 };
 const MSAT_100M = { value: "100000000", asset_code: "BTC", asset_scale: 11 };
