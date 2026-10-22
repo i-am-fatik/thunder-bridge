@@ -18,8 +18,8 @@ RUN npm prune --omit=dev \
 	&& find node_modules -name "*.bare" -delete
 
 FROM node:26.8.1-slim
-RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 \
-	&& rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends libatomic1 \
+	&& rm -rf /var/lib/apt/lists/* /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 WORKDIR /app
 COPY --from=check /app/node_modules ./node_modules
 COPY --from=check /app/core ./core

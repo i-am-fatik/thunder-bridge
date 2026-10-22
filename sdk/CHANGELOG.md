@@ -13,6 +13,16 @@ Every version up to 0.7.0 was unpublished from npm on 2026-08-02, so nothing bel
 this one is installable, and none of those numbers can ever be reused. npm never
 releases a version number once it has been published.
 
+## 3.0.2
+
+### Changed
+
+- Nothing in the client, which keeps its number in step with the gateway. The
+  gateway image upgrades its Debian packages when it is built and drops the npm it
+  never runs, which clears every critical and high finding in the 3.0.1 image. It
+  stays on Node 26.8.1, because 26.11.1 and 26.12.1 fail the peer redial test in
+  `src/cluster.test.ts`.
+
 ## 3.0.1
 
 ### Fixed
